@@ -79,7 +79,7 @@ main ──●──────────────●──────→
    ```bash
    git fetch upstream
    git rebase upstream/main
-   git push --force-with-lease
+   git push --force-with-lease -u origin feat/short-description
    ```
    在自己的功能分支上 force push 没问题，但在 `main` 上永远不允许。
 6. **推送并创建 PR。**
