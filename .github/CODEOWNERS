@@ -2,9 +2,9 @@
 # The last matching pattern takes precedence. Owners must have write access to the repository.
 # Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
-# Default owner for everything
-*                   @boring-mars
+# Default owners for everything
+*                     @boring-mars @ZedAqua
 
 # Process and repository configuration: changes need a maintainer
-/.github/           @boring-mars
-/docs/*/development/ @boring-mars
+/.github/             @boring-mars
+/docs/*/development/  @boring-mars
