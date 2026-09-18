@@ -86,7 +86,7 @@ git switch -c release/1.x v1.4.0
 
 维护分支的规则：
 
-- 命名为 `release/<主版本号>.x`
+- 作为 `<类型>` 规则的例外，维护分支命名为 `release/<主版本号>.x`
 - 和 `main` 一样受保护
 - 只接收 bug 修复和安全修复，不加新功能
 - 修复先合入 `main`，再 cherry-pick（`git cherry-pick -x <sha>`）到维护分支
