@@ -120,7 +120,7 @@ main ──●──────────────●──────→
 
 ## 行为准则
 
-所有参与项目的人都应遵守[行为准则](../../../.github/CODE_OF_CONDUCT.md)（英文，
+所有参与项目的人都应遵守[行为准则](../../../CODE_OF_CONDUCT.md)（英文，
 官方中文译本见 [Contributor Covenant 翻译页](https://www.contributor-covenant.org/translations)）。
 简单来说：保持尊重和建设性，评论代码而不评论人，并且记住很多贡献者是利用业余时间、甚至用非母语参与项目的志愿者。
 

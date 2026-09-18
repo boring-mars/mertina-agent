@@ -127,7 +127,7 @@ main ──●──────────────●──────→
 
 ## Code of conduct
 
-Everyone taking part in the project is expected to follow the [Code of Conduct](../../../.github/CODE_OF_CONDUCT.md).
+Everyone taking part in the project is expected to follow the [Code of Conduct](../../../CODE_OF_CONDUCT.md).
 In short: be respectful and constructive, critique code rather than people, and remember that many contributors
 are volunteers working in their spare time and in a second language.
 
