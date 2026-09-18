@@ -16,10 +16,28 @@ Thank you for your interest in Mertina Agent. This guide walks you from zero to 
 - **Search first.** Check existing issues and pull requests so work is not duplicated.
 - **Discuss large changes first.** For a new feature, an architectural change or anything over a few hundred lines,
   open an issue (or a Discussion) and agree on the approach before you write code.
-  This avoids spending time on a PR that cannot be accepted.
+  Feature PRs without prior agreement may be closed, however well written.
+- **Pick work that is ready.** Issues labeled `accepted`, `help wanted` or `good first issue` can be picked up
+  without asking first. Avoid issues labeled `needs-discussion` until the approach is agreed.
 - **Claim the issue.** Comment on the issue to say you are working on it, so others don't pick it up too.
   If you stop, say so, so it can be reassigned.
 - Small fixes (typos, obvious bugs, small docs changes) can go straight to a PR.
+
+## AI-assisted contributions
+
+AI coding tools are welcome. This project is itself an AI agent. What matters is that a human understands
+and stands behind every contribution:
+
+- **You are responsible for what you submit.** Review, understand and test AI-generated code before you open a PR.
+  You must be able to explain every change and answer reviewers' questions yourself.
+- **Disclose significant AI assistance** in the PR description: which tool you used and for what
+  (for example "tests drafted with an AI assistant, reviewed and edited by me").
+  Autocomplete-level help does not need disclosure.
+- **Write issues, PR descriptions and replies in your own words.** Don't paste raw AI output as a description or
+  as an answer to a reviewer.
+- **No unattended agents.** PRs, issues and comments created by autonomous agents without a human actively
+  involved will be closed.
+- AI-generated code is subject to the same licensing rules as any other code (see [Licensing](#licensing-and-attribution)).
 
 ## Development environment
 
@@ -109,11 +127,12 @@ main ──●──────────────●──────→
 
 ## Code of conduct
 
-Be respectful and constructive. Critique code, not people. Assume good intent, and remember that many contributors
+Everyone taking part in the project is expected to follow the [Code of Conduct](../../../.github/CODE_OF_CONDUCT.md).
+In short: be respectful and constructive, critique code rather than people, and remember that many contributors
 are volunteers working in their spare time and in a second language.
-Maintainers may hide comments, lock threads or block users who harass others.
 
 ## Getting help
 
 - For questions about the code or the process, open an issue or a Discussion.
 - If your PR has no response after a week, feel free to ping the maintainers in the PR.
+  Reviews are done by volunteers, so please be patient.

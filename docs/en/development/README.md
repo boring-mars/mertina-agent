@@ -31,6 +31,8 @@ Everyone who contributes to the project, maintainers included, follows these gui
 6. PRs are merged with **squash merge** only. The branch is deleted automatically afterwards.
 7. Versions follow [SemVer](https://semver.org/). Git tags (`vX.Y.Z`) are the single source of truth for versions.
 8. Never commit secrets. Report vulnerabilities privately, not in public issues.
+9. AI tools are welcome, but a human must understand and take responsibility for every contribution.
+10. Everyone follows the [Code of Conduct](../../../.github/CODE_OF_CONDUCT.md).
 
 ## Status
 

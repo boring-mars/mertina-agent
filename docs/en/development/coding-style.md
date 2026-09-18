@@ -118,6 +118,17 @@ def load_session(session_id: str, *, timeout_s: float = 5.0) -> Session:
 - Every network call has a timeout
 - Retries use exponential backoff and a cap, and only apply to operations that are safe to retry
 
+## Cross-platform
+
+The service runs on Linux in production, but contributors develop on Windows, macOS and Linux.
+Code that runs locally, including the CLI, tests and scripts, must work on all three.
+
+- Use `pathlib.Path` for paths. Never build paths by joining strings with `/` or `\`
+- Open text files with an explicit encoding: `open(path, encoding="utf-8")`
+- Don't assume a POSIX shell, `/tmp`, or Unix-only modules and signals. Use `tempfile` and `shutil`
+- Put helper scripts in Python (`uv run python scripts/...`) rather than shell scripts where practical
+- If a test genuinely depends on one OS, mark it with `pytest.mark.skipif` and give the reason
+
 ## Dependencies
 
 - Add with `uv add <package>` (runtime) or `uv add --group dev <package>` (development only), and commit `uv.lock`

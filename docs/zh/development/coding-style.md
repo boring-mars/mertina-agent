@@ -117,6 +117,17 @@ def load_session(session_id: str, *, timeout_s: float = 5.0) -> Session:
 - 每个网络调用都必须设置超时
 - 重试要使用指数退避并设置上限，并且只对可以安全重试的操作进行重试
 
+## 跨平台
+
+服务在生产环境中运行在 Linux 上，但贡献者会在 Windows、macOS 和 Linux 上开发。
+在本地运行的代码，包括 CLI、测试和脚本，必须在这三个平台上都能工作。
+
+- 路径使用 `pathlib.Path`，不要用 `/` 或 `\` 拼接字符串来构造路径
+- 打开文本文件时显式指定编码：`open(path, encoding="utf-8")`
+- 不要假设存在 POSIX shell、`/tmp` 或仅限 Unix 的模块和信号。使用 `tempfile` 和 `shutil`
+- 辅助脚本尽量用 Python 编写（`uv run python scripts/...`），而不是 shell 脚本
+- 如果某个测试确实依赖特定操作系统，用 `pytest.mark.skipif` 标记并写明原因
+
 ## 依赖
 
 - 使用 `uv add <包名>`（运行时依赖）或 `uv add --group dev <包名>`（仅开发依赖）添加，并提交 `uv.lock`

@@ -37,8 +37,10 @@ Only the latest release receives security fixes.
 **Input and injection**
 - Validate all external input at the boundary: type, length, format, allowed values
 - Use parameterized queries. Never build SQL by string concatenation
-- Never pass user input to a shell. If you must run a subprocess, use an argument list, not `shell=True`
-- Resolve and check file paths so user input can't escape the intended directory
+- Never pass user input to a shell. If you must run a subprocess, use an argument list, not `shell=True`.
+  If a shell string is truly unavoidable, quote every interpolated value with `shlex.quote()`
+- Resolve file paths, including symlinks (`Path.resolve()`), **before** checking that they stay inside
+  the intended directory (`resolved.is_relative_to(base)`)
 - Don't deserialize untrusted data with `pickle`, `yaml.load` (use `yaml.safe_load`) or `eval`
 
 **Authentication, authorization and tenants**
