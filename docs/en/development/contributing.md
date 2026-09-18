@@ -81,7 +81,7 @@ main ──●──────────────●──────→
    ```bash
    git fetch upstream
    git rebase upstream/main
-   git push --force-with-lease
+   git push --force-with-lease -u origin feat/short-description
    ```
    Force-pushing is fine on your own feature branch. It is never allowed on `main`.
 6. **Push and open a PR.**
