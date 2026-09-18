@@ -17,6 +17,16 @@ In order of importance:
 
 Formatting, import order and lint problems are left to the tools. Reviewers shouldn't spend time on them.
 
+## The standard for approval
+
+Approve a PR once it **clearly improves the overall health of the code**, even if it isn't perfect.
+There is no perfect code, only better code. Don't hold a PR back for polish that could be a `nit:` or a follow-up.
+
+- Technical facts and data win over personal preference
+- On style, these guidelines and the tools are the authority. Anything they don't cover is the author's choice,
+  as long as it is consistent with the surrounding code
+- A PR must not make the code worse. If it adds complexity, it has to pay for it
+
 ## Who reviews
 
 - GitHub requests reviews automatically based on `.github/CODEOWNERS` (once it is added)

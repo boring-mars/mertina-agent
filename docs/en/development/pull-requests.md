@@ -37,6 +37,8 @@ Fill in the PR template. A good description answers:
 - **How it was tested**: commands you ran, manual steps, screenshots or logs where helpful
 - **Risks**: breaking changes, migrations, config changes, performance or security impact
 - **Attribution**: where copied or adapted code came from, if any
+- **AI assistance**: which tools you used and for what, if significant
+  (see [AI-assisted contributions](contributing.md#ai-assisted-contributions))
 
 Write the description for a reviewer who has not read the issue. If it takes long to explain, the PR is probably too big.
 
@@ -49,6 +51,8 @@ Small PRs are reviewed faster and more thoroughly.
   interfaces first, then the implementation, then wiring it up
 - Put pure moves and renames in their own PR, separate from logic changes
 - Unfinished features can be merged behind a configuration flag that is off by default
+- Don't mix in drive-by reformatting or cosmetic edits to code you aren't otherwise changing.
+  They make the diff harder to review
 
 ## Draft PRs
 
@@ -83,8 +87,9 @@ Then:
 
 ## Stale PRs
 
-- PRs with no activity from the author for **30 days** get a reminder
-- If there is still no response **14 days** later, the PR may be closed. It can be reopened at any time
+- PRs waiting on the author with no activity for **30 days** get a reminder
+- PRs with no activity for **90 days** in total may be closed. They can be reopened at any time
+- PRs that are waiting on reviewers are never closed as stale. Ping the reviewers instead
 - A maintainer may take over an abandoned PR that is nearly finished. The original author keeps credit
   through a `Co-authored-by:` footer
 

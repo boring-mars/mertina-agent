@@ -25,6 +25,11 @@ Closes #
 <!-- Breaking changes, migrations, config changes, performance or security impact.
      Where copied or adapted code came from, if any. Write "None" if not applicable. -->
 
+## AI assistance
+
+<!-- If AI tools contributed significantly, say which and for what, e.g. "tests drafted with an AI assistant,
+     reviewed and edited by me". Write "None" otherwise. Autocomplete-level help doesn't need disclosure. -->
+
 ## Checklist
 
 - [ ] PR title follows [Conventional Commits](https://www.conventionalcommits.org/)
@@ -35,3 +40,4 @@ Closes #
 - [ ] `uv.lock` updated if dependencies changed
 - [ ] No secrets, credentials or personal data included
 - [ ] Breaking changes are marked with `!` and explained above
+- [ ] I understand every change in this PR and can explain it without AI assistance
