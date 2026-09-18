@@ -1,0 +1,10 @@
+# Code owners are requested for review automatically when a PR touches matching files.
+# The last matching pattern takes precedence. Owners must have write access to the repository.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+*                   @boring-mars
+
+# Process and repository configuration: changes need a maintainer
+/.github/           @boring-mars
+/docs/*/development/ @boring-mars

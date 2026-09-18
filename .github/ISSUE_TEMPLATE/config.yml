@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/boring-mars/mertina-agent/security/advisories/new
+    about: Please report vulnerabilities privately, not in public issues.
+  - name: Development guidelines
+    url: https://github.com/boring-mars/mertina-agent/blob/main/docs/en/development/README.md
+    about: How to contribute, branch, open PRs and review (English / 中文).
