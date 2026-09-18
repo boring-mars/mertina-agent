@@ -16,5 +16,5 @@ Only the latest release receives security fixes.
 
 ## More information
 
-- [Security guidelines (English)](../docs/en/development/security.md)
-- [安全规范（中文）](../docs/zh/development/security.md)
+- [Security guidelines (English)](docs/en/development/security.md)
+- [安全规范（中文）](docs/zh/development/security.md)
