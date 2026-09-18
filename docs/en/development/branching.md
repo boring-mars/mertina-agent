@@ -86,7 +86,7 @@ git switch -c release/1.x v1.4.0
 
 Rules for maintenance branches:
 
-- Named `release/<major>.x`
+- As an exception to the `<type>` rule, name maintenance branches `release/<major>.x`
 - Protected like `main`
 - Receive bug fixes and security fixes only, never new features
 - Fixes land on `main` first and are then cherry-picked (`git cherry-pick -x <sha>`) into the maintenance branch
