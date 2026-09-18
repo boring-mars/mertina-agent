@@ -1,0 +1,59 @@
+name: Feature request
+description: Suggest a new feature or an improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. You can write in English or Chinese.
+
+        A feature request is a proposal. Large changes need agreement before an implementation PR,
+        so please describe the problem first, then the solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and why is it hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen? Include API, configuration or CLI sketches if helpful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches or workarounds you have considered.
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to implement this?
+      options:
+        - Yes, I'd like to submit a PR
+        - Maybe, with some guidance
+        - No
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Links, references to other projects, or anything else that helps.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues (including closed ones) and this is not a duplicate.
+          required: true
