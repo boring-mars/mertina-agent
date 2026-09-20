@@ -5,7 +5,7 @@
 **Status**: agreed, pending implementation
 **Roadmap milestone**: [v0.1 — Agent core](../../../ROADMAP.md#v01--agent-core)
 **Branch**: `feat/agent-core-loop`
-**Upstream**: [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT). The survey below is based on a local checkout of upstream; the exact commit SHA is recorded in the port manifest.
+**Upstream**: [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT). The survey below is based on a local checkout of upstream; the exact commit SHA is recorded in [Porting from Hermes](../development/porting-from-hermes.md).
 
 ---
 
@@ -40,7 +40,7 @@ So the copy boundary can be cut. There is no "we must copy 568k lines".
 ### 1.2 Why the core loop cannot be copied file by file
 
 - `AIAgent` (`run_agent.py`, 1,592 lines) is assembled from 14 mixins. Its `__init__` takes about 70 parameters and forwards the real work to `agent/agent_init.py` (2,406 lines). `agent_init` is unreachable at module level and is imported lazily inside `__init__`, so copying `run_agent.py` yields a module that imports successfully and fails on instantiation.
-- `agent/conversation_loop.py` (1,745 lines) is a coordinator. The actual logic lives in 14 `agent/turn_*.py` modules (about 5,000 lines).
+- `agent/conversation_loop.py` (1,745 lines) is a coordinator. The actual logic lives in 15 `agent/turn_*.py` modules (5,444 lines).
 - A function-granularity measurement over the 9 main files (a whole function counts as removable when its body mentions any feature outside this milestone) gives a 45% survival rate:
 
 | File | Lines | Functions | Out of scope | After first pass |
@@ -66,11 +66,11 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 |---|---|---|
 | D1 | The copy boundary is L0+L1; the L2 platform layer is not copied | See §3 |
 | D2 | Copy everything into `vendor/` first, then trim and move out module by module | Mainline code stays runnable at every point; the "unrunnable" state exists only inside `vendor/` |
-| D3 | `vendor/` is not committed; a port manifest is committed instead | Committing it would add a 15,600-line diff. MIT attribution is satisfied by the manifest plus the per-file copyright headers |
+| D3 | `vendor/` is not committed | Committing it would add a 25,000-line diff. MIT attribution is satisfied by the per-file copyright headers plus [Porting from Hermes](../development/porting-from-hermes.md) in the development guidelines |
 | D4 | Flat root layout, aligned with Hermes filenames and import roots | See §5 |
 | D5 | No wheel is published; the project ships as a standalone product run from a checkout or Docker | A precondition for D4, and the project was never meant to be depended on as a library |
-| D6 | v0.1 is split into a/b/c; this branch delivers v0.1a only | See §8 |
-| D7 | v0.1a exercises the tool path with a placeholder `get_time` tool; `web_search` waits for v0.1c | Keeps v0.1a's tests free of any network dependency |
+| D6 | v0.1 is split into 0.1.0 / 0.1.1 / 0.1.2; this branch delivers v0.1.0 only | See §8 |
+| D7 | v0.1.0 exercises the tool path with a placeholder `get_time` tool; `web_search` waits for v0.1.2 | Keeps v0.1.0's tests free of any network dependency |
 
 ---
 
@@ -79,10 +79,10 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 | Layer | Contents | Lines | Treatment |
 |---|---|---:|---|
 | **L0** interface leaves | `agent/transports/base.py`, `agent/transports/types.py`, `agent/iteration_budget.py`, `agent/retry_utils.py`, `agent/web_search_provider.py`, `tools/interrupt.py` | 601 | **Copied verbatim**, MIT copyright headers kept |
-| **L1** loop skeleton | `conversation_loop.py` + 14 `turn_*.py` + `tool_executor.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + the `AIAgent` mixins | ~15,000 | **Copied into vendor, then trimmed** — this is the part that has to be understood |
+| **L1** loop skeleton | `conversation_loop.py` + 15 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + 12 `AIAgent` mixins and others, 44 files in all | 24,754 | **Copied into vendor, then trimmed** — this is the part that has to be understood |
 | **L2** platform layer | `agent_runtime_helpers.py` (3,509), `model_metadata.py` (2,551), `turn_recovery.py` (1,813), `error_classifier.py` (1,394), `redact.py` (1,335), `display.py` (1,118), `hermes_constants.py` (1,515), `hermes_logging.py` (764) and others | ~36,000 | **Not copied**; written from scratch as needed |
 
-L0/L1/L2 is the **copy boundary** (what goes into vendor and what does not); it is a different axis from the milestone split in §8. All six L0 files are inside the boundary but land at different times: `transports/base.py`, `transports/types.py` and `iteration_budget.py` in v0.1a; `retry_utils.py` and `tools/interrupt.py` in v0.1b; `web_search_provider.py` in v0.1c.
+L0/L1/L2 is the **copy boundary** (what goes into vendor and what does not); it is a different axis from the milestone split in §8. All six L0 files are inside the boundary but land at different times: `transports/base.py`, `transports/types.py` and `iteration_budget.py` in v0.1.0; `retry_utils.py` and `tools/interrupt.py` in v0.1.1; `web_search_provider.py` in v0.1.2.
 
 L2 is not the agent loop. It is model metadata tables, error classification, redaction, terminal rendering and global constants. For example, the OpenAI client is constructed in `agent_runtime_helpers.create_openai_client`; Mertina writes its own in about 30 lines.
 
@@ -108,7 +108,9 @@ Move-out order; each step runs before the next begins:
 
 `vendor/` is deleted entirely at the end.
 
-`vendor/` is added to `.gitignore`. In its place, `docs/hermes-port-manifest.md` is committed, recording the upstream commit SHA, the list of copied files, the disposition of each file (verbatim / trimmed / dropped), and every structural deviation from upstream (see §5.2).
+`vendor/` is added to `.gitignore`. The upstream SHA, the naming rules and the deviation log live in [Porting from Hermes](../development/porting-from-hermes.md) in the development guidelines, which is a standing document.
+
+The file-by-file progress checklist for this port is one-shot. It lives at `vendor/PORT_CHECKLIST.md` (also out of git) and is deleted with `vendor/`. Because the naming rules in §5.1 keep paths 1:1, no file-by-file mapping table is needed in the long run.
 
 ---
 
@@ -138,7 +140,7 @@ The value of alignment is not evenly distributed; the breakdown is recorded here
 
 28 of the 45 root-level `.py` files in Hermes are `hermes_state_*.py`. Of the 238 `.py` files under `agent/`, only 10 subdirectories exist, while 31 files are `turn_*.py`, 8 are `auxiliary_*.py` and 7 are `context_*.py`. This is decomposition in place: a file grew too large and was split into siblings, and the shared prefix is the directory that was never created.
 
-**Mertina does not replicate those split marks up front.** Copying `hermes_state.py` yields a single `mertina_state.py`. If it later needs splitting, it becomes a `state/` package, and the deviation is recorded in the port manifest (for example `hermes_state_*.py (28) → state/`).
+**Mertina does not replicate those split marks up front.** Copying `hermes_state.py` yields a single `mertina_state.py`. If it later needs splitting, it becomes a `state/` package, and the deviation is recorded in [Porting from Hermes](../development/porting-from-hermes.md) (for example `hermes_state_*.py (28) → state/`).
 
 Files Mertina writes itself, with no upstream counterpart, are organised however suits them. No correspondence is invented.
 
@@ -154,19 +156,19 @@ Scanning the files inside the v0.1 copy boundary for third-party imports (includ
 
 | Package | Where | v0.1 |
 |---|---|---|
-| `openai` | Not inside the boundary (client construction lives in L2's `agent_runtime_helpers.py`) | **Needed in v0.1a**; about 30 lines of our own construction code |
+| `openai` | Not inside the boundary (client construction lives in L2's `agent_runtime_helpers.py`) | **Needed in v0.1.0**; about 30 lines of our own construction code |
 | `fire` | The CLI entry point in `run_agent.py` | Not needed; the standard library's `argparse` replaces it |
 | `httpx` | `tools/web_tools.py` | Ships with the openai SDK; not listed separately |
-| `ddgs` | `tools/web_tools.py` | v0.1c (keyless search provider) |
-| `pyyaml` | `hermes_cli/config.py` | v0.1c (config file) |
+| `ddgs` | `tools/web_tools.py` | v0.1.2 (keyless search provider) |
+| `pyyaml` | `hermes_cli/config.py` | v0.1.2 (config file) |
 
-Hermes lists 36 core dependencies (`rich`, `tenacity`, `pydantic`, `fastapi`, `Pillow`, `croniter`, `PyJWT` and others). **v0.1a needs none of them and depends only on `openai`.** Note that `tenacity` is not used on Hermes's retry path either — `retry_utils.py` is hand-written backoff.
+Hermes lists 36 core dependencies (`rich`, `tenacity`, `pydantic`, `fastapi`, `Pillow`, `croniter`, `PyJWT` and others). **v0.1.0 needs none of them and depends only on `openai`.** Note that `tenacity` is not used on Hermes's retry path either — `retry_utils.py` is hand-written backoff.
 
 Python version follows Hermes: `>=3.11`.
 
 ---
 
-## 7. v0.1a design
+## 7. v0.1.0 design
 
 ### 7.1 Modules
 
@@ -209,7 +211,7 @@ Two entry points, as the Roadmap specifies: `chat()` returns the final text, `ru
 - **Interrupt**: a stop flag is checked before every model call. On stop, tool calls that were issued but never completed get an `"interrupted"` result, so the history stays valid for the model API.
 - **Budget**: `IterationBudget.consume()` per round.
 
-v0.1a implements the budget and the basic stop flag only; retry and mid-stream interruption arrive in v0.1b.
+v0.1.0 implements the budget and the basic stop flag only; retry and mid-stream interruption arrive in v0.1.1.
 
 ### 7.4 Tests
 
@@ -227,7 +229,7 @@ The `get_time` tool needs no network, so the tool path is covered end to end.
 
 - A script runs the full loop against the fake client, including a tool-call round trip
 - The five unit tests above pass
-- `vendor/` has been removed from the working tree, and `docs/hermes-port-manifest.md` records every copied source
+- `vendor/` has been removed from the working tree, and the upstream SHA in the development guidelines is up to date
 - The README's layout section matches the actual layout
 
 ---
@@ -236,16 +238,16 @@ The `get_time` tool needs no network, so the tool path is covered end to end.
 
 | | Contents | Result |
 |---|---|---|
-| **v0.1a** (this branch) | L0 leaves + transports + registry + loop + `get_time` | The full loop runs against a fake client |
-| v0.1b | Streaming + retry + interruption (`tools/interrupt.py`, `agent/prompt_builder.py`, `agent/system_prompt.py`) | The Roadmap's stop semantics are met |
-| v0.1c | `web_search` + the `WebSearchProvider` interface + the config layer (`mertina_cli/config.py`) | The Roadmap's acceptance scenario runs against a real endpoint |
+| **v0.1.0** (this branch) | L0 leaves + transports + registry + loop + `get_time` | The full loop runs against a fake client |
+| v0.1.1 | Streaming + retry + interruption (`tools/interrupt.py`, `agent/prompt_builder.py`, `agent/system_prompt.py`) | The Roadmap's stop semantics are met |
+| v0.1.2 | `web_search` + the `WebSearchProvider` interface + the config layer (`mertina_cli/config.py`) | The Roadmap's acceptance scenario runs against a real endpoint |
 
-When v0.1c lands, all three of the Roadmap's v0.1 "Done when" items are satisfied.
+When v0.1.2 lands, all three of the Roadmap's v0.1 "Done when" items are satisfied.
 
 ---
 
 ## 9. Open questions
 
-- **How deep the L2 replacements go**: error classification, redaction and logging get minimal implementations in v0.1a. Whether to revisit Hermes's counterparts is a P1 question.
+- **How deep the L2 replacements go**: error classification, redaction and logging get minimal implementations in v0.1.0. Whether to revisit Hermes's counterparts is a P1 question.
 - **The risk of the `agent` / `tools` top-level names**: in a virtualenv they could in principle collide with a third-party package of the same name. Hermes has lived with this risk. If a collision ever happens, the fallback is to add the `src/mertina_agent/` prefix (D4's alternative), at the cost of a permanent difference from upstream on every import line.
-- **No mechanism for tracking upstream**: the port manifest records the upstream SHA, but nothing yet detects that an already-ported file changed upstream. A `scripts/diff-hermes.sh` is the candidate; it will be assessed after v0.1c.
+- **No mechanism for tracking upstream**: the development guidelines record the upstream SHA, but nothing yet detects that an already-ported file changed upstream. A `scripts/diff-hermes.sh` is the candidate; it will be assessed after v0.1.2.

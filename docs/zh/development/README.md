@@ -16,6 +16,7 @@
 | [Pull Request](pull-requests.md) | 如何创建、更新和合并 PR |
 | [代码审查](code-review.md) | 审查关注什么、作者和审查者如何配合 |
 | [编码规范](coding-style.md) | Python 风格、类型标注、项目结构、依赖管理 |
+| [从 Hermes 移植](porting-from-hermes.md) | 从上游 Hermes Agent 取什么代码，以及取用时的规则 |
 | [测试](testing.md) | 测试目录结构、什么必须测试、如何运行测试 |
 | [版本与发布](versioning-and-release.md) | 语义化版本、tag、变更日志、发布流程 |
 | [Issue 与标签](issues-and-labels.md) | 如何报告 bug、提需求，以及 issue 如何分流处理 |

@@ -16,6 +16,7 @@ Everyone who contributes to the project, maintainers included, follows these gui
 | [Pull Requests](pull-requests.md) | How to open, update and merge a pull request |
 | [Code Review](code-review.md) | What reviewers look for and how authors and reviewers work together |
 | [Coding Style](coding-style.md) | Python style, typing, project layout, dependencies |
+| [Porting from Hermes](porting-from-hermes.md) | What we take from upstream Hermes Agent, and the rules for taking it |
 | [Testing](testing.md) | Test layout, what must be tested, how to run tests |
 | [Versioning and Release](versioning-and-release.md) | SemVer, tags, changelog, release flow |
 | [Issues and Labels](issues-and-labels.md) | How to report bugs, request features, and how issues are triaged |
