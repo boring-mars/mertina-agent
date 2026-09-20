@@ -55,3 +55,8 @@ desktop.ini
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Upstream Hermes snapshot used as a porting reference. Copied verbatim,
+# trimmed and moved into the tree module by module, then deleted.
+# See docs/en/development/porting-from-hermes.md for provenance.
+vendor/
