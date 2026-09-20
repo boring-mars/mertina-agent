@@ -47,6 +47,8 @@ class Settings(BaseSettings):
         frozen=True,
     )
 
+    # The model settings are named ``llm_*`` rather than ``model_*`` because
+    # pydantic reserves the ``model_`` prefix for its own attributes.
     log_level: LogLevel = "INFO"
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: SecretStr | None = None
