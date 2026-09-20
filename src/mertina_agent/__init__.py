@@ -1,13 +1,22 @@
 """Mertina Agent: a tool-using agent harness built on OpenAI-compatible models."""
 
 from mertina_agent.config import Settings, load_settings
-from mertina_agent.exceptions import ConfigurationError, MertinaError
+from mertina_agent.exceptions import (
+    ConfigurationError,
+    MertinaError,
+    ModelInputError,
+    ModelRequestError,
+    ModelResponseError,
+)
 
 __version__ = "0.1.0.dev0"
 
 __all__ = [
     "ConfigurationError",
     "MertinaError",
+    "ModelInputError",
+    "ModelRequestError",
+    "ModelResponseError",
     "Settings",
     "__version__",
     "load_settings",

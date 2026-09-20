@@ -2,7 +2,8 @@
 
 **A personal AI assistant that lives in the cloud and extends to your devices.**
 
-> **Status: pre-alpha.** The project is being built from scratch. Nothing is runnable yet.
+> **Status: pre-alpha.** A typed, asynchronous model client and an explicit smoke-test example
+> are available. The agent loop, tool execution, gateway, and UI are not implemented yet.
 > See the [Roadmap](ROADMAP.md) for what is being built and in what order.
 
 Mertina Agent is a general-purpose personal assistant. It runs as an always-on cloud service
@@ -90,13 +91,79 @@ mertina-agent/
 
 ## Getting started
 
-There is nothing to run yet. Setup instructions will be added here with the first release.
-Until then, the [contributing guide](docs/en/development/contributing.md) describes the development
-environment and the workflow.
+Use Python 3.12 or newer and [uv](https://docs.astral.sh/uv/). Install the project and development
+tools from the lockfile:
+
+```bash
+uv sync --locked
+```
+
+Copy `.env.example` to `.env`, then explicitly set `MERTINA_LLM_BASE_URL` and `MERTINA_LLM_MODEL`
+to an endpoint and model you intend to use. Set `MERTINA_LLM_API_KEY` only if that endpoint requires
+authentication. An empty key selects unauthenticated mode; the client does not fall back to
+`OPENAI_API_KEY`. Never commit `.env` or share its secrets. Environment variables override `.env`.
+
+Run one real request explicitly, from the repository root:
+
+```bash
+uv run python examples/model_call.py --env-file .env
+```
+
+This sends the fixed, non-private prompt "Reply with a short greeting." It may incur charges on a
+hosted endpoint. The example requires an existing env file and explicitly supplied endpoint/model
+settings; an empty file cannot silently select a hosted service through library defaults.
+No key is required for an endpoint that supports unauthenticated requests.
+
+To offer a demonstration function tool:
+
+```bash
+uv run python examples/model_call.py --env-file .env --tools
+```
+
+The example displays normalized text, requested tools, finish reason, refusal, and optional token
+usage as JSON. It never executes tools or sends a follow-up request. Offering a tool does not force
+the endpoint to call it. Successful exit means a structurally valid response was received; check
+`finish_reason` and `refusal` because truncation, filtering, or refusal are not ordinary completion.
+Missing usage/counts remain `null`, not fabricated zeroes.
+
+The Python entry point is `mertina_agent.agent.model_client.ModelClient`. It accepts existing
+`Settings`, supports `async with`, and exposes `await client.complete(messages, tools=...)`.
+Messages support text-only `system`, `developer`, `user`, `assistant`, and `tool` roles; tools use
+standard function definitions. An endpoint must support the roles and tool features you request.
+Unsupported input fields and malformed responses fail explicitly rather than being silently repaired.
+
+Current scope is one asynchronous, non-streaming Chat Completions request with SDK retries disabled.
+There is no conversation loop, streaming, tool execution, automatic backoff, or product-level stop
+and history recovery yet. `MERTINA_LLM_TIMEOUT_S` controls network-operation timeouts, not a total
+agent-turn deadline. `MERTINA_MAX_ITERATIONS` is reserved for the later agent loop and is not used here.
+SDK clients created by the wrapper are closed with it; injected clients remain caller-owned.
+Base URLs must not contain embedded credentials, query parameters, fragments, or control characters.
+Automatic HTTP redirects are disabled as well as retries. Injected SDKs with conflicting HTTP-level
+authentication, cookies, custom headers/query data, or automatic redirects are rejected before dispatch.
+
+### Offline checks and real-provider acceptance
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
+uv run pytest
+uv run pre-commit run --all-files
+```
+
+These checks use offline fixtures or simulated HTTP and do not contact a model service. The example
+is not collected by pytest. Passing offline checks does not establish successful real-provider
+acceptance; that is recorded separately after explicitly running against a designated endpoint.
+
+See the [contributing guide](docs/en/development/contributing.md) for the development workflow and
+the [phase-two plan](docs/plans/v0.1-phase-2-model-transport.md) for acceptance criteria.
 
 ## Documentation
 
 - [Roadmap](ROADMAP.md): priorities and milestones
+- [Model-transport phase plan](docs/plans/v0.1-phase-2-model-transport.md): scope and acceptance criteria
+- [Hermes model-transport provenance](docs/sources/hermes-model-transport.md): fixed source version,
+  adaptations, and third-party license
 - [Development guidelines](docs/en/development/README.md): branching, commits, pull requests,
   code review, coding style, testing, releases, security
 - [开发规范（中文）](docs/zh/development/README.md)
@@ -111,7 +178,9 @@ Contributions are welcome. Read the [contributing guide](CONTRIBUTING.md) and th
 
 Mertina Agent is built on ideas and code from [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 by [Nous Research](https://nousresearch.com), released under the MIT License. Where Mertina copies
-code from Hermes, the original copyright notice is kept, as the license requires.
+code from Hermes, the original copyright notice is kept, as the license requires. The model-transport
+source snapshot and deliberate changes are recorded in the [provenance document](docs/sources/hermes-model-transport.md).
+Its original license is included in [LICENSES/Hermes-Agent-MIT.txt](LICENSES/Hermes-Agent-MIT.txt).
 
 ## License
 

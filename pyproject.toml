@@ -4,7 +4,7 @@ description = "A tool-using AI agent harness, cut down from Hermes Agent"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "LICENSES/Hermes-Agent-MIT.txt"]
 authors = [{ name = "Mertina Agent contributors" }]
 keywords = ["agent", "llm", "openai", "assistant"]
 classifiers = [
@@ -17,6 +17,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "openai>=3.16.2",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
 ]
@@ -135,6 +136,7 @@ exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.13.0",
     "mypy>=2.3.1",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",

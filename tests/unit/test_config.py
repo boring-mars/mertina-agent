@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from mertina_agent.config import load_settings
+from mertina_agent.config import Settings, load_settings
 from mertina_agent.exceptions import ConfigurationError, MertinaError
 
 
@@ -86,6 +86,17 @@ def test_missing_env_file_is_not_an_error(tmp_path: Path):
         ("MERTINA_LLM_TIMEOUT_S", "soon"),
         ("MERTINA_MAX_ITERATIONS", "0"),
         ("MERTINA_MAX_ITERATIONS", "many"),
+        ("MERTINA_LLM_TIMEOUT_S", "inf"),
+        ("MERTINA_LLM_TIMEOUT_S", "nan"),
+        ("MERTINA_LLM_BASE_URL", "file:///tmp/model"),
+        ("MERTINA_LLM_BASE_URL", "https:///v1"),
+        ("MERTINA_LLM_BASE_URL", "https://example.test:99999/v1"),
+        ("MERTINA_LLM_BASE_URL", "https://user:secret@example.test/v1"),
+        ("MERTINA_LLM_BASE_URL", "https://example.test/v1?route=test"),
+        ("MERTINA_LLM_BASE_URL", "https://example.test/v1#fragment"),
+        ("MERTINA_LLM_BASE_URL", "https://example.test/v1?"),
+        ("MERTINA_LLM_BASE_URL", "https://example.test/\x7fbad"),
+        ("MERTINA_LLM_MODEL", "  "),
     ],
 )
 def test_invalid_values_raise_configuration_error(
@@ -97,6 +108,30 @@ def test_invalid_values_raise_configuration_error(
         load_settings(env_file=None)
 
     assert name.removeprefix("MERTINA_").lower() in str(error.value)
+
+
+def test_invalid_settings_do_not_echo_sensitive_input(monkeypatch):
+    monkeypatch.setenv("MERTINA_LLM_BASE_URL", "https://user:private-key@example.test/v1")
+
+    with pytest.raises(ConfigurationError) as error:
+        load_settings(env_file=None)
+
+    assert "private-key" not in str(error.value)
+    assert error.value.__cause__ is not None
+
+
+def test_null_control_character_in_url_is_rejected_before_sdk_construction():
+    with pytest.raises(ValidationError, match="llm_base_url"):
+        Settings(llm_base_url="https://example.test/\x00bad")
+
+
+def test_committable_env_example_never_contains_a_credential():
+    settings = load_settings(env_file=Path(__file__).parents[2] / ".env.example")
+    secret = settings.llm_api_key
+    # Do not use a rewritten assertion on the secret value: pytest would echo
+    # the credential when someone accidentally fills in the committable template.
+    if secret is not None and secret.get_secret_value():
+        pytest.fail("Keep credentials in ignored .env, never in .env.example.")
 
 
 def test_configuration_error_is_a_mertina_error():
