@@ -11,7 +11,7 @@ uv run pytest                          # 全部测试
 uv run pytest tests/storage            # 某个目录
 uv run pytest -k session               # 名称中包含 "session" 的测试
 uv run pytest -x --lf                  # 遇到第一个失败就停止，只重跑上次失败的测试
-uv run pytest --cov=mertina_agent      # 生成覆盖率报告
+uv run pytest --cov=mertina            # 生成覆盖率报告
 ```
 
 ## 目录结构
@@ -26,7 +26,7 @@ tests/
     └── ...
 ```
 
-- `tests/unit/` 的目录结构与 `src/mertina_agent/` 对应
+- `tests/unit/` 的目录结构与 `mertina/` 对应
 - 文件命名为 `test_<模块>.py`，函数命名为 `test_<行为>`，例如
   `test_load_session_raises_when_missing`
 

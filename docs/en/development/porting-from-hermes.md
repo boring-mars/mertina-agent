@@ -23,15 +23,25 @@ maintained as ours.
 
 ## Rules
 
-### 1. Paths and filenames mirror upstream
+### 1. Paths and filenames mirror upstream, under the `mertina` package
 
-A file ported from Hermes keeps its path and name: `agent/turn_tool_round.py` stays
-`agent/turn_tool_round.py`. The `hermes_*` prefix is replaced with `mertina_*`, so
-`hermes_state.py` becomes `mertina_state.py` and `hermes_cli/` becomes `mertina_cli/`.
+Everything importable lives under the single top-level package `mertina`, so a ported file's path
+is its upstream path with `mertina/` in front:
 
-Because of this, no file-by-file mapping table is needed: a ported file's origin is its own path.
-`diff` against the matching upstream file is a pure semantic diff, with import statements identical
-on both sides.
+| Hermes | Mertina |
+|---|---|
+| `agent/turn_tool_round.py` | `mertina/agent/turn_tool_round.py` |
+| `agent/transports/base.py` | `mertina/agent/transports/base.py` |
+| `tools/registry.py` | `mertina/tools/registry.py` |
+| `run_agent.py` | `mertina/run_agent.py` |
+| `hermes_state.py` | `mertina/state.py` |
+| `hermes_cli/config.py` | `mertina/cli/config.py` |
+
+The `hermes_` prefix is dropped rather than translated: the package name already supplies the
+namespace, so `mertina/mertina_state.py` would stutter.
+
+Because the mapping is mechanical, no file-by-file table is needed — a ported file's origin is its
+own path.
 
 Files we write ourselves, with no upstream counterpart, are organised however suits them.
 No correspondence is invented.
@@ -68,8 +78,12 @@ Places where Mertina's structure departs from upstream, so the departure is not 
 With a Hermes checkout alongside this repository, a ported file diffs directly against its twin:
 
 ```bash
-diff ../hermes-agent/agent/turn_tool_round.py agent/turn_tool_round.py
+diff <(sed 's/^from \(agent\|tools\)\./from mertina.\1./' ../hermes-agent/agent/turn_tool_round.py) \
+     mertina/agent/turn_tool_round.py
 ```
+
+The `sed` filter rewrites upstream's import roots to ours, so the only differences left are
+semantic ones.
 
 Remember that our copy is deliberately smaller: features outside the current milestone were removed
 on purpose, and a large diff is the expected result, not a problem to fix.

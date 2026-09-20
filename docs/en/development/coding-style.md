@@ -9,9 +9,9 @@ so run them before pushing rather than memorizing the rules.
 
 | Tool | Purpose | Command |
 |---|---|---|
-| [uv](https://docs.astral.sh/uv/) | Python version, virtual env, dependencies, build | `uv sync`, `uv add`, `uv build` |
+| [uv](https://docs.astral.sh/uv/) | Python version, virtual env, dependencies | `uv sync`, `uv add`, `uv lock` |
 | [Ruff](https://docs.astral.sh/ruff/) | Linting and formatting | `uv run ruff check .`, `uv run ruff format .` |
-| [mypy](https://mypy.readthedocs.io/) | Static type checking | `uv run mypy src` |
+| [mypy](https://mypy.readthedocs.io/) | Static type checking | `uv run mypy mertina` |
 | [pytest](https://docs.pytest.org/) | Tests | `uv run pytest` |
 | [pre-commit](https://pre-commit.com/) | Runs the checks before each commit | `uv run pre-commit install` |
 
@@ -24,17 +24,19 @@ or tool-specific config files unless a tool can't be configured any other way.
 mertina-agent/
 ├── pyproject.toml        # project metadata, dependencies, tool config
 ├── uv.lock               # locked dependency versions (committed)
-├── src/
-│   └── mertina_agent/    # the package
-│       ├── __init__.py
-│       └── ...
-├── tests/                # tests, mirroring the src layout
+├── mertina/              # the one import package
+│   ├── __init__.py
+│   └── ...
+├── tests/                # tests, mirroring the package
 ├── docs/                 # documentation
 └── .github/              # CI workflows, templates, CODEOWNERS
 ```
 
-- The package uses the **src layout**, so tests run against the installed package, not stray local files
-- The package name is `mertina_agent`. The distribution (PyPI) name is `mertina-agent`
+- There is exactly **one top-level import package**, `mertina`. Everything importable lives under it,
+  so the project can never collide with a third-party package on a generic name
+- The package name is `mertina`. The repository and distribution name is `mertina-agent`
+- No `src/` directory: the project ships as an application, not a library, and is run from a checkout
+  or a Docker image rather than installed (`[tool.uv] package = false`)
 
 ## Python version
 

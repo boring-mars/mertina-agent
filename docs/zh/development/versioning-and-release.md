@@ -14,7 +14,7 @@
 
 以下内容属于**公共接口**，对它们的不兼容修改就是破坏性变更：
 
-- `mertina_agent` 导出的 Python API
+- `mertina` 导出的 Python API
 - HTTP API
 - CLI 命令和参数
 - 配置项和环境变量

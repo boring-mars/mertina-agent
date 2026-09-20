@@ -9,9 +9,9 @@
 
 | 工具 | 用途 | 命令 |
 |---|---|---|
-| [uv](https://docs.astral.sh/uv/) | Python 版本、虚拟环境、依赖、构建 | `uv sync`、`uv add`、`uv build` |
+| [uv](https://docs.astral.sh/uv/) | Python 版本、虚拟环境、依赖 | `uv sync`、`uv add`、`uv lock` |
 | [Ruff](https://docs.astral.sh/ruff/) | 代码检查和格式化 | `uv run ruff check .`、`uv run ruff format .` |
-| [mypy](https://mypy.readthedocs.io/) | 静态类型检查 | `uv run mypy src` |
+| [mypy](https://mypy.readthedocs.io/) | 静态类型检查 | `uv run mypy mertina` |
 | [pytest](https://docs.pytest.org/) | 测试 | `uv run pytest` |
 | [pre-commit](https://pre-commit.com/) | 每次提交前自动运行检查 | `uv run pre-commit install` |
 
@@ -24,17 +24,19 @@
 mertina-agent/
 ├── pyproject.toml        # 项目元数据、依赖、工具配置
 ├── uv.lock               # 锁定的依赖版本（需要提交）
-├── src/
-│   └── mertina_agent/    # 包代码
-│       ├── __init__.py
-│       └── ...
-├── tests/                # 测试，目录结构与 src 对应
+├── mertina/              # 唯一的顶层 import 包
+│   ├── __init__.py
+│   └── ...
+├── tests/                # 测试，目录结构与包对应
 ├── docs/                 # 文档
 └── .github/              # CI 工作流、模板、CODEOWNERS
 ```
 
-- 使用 **src 布局**，这样测试运行的是安装后的包，而不会意外导入本地散落的文件
-- 包名（import 用）是 `mertina_agent`，发布名（PyPI 上）是 `mertina-agent`
+- 顶层 import 包**有且只有一个**：`mertina`。所有可导入的代码都在它下面，
+  因此不会与第三方包在通用名字上撞车
+- 包名（import 用）是 `mertina`，仓库名和发布名是 `mertina-agent`
+- 不使用 `src/` 目录：本项目作为应用发布而非库，从 checkout 或 Docker 镜像运行，
+  不需要安装（`[tool.uv] package = false`）
 
 ## Python 版本
 

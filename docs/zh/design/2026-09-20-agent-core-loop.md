@@ -67,8 +67,8 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 | D1 | 拷贝边界定在 L0+L1，L2 平台层不拷 | 见 §3 |
 | D2 | 先全拷进 `vendor/`，再逐模块裁剪搬出 | 主线代码任何时刻都能跑，「不可运行期」只存在于 vendor 目录内 |
 | D3 | `vendor/` 不提交 git | 提交会带来 2.5 万行 diff；MIT 署名靠每文件版权头 + 开发规范中的[从 Hermes 移植](../development/porting-from-hermes.md)即可满足 |
-| D4 | 目录采用根级扁平布局，与 Hermes 文件名和 import 根一致 | 见 §5 |
-| D5 | 不发布 wheel，作为独立产品从 checkout / Docker 运行 | D4 的前提，且项目定位本就不是被当作库依赖 |
+| D4 | 扁平布局（不用 `src/`），顶层只有一个具名包 `mertina`，其内部严格镜像 Hermes | 见 §5 |
+| D5 | 不发布 wheel，作为独立产品从 checkout / Docker 运行（`[tool.uv] package = false`） | 项目定位是应用不是库；也是不用 `src/` 布局的理由 |
 | D6 | v0.1 拆成 0.1.0 / 0.1.1 / 0.1.2 三刀，本分支只做 v0.1.0 | 见 §8 |
 | D7 | v0.1.0 用 `get_time` 占位工具跑通工具路径，`web_search` 推迟到 v0.1.2 | 让 v0.1.0 的测试完全不依赖网络 |
 
@@ -94,7 +94,7 @@ L2 不是 agent loop，是模型元数据表、错误分类、脱敏、终端渲
 
 ```
 vendor/hermes/        ← L0+L1 原样拷贝；不参与构建、不参与 lint、不提交 git
-agent/ tools/ ...     ← 裁剪后搬出的代码，始终可运行
+mertina/              ← 裁剪后搬出的代码，始终可运行（agent/ tools/ 等子包在其下）
 ```
 
 搬运顺序，每步跑通再进下一步：
@@ -120,19 +120,67 @@ agent/ tools/ ...     ← 裁剪后搬出的代码，始终可运行
 
 Hermes 采用根级扁平布局：`agent/`、`tools/`、`gateway/`、`cron/`、`hermes_cli/` 直接位于仓库根，加根级单文件模块（`run_agent.py`、`model_tools.py`、`utils.py`、`hermes_state*.py`）。其 `setup.py` 主动禁止构建 wheel/sdist（Nix 构建除外），因为运行时资源依赖源码 checkout 的布局解析——这也是它敢占用 `agent`、`tools` 这类通用顶层包名的原因。
 
-Mertina 采用同样形态，规则两条：
+**Mertina 不照搬这一点。** 调研了同类项目后（见下），顶层只放一个具名包：
 
-1. **路径与文件名原样保留**：`agent/turn_tool_round.py` ↔ `agent/turn_tool_round.py`
-2. **`hermes_*` 前缀机械替换为 `mertina_*`**：`hermes_state.py` → `mertina_state.py`，`hermes_cli/` → `mertina_cli/`
+```
+mertina-agent/            仓库名、分发名
+├── mertina/              唯一的顶层 import 包
+│   ├── agent/            ↔ hermes agent/
+│   ├── tools/            ↔ hermes tools/
+│   ├── run_agent.py      ↔ hermes run_agent.py
+│   └── model_tools.py    ↔ hermes model_tools.py
+├── tests/unit/           镜像 mertina/
+└── pyproject.toml
+```
 
-这样 `diff hermes-agent/agent/turn_tool_round.py mertina-agent/agent/turn_tool_round.py` 得到的是纯语义差异，import 语句两边一字不差。
+映射规则三条：
+
+1. **上游路径前加 `mertina/`**：`agent/turn_tool_round.py` → `mertina/agent/turn_tool_round.py`
+2. **文件名不变**
+3. **`hermes_` 前缀剥掉**（不是替换成 `mertina_`，包名已经提供命名空间）：`hermes_state.py` → `mertina/state.py`，`hermes_cli/` → `mertina/cli/`
+
+对照时用一个 `sed` 过滤抹平 import 根的差异，剩下的就是纯语义差异：
+
+```bash
+diff <(sed 's/^from \(agent\|tools\)\./from mertina.\1./' ../hermes-agent/agent/turn_tool_round.py) \
+     mertina/agent/turn_tool_round.py
+```
+
+#### 为什么不照搬 Hermes 的顶层布局
+
+「扁平 vs src」和「顶层是一个具名包 vs 多个通用包」是两个独立的问题。Hermes 的特别之处在后者。
+
+同类项目的做法（全部是扁平 + 单一具名顶层包）：
+
+| 项目 | 形态 | 顶层 import 包 |
+|---|---|---|
+| Home Assistant（90.8k★） | 长期运行的服务，与 Mertina 最接近 | `homeassistant/` |
+| Aider（49.1k★） | AI agent CLI 应用 | `aider/`（分发名是 `aider-chat`） |
+| SWE-agent（20.4k★） | AI agent | `sweagent/` |
+| Django | 框架 | `django/` |
+| Flask / black / pip | 库 | `src/<name>/` |
+
+SWE-agent 根目录也有 `tools/`，但那是工具资源目录、不是 import 包——和 PyPA
+[src layout vs flat layout](https://packaging.python.org/en/latest/discussions/src-layout-vs-flat-layout/)
+文档里 flat layout 示例的形态一致（示例中根目录只有一个具名 import 包，`tools/` 用来放脚本）。
+
+而 `agent` 和 `tools` 在 PyPI 上都是**真实存在的包**（`agent 0.1.3`、`tools 1.0.35`），都提供同名顶层模块。
+占用这两个名字的撞名风险是现实的，不是理论的。
+
+不用 `src/` 的理由：src layout 的收益（防止误导入开发副本、强制使用已安装副本）是为要分发的库设计的。
+按 D5 我们不发包、用 `[tool.uv] package = false`，没有安装步骤，src layout 反而使代码不加 path hack
+就无法导入。上表中的三个应用类项目也都不用 `src/`。
+
+包名取 `mertina` 而非 `mertina_agent`：import 包名短于分发名是常态（`aider-chat` → `aider`、
+`scikit-learn` → `sklearn`、`Pillow` → `PIL`）；更重要的是内部结构镜像 Hermes 后第一层必然是 `agent/`，
+`mertina_agent.agent.conversation_loop` 会结巴，而且这个包后续还要装下 gateway、state、cron。
 
 对齐的价值分布并不均匀，记录在此以备后续权衡：
 
 | 对齐什么 | 收益 | 成本 |
 |---|---|---|
 | 文件名 / 模块名 | 高（移植时同名文件直接可 diff） | 几乎为零 |
-| import 根（`agent.` 而非 `mertina_agent.agent.`） | 高（import 行在文件开头，不对齐则每次 diff 都是噪音） | 放弃 pip 安装 |
+| import 根 | 中（可用一行 `sed` 抹平，不是结构性成本） | 若为此占用通用顶层名，则要承担撞名风险并放弃打包 |
 | 目录嵌套深度 | 近乎为零（Hermes 本就是平的，无结构可继承） | — |
 | accretion 模式 | 负（是债务不是资产） | — |
 
@@ -140,13 +188,20 @@ Mertina 采用同样形态，规则两条：
 
 Hermes 根级 45 个 `.py` 中有 28 个是 `hermes_state_*.py`；`agent/` 下 238 个 `.py` 只有 10 个子目录，其中 31 个是 `turn_*.py`、8 个 `auxiliary_*.py`、7 个 `context_*.py`。这是就地拆分的产物——文件长到装不下就拆成兄弟文件，那个前缀就是没有被创建出来的目录。
 
-**Mertina 不预先复制这些拆分痕迹。** 拷 `hermes_state.py` 就是一个 `mertina_state.py`；将来真的需要拆，拆成 `state/` 包，并在[从 Hermes 移植](../development/porting-from-hermes.md)的偏离表里记一条（如 `hermes_state_*.py (28) → state/`）。
+**Mertina 不预先复制这些拆分痕迹。** 拷 `hermes_state.py` 就是一个 `mertina/state.py`；将来真的需要拆，拆成 `mertina/state/` 包，并在[从 Hermes 移植](../development/porting-from-hermes.md)的偏离表里记一条（如 `hermes_state_*.py (28) → state/`）。
 
 Mertina 自己写的、上游没有对应物的文件，按自身合适的方式组织，不编造对应关系。
 
-### 5.3 与 README 的冲突
+### 5.3 需要同步修改的既有文档
 
-README 第 76–89 行「Planned repository layout」写的是 `src/mertina_agent/` 布局，与 D4 冲突。本分支一并修改该章节。
+以下文档写于本决定之前，假设了 `src/mertina_agent/` 布局，本分支一并修正：
+
+| 文档 | 原内容 |
+|---|---|
+| `README.md` | 「Planned repository layout」章节的 `src/mertina_agent/` |
+| `coding-style.md` | 项目结构树、`mypy src`、「使用 src 布局」、包名 `mertina_agent`、`uv build` |
+| `testing.md` | `--cov=mertina_agent`、`tests/unit/` 镜像 `src/mertina_agent/` |
+| `versioning-and-release.md` | 公共接口定义中的 `mertina_agent` |
 
 ---
 
@@ -174,21 +229,22 @@ Python 版本跟随 Hermes：`>=3.11`。
 
 | 路径 | 来源 | 说明 |
 |---|---|---|
-| `agent/transports/base.py` | L0 逐字抄 | `ProviderTransport` ABC |
-| `agent/transports/types.py` | L0 逐字抄 | `ToolCall` / `Usage` / `NormalizedResponse`，裁掉 codex/bedrock/anthropic 的 `provider_data` 兼容属性 |
-| `agent/transports/__init__.py` | L1 裁剪 | transport 注册表，只注册 `chat_completions` |
-| `agent/transports/chat_completions.py` | L1 裁剪 | 保留 sanitize → build_kwargs → normalize_response 三步，去掉各家特判 |
-| `agent/iteration_budget.py` | L0 逐字抄 | 去掉 `normalize_budget_warning_ratio` |
-| `agent/conversation_loop.py` | L1 裁剪 | `run_conversation()` 入口与 turn 调度 |
-| `agent/turn_api_request.py` | L1 裁剪 | 请求组装 |
-| `agent/turn_response_intake.py` | L1 裁剪 | 响应归一化 |
-| `agent/turn_tool_round.py` | L1 裁剪 | 一轮工具调用 |
-| `agent/turn_finalizer.py` | L1 裁剪 | 收尾 |
-| `agent/tool_executor.py` | L1 裁剪 | 并行执行独立工具调用，去掉审批网关/中间件/checkpoint/心跳 |
-| `tools/registry.py` | L1 裁剪 | 保留 `ToolEntry` 形状与 `register()`，去掉插件作用域、发现缓存、`check_fn` 缓存 |
-| `tools/time_tools.py` | 新写 | `get_time` 占位工具 |
-| `model_tools.py` | L1 裁剪 | 工具定义收集与分发，去掉 toolset 选择、hook、bridge |
-| `run_agent.py` | L1 裁剪 | `AIAgent` 摊平 14 个 mixin，`__init__` 参数收敛到本里程碑所需 |
+| `mertina/agent/transports/base.py` | L0 逐字抄 | `ProviderTransport` ABC |
+| `mertina/agent/transports/types.py` | L0 逐字抄 | `ToolCall` / `Usage` / `NormalizedResponse`，裁掉 codex/bedrock/anthropic 的 `provider_data` 兼容属性 |
+| `mertina/agent/transports/__init__.py` | L1 裁剪 | transport 注册表，只注册 `chat_completions` |
+| `mertina/agent/transports/chat_completions.py` | L1 裁剪 | 保留 sanitize → build_kwargs → normalize_response 三步，去掉各家特判 |
+| `mertina/agent/client_lifecycle.py` | L1 裁剪 | 单个 OpenAI 客户端的构造与关闭。上游把构造放在 L2 的 `agent_runtime_helpers.py`，因为它要处理 MoA facade、Gemini 原生客户端、provider profile、SSL/代理校验——我们都没有，故合并到本文件，并在偏离表记一条 |
+| `mertina/agent/iteration_budget.py` | L0 逐字抄 | 去掉 `normalize_budget_warning_ratio` |
+| `mertina/agent/conversation_loop.py` | L1 裁剪 | `run_conversation()` 入口与 turn 调度 |
+| `mertina/agent/turn_api_request.py` | L1 裁剪 | 请求组装 |
+| `mertina/agent/turn_response_intake.py` | L1 裁剪 | 响应归一化 |
+| `mertina/agent/turn_tool_round.py` | L1 裁剪 | 一轮工具调用 |
+| `mertina/agent/turn_finalizer.py` | L1 裁剪 | 收尾 |
+| `mertina/agent/tool_executor.py` | L1 裁剪 | 并行执行独立工具调用，去掉审批网关/中间件/checkpoint/心跳 |
+| `mertina/tools/registry.py` | L1 裁剪 | 保留 `ToolEntry` 形状与 `register()`，去掉插件作用域、发现缓存、`check_fn` 缓存 |
+| `mertina/tools/time_tools.py` | 新写 | `get_time` 占位工具 |
+| `mertina/model_tools.py` | L1 裁剪 | 工具定义收集与分发，去掉 toolset 选择、hook、bridge |
+| `mertina/run_agent.py` | L1 裁剪 | `AIAgent` 摊平 14 个 mixin，`__init__` 参数收敛到本里程碑所需 |
 
 ### 7.2 数据流
 
@@ -249,5 +305,5 @@ v0.1.2 完成时，Roadmap v0.1 的三条「Done when」全部满足。
 ## 9. 遗留问题
 
 - **L2 的替代实现深度未定**：错误分类、脱敏、日志在 v0.1.0 用最简实现，P1 再评估要不要回头参考 Hermes 的对应模块。
-- **`agent`/`tools` 顶层包名的撞名风险**：在 venv 中理论上可能与同名第三方包冲突。Hermes 长期承受此风险。若将来确有冲突，回退方案是加 `src/mertina_agent/` 前缀（D4 的备选），代价是所有 import 行与上游产生固定差异。
+- **`mertina/` 内部是否需要再分层**：v0.1 只有 `agent/` 和 `tools/` 两个子包，规模小。等 gateway、state、cron 进来后，是否需要在 `mertina/` 下引入更多分层，到时再看。
 - **上游跟进机制未定**：开发规范记录了上游 SHA，但「如何发现上游某个已移植文件发生了变更」还没有工具支持。候选方案是一个 `scripts/diff-hermes.sh`，留待 v0.1.2 之后评估。

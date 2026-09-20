@@ -14,7 +14,7 @@ Versions follow [Semantic Versioning 2.0](https://semver.org/): `MAJOR.MINOR.PAT
 
 What counts as the **public interface**, where a change can be breaking:
 
-- The Python API exported from `mertina_agent`
+- The Python API exported from `mertina`
 - The HTTP API
 - CLI commands and options
 - Configuration keys and environment variables

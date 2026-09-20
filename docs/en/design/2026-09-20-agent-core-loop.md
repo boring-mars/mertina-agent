@@ -67,8 +67,8 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 | D1 | The copy boundary is L0+L1; the L2 platform layer is not copied | See §3 |
 | D2 | Copy everything into `vendor/` first, then trim and move out module by module | Mainline code stays runnable at every point; the "unrunnable" state exists only inside `vendor/` |
 | D3 | `vendor/` is not committed | Committing it would add a 25,000-line diff. MIT attribution is satisfied by the per-file copyright headers plus [Porting from Hermes](../development/porting-from-hermes.md) in the development guidelines |
-| D4 | Flat root layout, aligned with Hermes filenames and import roots | See §5 |
-| D5 | No wheel is published; the project ships as a standalone product run from a checkout or Docker | A precondition for D4, and the project was never meant to be depended on as a library |
+| D4 | Flat layout (no `src/`) with exactly one top-level package, `mertina`, mirroring Hermes inside it | See §5 |
+| D5 | No wheel is published; the project ships as a standalone product run from a checkout or Docker (`[tool.uv] package = false`) | It is an application, not a library; this is also why there is no `src/` layout |
 | D6 | v0.1 is split into 0.1.0 / 0.1.1 / 0.1.2; this branch delivers v0.1.0 only | See §8 |
 | D7 | v0.1.0 exercises the tool path with a placeholder `get_time` tool; `web_search` waits for v0.1.2 | Keeps v0.1.0's tests free of any network dependency |
 
@@ -94,7 +94,7 @@ The `turn_*` separation inside L1 is kept rather than merged into one large loop
 
 ```
 vendor/hermes/        <- L0+L1 copied verbatim; excluded from the build, from lint, and from git
-agent/ tools/ ...     <- trimmed code moved out, runnable at all times
+mertina/              <- trimmed code moved out, runnable at all times (agent/, tools/ live inside)
 ```
 
 Move-out order; each step runs before the next begins:
@@ -120,19 +120,74 @@ The file-by-file progress checklist for this port is one-shot. It lives at `vend
 
 Hermes uses a flat root layout: `agent/`, `tools/`, `gateway/`, `cron/` and `hermes_cli/` sit at the repository root, alongside root-level single-file modules (`run_agent.py`, `model_tools.py`, `utils.py`, `hermes_state*.py`). Its `setup.py` actively blocks wheel and sdist builds outside a Nix build, because runtime assets are resolved through the source-checkout layout. That is also why it can take generic top-level package names like `agent` and `tools`.
 
-Mertina takes the same shape, under two rules:
+**Mertina does not copy that last part.** After surveying comparable projects (below), the repository
+root holds exactly one import package:
 
-1. **Paths and filenames are preserved**: `agent/turn_tool_round.py` maps to `agent/turn_tool_round.py`
-2. **The `hermes_*` prefix is mechanically replaced with `mertina_*`**: `hermes_state.py` becomes `mertina_state.py`, `hermes_cli/` becomes `mertina_cli/`
+```
+mertina-agent/            repository and distribution name
+├── mertina/              the one top-level import package
+│   ├── agent/            <-> hermes agent/
+│   ├── tools/            <-> hermes tools/
+│   ├── run_agent.py      <-> hermes run_agent.py
+│   └── model_tools.py    <-> hermes model_tools.py
+├── tests/unit/           mirrors mertina/
+└── pyproject.toml
+```
 
-This makes `diff hermes-agent/agent/turn_tool_round.py mertina-agent/agent/turn_tool_round.py` a pure semantic diff, with import statements identical on both sides.
+Three mapping rules:
+
+1. **Prefix the upstream path with `mertina/`**: `agent/turn_tool_round.py` becomes `mertina/agent/turn_tool_round.py`
+2. **Filenames are unchanged**
+3. **The `hermes_` prefix is dropped** (not translated to `mertina_`; the package name already supplies the namespace): `hermes_state.py` becomes `mertina/state.py`, `hermes_cli/` becomes `mertina/cli/`
+
+A `sed` filter flattens the difference in import roots when comparing, leaving only semantic differences:
+
+```bash
+diff <(sed 's/^from \(agent\|tools\)\./from mertina.\1./' ../hermes-agent/agent/turn_tool_round.py) \
+     mertina/agent/turn_tool_round.py
+```
+
+#### Why Hermes's top-level layout is not copied
+
+"Flat versus src" and "one named top-level package versus several generic ones" are independent
+questions. What makes Hermes unusual is the second.
+
+Comparable projects, all of them flat with a single named top-level package:
+
+| Project | Shape | Top-level import package |
+|---|---|---|
+| Home Assistant (90.8k★) | A long-running service, the closest match to Mertina | `homeassistant/` |
+| Aider (49.1k★) | An AI agent CLI application | `aider/` (distributed as `aider-chat`) |
+| SWE-agent (20.4k★) | An AI agent | `sweagent/` |
+| Django | A framework | `django/` |
+| Flask / black / pip | Libraries | `src/<name>/` |
+
+SWE-agent also has a root-level `tools/`, but it is a directory of tool assets, not an import
+package — the same shape as the flat-layout example in PyPA's
+[src layout vs flat layout](https://packaging.python.org/en/latest/discussions/src-layout-vs-flat-layout/),
+where the root holds one named import package and `tools/` holds scripts.
+
+Meanwhile `agent` and `tools` are both **real packages on PyPI** (`agent 0.1.3`, `tools 1.0.35`),
+each providing a top-level module of that name. Taking those names is a concrete collision risk,
+not a theoretical one.
+
+Why no `src/`: the benefits of a src layout (preventing accidental imports of the in-development
+copy, forcing the installed copy to be used) exist for libraries that get distributed. Under D5 we
+publish nothing and set `[tool.uv] package = false`, so there is no install step, and a src layout
+would instead make the code unimportable without a path hack. The three application projects above
+have no `src/` either.
+
+Why `mertina` rather than `mertina_agent`: an import package shorter than its distribution name is
+the norm (`aider-chat` → `aider`, `scikit-learn` → `sklearn`, `Pillow` → `PIL`). More importantly,
+mirroring Hermes means the first level inside is `agent/`, so `mertina_agent.agent.conversation_loop`
+stutters — and the package will later hold the gateway, state and cron as well.
 
 The value of alignment is not evenly distributed; the breakdown is recorded here for future trade-offs:
 
 | What is aligned | Value | Cost |
 |---|---|---|
 | Filenames / module names | High (a ported file diffs directly against its upstream twin) | Close to zero |
-| Import roots (`agent.` rather than `mertina_agent.agent.`) | High (imports sit at the top of every file; misalignment makes every diff start with noise) | Giving up pip installation |
+| Import roots | Moderate (one line of `sed` flattens it; not a structural cost) | Taking generic top-level names for it means collision risk and no packaging |
 | Directory nesting depth | Close to zero (Hermes is already flat; there is no structure to inherit) | — |
 | Accretion patterns | Negative (they are debt, not an asset) | — |
 
@@ -140,13 +195,20 @@ The value of alignment is not evenly distributed; the breakdown is recorded here
 
 28 of the 45 root-level `.py` files in Hermes are `hermes_state_*.py`. Of the 238 `.py` files under `agent/`, only 10 subdirectories exist, while 31 files are `turn_*.py`, 8 are `auxiliary_*.py` and 7 are `context_*.py`. This is decomposition in place: a file grew too large and was split into siblings, and the shared prefix is the directory that was never created.
 
-**Mertina does not replicate those split marks up front.** Copying `hermes_state.py` yields a single `mertina_state.py`. If it later needs splitting, it becomes a `state/` package, and the deviation is recorded in [Porting from Hermes](../development/porting-from-hermes.md) (for example `hermes_state_*.py (28) → state/`).
+**Mertina does not replicate those split marks up front.** Copying `hermes_state.py` yields a single `mertina/state.py`. If it later needs splitting, it becomes a `mertina/state/` package, and the deviation is recorded in [Porting from Hermes](../development/porting-from-hermes.md) (for example `hermes_state_*.py (28) → state/`).
 
 Files Mertina writes itself, with no upstream counterpart, are organised however suits them. No correspondence is invented.
 
-### 5.3 Conflict with the README
+### 5.3 Existing documents that need updating
 
-Lines 76–89 of the README describe a `src/mertina_agent/` layout, which conflicts with D4. This branch updates that section.
+These were written before this decision and assume a `src/mertina_agent/` layout. This branch corrects them:
+
+| Document | What it said |
+|---|---|
+| `README.md` | The `src/mertina_agent/` tree under "Planned repository layout" |
+| `coding-style.md` | The project layout tree, `mypy src`, "uses the src layout", the package name `mertina_agent`, `uv build` |
+| `testing.md` | `--cov=mertina_agent`, and `tests/unit/` mirroring `src/mertina_agent/` |
+| `versioning-and-release.md` | `mertina_agent` in the definition of the public interface |
 
 ---
 
@@ -174,21 +236,22 @@ Python version follows Hermes: `>=3.11`.
 
 | Path | Origin | Notes |
 |---|---|---|
-| `agent/transports/base.py` | L0 verbatim | The `ProviderTransport` ABC |
-| `agent/transports/types.py` | L0 verbatim | `ToolCall` / `Usage` / `NormalizedResponse`, minus the codex/bedrock/anthropic `provider_data` accessors |
-| `agent/transports/__init__.py` | L1 trimmed | Transport registry, registering `chat_completions` only |
-| `agent/transports/chat_completions.py` | L1 trimmed | Keeps sanitize → build_kwargs → normalize_response; vendor-specific special cases removed |
-| `agent/iteration_budget.py` | L0 verbatim | `normalize_budget_warning_ratio` dropped |
-| `agent/conversation_loop.py` | L1 trimmed | The `run_conversation()` entry point and turn scheduling |
-| `agent/turn_api_request.py` | L1 trimmed | Request assembly |
-| `agent/turn_response_intake.py` | L1 trimmed | Response normalization |
-| `agent/turn_tool_round.py` | L1 trimmed | One round of tool calls |
-| `agent/turn_finalizer.py` | L1 trimmed | Turn wrap-up |
-| `agent/tool_executor.py` | L1 trimmed | Parallel execution of independent tool calls; approval gate, middleware, checkpoints and heartbeats removed |
-| `tools/registry.py` | L1 trimmed | Keeps the `ToolEntry` shape and `register()`; plugin scoping, the discovery cache and the `check_fn` cache removed |
-| `tools/time_tools.py` | New | The `get_time` placeholder tool |
-| `model_tools.py` | L1 trimmed | Tool definition collection and dispatch; toolset selection, hooks and bridges removed |
-| `run_agent.py` | L1 trimmed | `AIAgent` with its 14 mixins flattened and `__init__` narrowed to this milestone's parameters |
+| `mertina/agent/transports/base.py` | L0 verbatim | The `ProviderTransport` ABC |
+| `mertina/agent/transports/types.py` | L0 verbatim | `ToolCall` / `Usage` / `NormalizedResponse`, minus the codex/bedrock/anthropic `provider_data` accessors |
+| `mertina/agent/transports/__init__.py` | L1 trimmed | Transport registry, registering `chat_completions` only |
+| `mertina/agent/transports/chat_completions.py` | L1 trimmed | Keeps sanitize → build_kwargs → normalize_response; vendor-specific special cases removed |
+| `mertina/agent/client_lifecycle.py` | L1 trimmed | Construction and teardown of the single OpenAI client. Upstream puts construction in L2's `agent_runtime_helpers.py` because it handles MoA facades, native Gemini clients, provider profiles and SSL/proxy validation — none of which we have — so it merges into this file, recorded as a deviation |
+| `mertina/agent/iteration_budget.py` | L0 verbatim | `normalize_budget_warning_ratio` dropped |
+| `mertina/agent/conversation_loop.py` | L1 trimmed | The `run_conversation()` entry point and turn scheduling |
+| `mertina/agent/turn_api_request.py` | L1 trimmed | Request assembly |
+| `mertina/agent/turn_response_intake.py` | L1 trimmed | Response normalization |
+| `mertina/agent/turn_tool_round.py` | L1 trimmed | One round of tool calls |
+| `mertina/agent/turn_finalizer.py` | L1 trimmed | Turn wrap-up |
+| `mertina/agent/tool_executor.py` | L1 trimmed | Parallel execution of independent tool calls; approval gate, middleware, checkpoints and heartbeats removed |
+| `mertina/tools/registry.py` | L1 trimmed | Keeps the `ToolEntry` shape and `register()`; plugin scoping, the discovery cache and the `check_fn` cache removed |
+| `mertina/tools/time_tools.py` | New | The `get_time` placeholder tool |
+| `mertina/model_tools.py` | L1 trimmed | Tool definition collection and dispatch; toolset selection, hooks and bridges removed |
+| `mertina/run_agent.py` | L1 trimmed | `AIAgent` with its 14 mixins flattened and `__init__` narrowed to this milestone's parameters |
 
 ### 7.2 Data flow
 
@@ -249,5 +312,5 @@ When v0.1.2 lands, all three of the Roadmap's v0.1 "Done when" items are satisfi
 ## 9. Open questions
 
 - **How deep the L2 replacements go**: error classification, redaction and logging get minimal implementations in v0.1.0. Whether to revisit Hermes's counterparts is a P1 question.
-- **The risk of the `agent` / `tools` top-level names**: in a virtualenv they could in principle collide with a third-party package of the same name. Hermes has lived with this risk. If a collision ever happens, the fallback is to add the `src/mertina_agent/` prefix (D4's alternative), at the cost of a permanent difference from upstream on every import line.
+- **Whether `mertina/` needs more internal structure**: v0.1 has only the `agent/` and `tools/` subpackages, which is small. Revisit once the gateway, state and cron arrive.
 - **No mechanism for tracking upstream**: the development guidelines record the upstream SHA, but nothing yet detects that an already-ported file changed upstream. A `scripts/diff-hermes.sh` is the candidate; it will be assessed after v0.1.2.

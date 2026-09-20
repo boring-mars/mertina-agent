@@ -77,7 +77,7 @@ Key decisions:
 
 ```
 mertina-agent/
-├── src/mertina_agent/
+├── mertina/          # the one import package
 │   ├── agent/        # agent loop, transports, prompt builder
 │   ├── tools/        # tool registry and built-in tools
 │   ├── gateway/      # gateway process, API server, cron ticker

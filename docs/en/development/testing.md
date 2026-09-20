@@ -11,7 +11,7 @@ uv run pytest                          # all tests
 uv run pytest tests/storage            # one directory
 uv run pytest -k session               # tests whose name matches "session"
 uv run pytest -x --lf                  # stop at first failure, rerun last failures
-uv run pytest --cov=mertina_agent      # with coverage report
+uv run pytest --cov=mertina            # with coverage report
 ```
 
 ## Layout
@@ -26,7 +26,7 @@ tests/
     └── ...
 ```
 
-- The structure of `tests/unit/` mirrors `src/mertina_agent/`
+- The structure of `tests/unit/` mirrors `mertina/`
 - Files are named `test_<module>.py`, and functions `test_<behavior>`, for example
   `test_load_session_raises_when_missing`
 
