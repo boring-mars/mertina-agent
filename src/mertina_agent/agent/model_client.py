@@ -8,7 +8,7 @@ and docs/sources/hermes-model-transport.md for the pinned source and reductions.
 from collections.abc import Sequence
 from json import JSONDecodeError
 from types import TracebackType
-from typing import Self
+from typing import Protocol, Self
 
 import openai
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient, Omit
@@ -20,6 +20,27 @@ from mertina_agent.config import Settings
 from mertina_agent.exceptions import ConfigurationError, ModelRequestError, ModelResponseError
 
 _NO_AUTH_KEY = "mertina-no-auth-placeholder"
+
+
+class ModelClientProtocol(Protocol):
+    """The model-call boundary the agent loop depends on.
+
+    :class:`ModelClient` implements it against a real endpoint; tests supply a
+    scripted fake at this boundary instead of patching the SDK.
+    """
+
+    async def complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        tools: Sequence[ToolDefinition] = (),
+    ) -> NormalizedResponse:
+        """Send one request and return its normalized result without executing tools."""
+        ...
+
+    async def aclose(self) -> None:
+        """Release resources the client owns."""
+        ...
 
 
 class ModelClient:

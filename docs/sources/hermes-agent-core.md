@@ -108,6 +108,23 @@
 | untrusted 包装覆盖 `web_extract`、`browser_*`、`mcp_*` | 只覆盖 `web_search` | v0.1 仅有该外部内容工具 |
 | 中断在每个工具前后各检查一次，第二次使用“User sent a new message”文案 | 只在每个工具前检查，统一使用取消文案 | Mertina 的中断只表示停止，没有 steer/redirect |
 
+### CP2：最小 ReAct 循环
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 混合批中未知工具的错误结果先于已执行工具的结果追加 | 所有结果按模型调用顺序写回 | 历史不变量：结果顺序与调用顺序一致 |
+| `_close_durable_failed_turn` 只关闭以 `user` 结尾的失败轮次 | 同时关闭以 `tool` 结尾的失败轮次（工具轮次后模型请求失败） | 任何返回的历史都不以 tool 结尾，可直接进入下一轮 |
+| 模型请求失败进入重试、凭据轮换与 fallback | CP2 直接以 `model_request_failed` 结束本轮；CP4 加入重试 | 检查点分步交付，失败语义与后续重试兼容 |
+| `length` 截断进入续写，最多 3 次 | 截断文本作为 partial 答复保留；截断的工具调用拒绝执行且不写入历史 | 续写属于 P1；截断参数绝不执行与 Hermes 一致 |
+| `content_filter` 先尝试 fallback provider，文案带 provider 名称 | 直接以 failed 结束，文案不带 provider 名称 | v0.1 只有一个端点，无 provider 概念 |
+| system prompt 从 agent 对象读取配置，含 Provider/Platform/Session 行，`system_message` 每轮传入但只在首轮生效 | 显式参数、时钟注入；只含 Model 行；`system_message` 为构造参数 | 语义相同（只构建一次）且更清楚；可测试 |
+| 空工具名有单独的简短错误文案 | 删除该分支 | 第二阶段 `ToolCall` 契约已拒绝空名称，属不可达代码 |
+| summary 调用不计入 `api_calls` | 计入 | 结果中如实反映实际请求数 |
+| 调用方历史只做列表浅拷贝 | 逐条结构化克隆 | 保证调用方历史及其字典绝不被修改 |
+| `_invalid_tool_retries` / `_invalid_json_retries` 挂在 agent 上跨轮存在 | 挂在每轮状态上 | 计数不应泄漏到下一轮 |
+| 同一 agent 实例的并发调用由网关层保证互斥 | `Agent` 拒绝重入并抛 `AgentBusyError` | 中断信号与缓存属于实例，并发会互相干扰 |
+| 结果 dict 在多个模块中拼装 | `ConversationResult` TypedDict 与构造函数集中在 `agent/turn_result.py` | 类型化；phase 模块无需导入循环模块 |
+
 ## 异步改写
 
 | Hermes 机制 | Mertina 机制 | 保持的语义 |

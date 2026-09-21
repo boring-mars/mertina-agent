@@ -19,6 +19,12 @@ import time
 from collections.abc import Collection, Sequence
 from typing import cast
 
+from mertina_agent.agent.events import (
+    EventCallback,
+    ToolCallFinished,
+    ToolCallStarted,
+    emit_event,
+)
 from mertina_agent.agent.interrupt import is_interrupted
 from mertina_agent.agent.transports.types import (
     ChatMessage,
@@ -71,6 +77,26 @@ def _parse_tool_arguments(raw_arguments: str) -> tuple[JsonObject, str | None]:
     if isinstance(arguments, dict):
         return cast(JsonObject, arguments), None
     return {}, _INVALID_ARGUMENTS_RESULT
+
+
+def _detect_tool_failure(result: str) -> bool:
+    """Return whether a tool result reports a failure.
+
+    Copied from the generic branch of Hermes ``agent/display.py``
+    ``_detect_tool_failure``; the terminal, memory and guardrail branches are
+    left out with their tools.
+    """
+    try:
+        data: object = json.loads(result)
+    except (ValueError, RecursionError):
+        data = None
+    if isinstance(data, dict):
+        failed = data.get("success") is False
+        error = data.get("error") or data.get("message")
+        if error and (failed or "error" in data):
+            return True
+    head = result[:500].lower()
+    return '"error"' in head or '"failed"' in head or result.startswith("Error")
 
 
 def _neutralize_delimiters(content: str) -> str:
@@ -131,6 +157,7 @@ async def execute_tool_calls_sequential(
     *,
     enabled_tools: Collection[str] | None = None,
     tool_registry: ToolRegistry = registry,
+    event_callback: EventCallback | None = None,
 ) -> None:
     """Run tool calls one at a time and append one result per call to ``messages``.
 
@@ -145,6 +172,7 @@ async def execute_tool_calls_sequential(
         messages: Working history; results are appended in call order.
         enabled_tools: Names offered to the model this turn, or ``None`` for all.
         tool_registry: Registry that owns the handlers.
+        event_callback: Receives a start and a finish event for each executed call.
     """
     for index, tool_call in enumerate(tool_calls):
         if is_interrupted():
@@ -160,6 +188,7 @@ async def execute_tool_calls_sequential(
             messages.append(make_tool_result_message(tool_call.name, parse_error, tool_call.id))
             continue
 
+        emit_event(event_callback, ToolCallStarted(call_id=tool_call.id, name=tool_call.name))
         started = time.monotonic()
         result = await handle_function_call(
             tool_call.name,
@@ -167,10 +196,19 @@ async def execute_tool_calls_sequential(
             enabled_tools=enabled_tools,
             tool_registry=tool_registry,
         )
+        duration_s = time.monotonic() - started
+        is_error = _detect_tool_failure(result)
         logger.info(
-            "Tool %s completed (%.2fs, %d chars)",
+            "Tool %s %s (%.2fs, %d chars)",
             tool_call.name,
-            time.monotonic() - started,
+            "failed" if is_error else "completed",
+            duration_s,
             len(result),
+        )
+        emit_event(
+            event_callback,
+            ToolCallFinished(
+                call_id=tool_call.id, name=tool_call.name, duration_s=duration_s, is_error=is_error
+            ),
         )
         messages.append(make_tool_result_message(tool_call.name, result, tool_call.id))

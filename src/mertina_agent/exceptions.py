@@ -15,6 +15,10 @@ class ConfigurationError(MertinaError):
     """Raised when configuration is missing, malformed or out of range."""
 
 
+class AgentBusyError(MertinaError):
+    """Raised when an agent is asked to run a turn while it is already running one."""
+
+
 class ToolRegistrationError(MertinaError):
     """Raised when a tool declaration is invalid or would shadow another toolset."""
 
