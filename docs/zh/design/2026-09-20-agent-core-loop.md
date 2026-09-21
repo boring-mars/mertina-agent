@@ -39,22 +39,22 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 
 ### 1.2 为什么核心循环不能整文件照抄
 
-- `AIAgent`（`run_agent.py`，1,592 行）由 14 个 mixin 拼装，`__init__` 约 70 个参数，实体逻辑转发给 `agent/agent_init.py`（2,406 行）。`agent_init` 在模块级不可达，只在 `__init__` 里延迟 import——拷了 `run_agent.py` 能 import 成功，但实例化即失败。
+- `AIAgent`（`run_agent.py`，1,609 行）由 14 个 mixin 拼装，`__init__` 约 70 个参数，实体逻辑转发给 `agent/agent_init.py`（2,466 行）。`agent_init` 在模块级不可达，只在 `__init__` 里延迟 import——拷了 `run_agent.py` 能 import 成功，但实例化即失败。
 - `agent/conversation_loop.py`（1,745 行）本身是调度壳，真正的逻辑在 15 个 `agent/turn_*.py`（5,444 行）里。
 - 对 9 个主文件做函数粒度实测（函数体内出现本里程碑范围外的特性即整函数判为可删），保留率 45%：
 
 | 文件 | 总行 | 函数数 | 范围外函数 | 第一刀后剩 |
 |---|---:|---:|---:|---:|
-| `run_agent.py` | 1,592 | 88 | 54 | 708 |
+| `run_agent.py` | 1,609 | 88 | 54 | 708 |
 | `agent/conversation_loop.py` | 1,745 | 58 | 45 | 594 |
-| `agent/tool_executor.py` | 1,849 | 80 | 51 | 550 |
+| `agent/tool_executor.py` | 1,856 | 80 | 51 | 550 |
 | `agent/prompt_builder.py` | 1,767 | 65 | 17 | 1,438 |
-| `tools/registry.py` | 1,007 | 70 | 21 | 558 |
+| `tools/registry.py` | 1,012 | 70 | 21 | 558 |
 | `model_tools.py` | 987 | 48 | 30 | 343 |
 | `agent/system_prompt.py` | 817 | 41 | 26 | 305 |
-| `agent/transports/chat_completions.py` | 672 | 32 | 23 | 178 |
-| `tools/web_tools.py` | 549 | 24 | 12 | 279 |
-| **合计** | **10,985** | | | **4,953（45%）** |
+| `agent/transports/chat_completions.py` | 692 | 32 | 23 | 178 |
+| `tools/web_tools.py` | 569 | 24 | 12 | 279 |
+| **合计** | **11,054** | | | **4,953（45%）** |
 
 第一刀之后还有级联删除（留下的代码大量调用已删函数）、摊平 mixin、瘦身提示词文本三笔要扣，预计 v0.1 最终产物 **2,000–3,000 行**。
 

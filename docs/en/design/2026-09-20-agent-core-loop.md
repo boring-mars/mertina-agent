@@ -39,22 +39,22 @@ So the copy boundary can be cut. There is no "we must copy 568k lines".
 
 ### 1.2 Why the core loop cannot be copied file by file
 
-- `AIAgent` (`run_agent.py`, 1,592 lines) is assembled from 14 mixins. Its `__init__` takes about 70 parameters and forwards the real work to `agent/agent_init.py` (2,406 lines). `agent_init` is unreachable at module level and is imported lazily inside `__init__`, so copying `run_agent.py` yields a module that imports successfully and fails on instantiation.
+- `AIAgent` (`run_agent.py`, 1,609 lines) is assembled from 14 mixins. Its `__init__` takes about 70 parameters and forwards the real work to `agent/agent_init.py` (2,466 lines). `agent_init` is unreachable at module level and is imported lazily inside `__init__`, so copying `run_agent.py` yields a module that imports successfully and fails on instantiation.
 - `agent/conversation_loop.py` (1,745 lines) is a coordinator. The actual logic lives in 15 `agent/turn_*.py` modules (5,444 lines).
 - A function-granularity measurement over the 9 main files (a whole function counts as removable when its body mentions any feature outside this milestone) gives a 45% survival rate:
 
 | File | Lines | Functions | Out of scope | After first pass |
 |---|---:|---:|---:|---:|
-| `run_agent.py` | 1,592 | 88 | 54 | 708 |
+| `run_agent.py` | 1,609 | 88 | 54 | 708 |
 | `agent/conversation_loop.py` | 1,745 | 58 | 45 | 594 |
-| `agent/tool_executor.py` | 1,849 | 80 | 51 | 550 |
+| `agent/tool_executor.py` | 1,856 | 80 | 51 | 550 |
 | `agent/prompt_builder.py` | 1,767 | 65 | 17 | 1,438 |
-| `tools/registry.py` | 1,007 | 70 | 21 | 558 |
+| `tools/registry.py` | 1,012 | 70 | 21 | 558 |
 | `model_tools.py` | 987 | 48 | 30 | 343 |
 | `agent/system_prompt.py` | 817 | 41 | 26 | 305 |
-| `agent/transports/chat_completions.py` | 672 | 32 | 23 | 178 |
-| `tools/web_tools.py` | 549 | 24 | 12 | 279 |
-| **Total** | **10,985** | | | **4,953 (45%)** |
+| `agent/transports/chat_completions.py` | 692 | 32 | 23 | 178 |
+| `tools/web_tools.py` | 569 | 24 | 12 | 279 |
+| **Total** | **11,054** | | | **4,953 (45%)** |
 
 Three further reductions follow the first pass: cascading deletion (the surviving code calls plenty of removed functions), flattening the mixins, and slimming the prompt text. The expected v0.1 result is **2,000–3,000 lines**.
 

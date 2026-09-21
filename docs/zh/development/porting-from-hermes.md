@@ -12,7 +12,7 @@ Mertina Agent 是 Nous Research 的 [Hermes Agent](https://github.com/NousResear
 |---|---|
 | 仓库 | https://github.com/NousResearch/hermes-agent |
 | 许可 | MIT |
-| 已移植至 | `ec015c906c8758a17e1535810a45500dabd0e038`（2026-09-19） |
+| 已移植至 | `fbc4ea8b96c784c9bb28dd27541c14514bba302d`（2026-09-20） |
 
 「已移植至」指当前代码读取自哪个上游 commit。每次从更新的 commit 移植代码后，更新这一行。
 
@@ -52,7 +52,7 @@ Mertina Agent 是 Nous Research 的 [Hermes Agent](https://github.com/NousResear
 Hermes 仓库根有 28 个 `hermes_state_*.py`，`agent/` 一个平铺目录下有 31 个 `turn_*.py`。
 这是就地拆分文件的产物，那个共同前缀是一个从未被创建出来的目录。
 
-我们不复制这些拆分痕迹。移植 `hermes_state.py` 得到一个 `mertina_state.py`；
+我们不复制这些拆分痕迹。移植 `hermes_state.py` 得到一个 `mertina/state.py`；
 将来确实需要拆分，就拆成 `state/` 包，并在下面记录这条偏离。
 
 ## 偏离记录

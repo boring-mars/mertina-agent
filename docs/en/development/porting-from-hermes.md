@@ -13,7 +13,7 @@ take from upstream and the rules for taking it. For the reasoning behind the rul
 |---|---|
 | Repository | https://github.com/NousResearch/hermes-agent |
 | License | MIT |
-| Ported up to | `ec015c906c8758a17e1535810a45500dabd0e038` (2026-09-19) |
+| Ported up to | `fbc4ea8b96c784c9bb28dd27541c14514bba302d` (2026-09-20) |
 
 "Ported up to" is the upstream commit our current code was read from. Update it whenever a port
 brings code across from a newer commit.
@@ -62,7 +62,7 @@ Hermes has 28 `hermes_state_*.py` files at its repository root and 31 `agent/tur
 flat directory. These are the result of splitting a file in place; the shared prefix is a directory
 that was never created.
 
-We do not replicate those split marks. Porting `hermes_state.py` yields one `mertina_state.py`.
+We do not replicate those split marks. Porting `hermes_state.py` yields one `mertina/state.py`.
 If it later needs splitting, it becomes a `state/` package, and the deviation is recorded below.
 
 ## Deviations
