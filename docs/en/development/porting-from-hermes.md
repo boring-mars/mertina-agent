@@ -115,6 +115,8 @@ Every rewrite in a cut commit (a line `port_check --cut-from` reports as `rewrit
 | `chat_completions.build_kwargs`: the result goes through `_finish_kwargs`, which adds `prompt_cache_key` | `return api_kwargs` directly | Prompt-cache routing needs the Codex transport |
 | `chat_completions.normalize_response`: `finish_reason` is folded by `normalize_finish_reason` (integer and upper-case values) | `_fr = ...` kept as is; the next line becomes `finish_reason = _fr or "stop"` | **Behavior change.** The folding targets Poolside and some Gemini gateways; keeping it means porting `message_sanitization` |
 | `chat_completions.validate_response`: ends with `return not is_router_timeout_shim(response)` | `return True` | **Behavior change:** a router's fake success (HTTP 200 carrying a timeout message) is no longer recognized. Keeping it keeps four more definitions |
+| `registry.ToolRegistry.register`: `target = self._slot(scope, create=True)` picks the table by profile scope | `target = self._tools` | Plugin and profile scopes are outside v0.1, so every tool registers in the global table |
+| `model_tools._compute_tool_definitions`: `tools_to_include = _select_tool_names(enabled_toolsets, disabled_toolsets, quiet_mode)` selects by toolset | `tools_to_include = set(registry.get_all_tool_names())` | **Behavior change:** toolsets are no longer enabled or disabled; every registered tool goes to the model. Toolset selection needs the static tables in `toolsets.py`, and v0.1 has one tool, `get_time` |
 
 ## Comparing against upstream
 

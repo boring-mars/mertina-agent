@@ -102,6 +102,8 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 | `chat_completions.build_kwargs`：末尾经 `_finish_kwargs` 计算 `prompt_cache_key` 后返回 | 直接 `return api_kwargs` | prompt 缓存路由依赖 Codex transport |
 | `chat_completions.normalize_response`：`finish_reason` 经 `normalize_finish_reason` 折叠整数和大写取值 | 原样保留 `_fr = ...`，下一行改为 `finish_reason = _fr or "stop"` | **行为改变。** 折叠针对 Poolside 和部分 Gemini 网关；保留它还要搬 `message_sanitization` |
 | `chat_completions.validate_response`：最后 `return not is_router_timeout_shim(response)` | `return True` | **行为改变：** 不再识别「HTTP 200 + 超时提示」的路由器伪装响应。保留它要多留 4 个定义 |
+| `registry.ToolRegistry.register`：`target = self._slot(scope, create=True)`，按 profile 作用域选注册表 | `target = self._tools` | 插件和 profile 作用域不在 v0.1 内，所有工具都注册到全局表 |
+| `model_tools._compute_tool_definitions`：`tools_to_include = _select_tool_names(enabled_toolsets, disabled_toolsets, quiet_mode)`，按 toolset 选择 | `tools_to_include = set(registry.get_all_tool_names())` | **行为改变：** 不再按 toolset 启用或禁用，所有已注册工具都发给模型。toolset 选择依赖 `toolsets.py` 的静态表，v0.1 只有 `get_time` 一个工具 |
 
 ## 与上游对照
 
