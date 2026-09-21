@@ -53,7 +53,7 @@ No correspondence is invented.
 "Copied verbatim" means **verbatim in substance**: behavior and structure are unchanged, and the form
 follows this repository's standards. Only four kinds of change are allowed:
 
-1. Rewriting import roots by rule 1: `from agent.` → `from mertina.agent.`, `hermes_cli` → `mertina.cli`, `import hermes_bootstrap` → `from mertina import bootstrap`. **Module paths inside strings count too**, such as `_forward("agent.agent_runtime_helpers", ...)` and `importlib.import_module(f"agent.transports.{name}")`
+1. Rewriting import roots by rule 1: `from agent.` → `from mertina.agent.`, `hermes_cli` → `mertina.cli`, `import hermes_bootstrap` → `from mertina import bootstrap`. **Module paths inside strings count too**, such as `_forward("agent.agent_runtime_helpers", ...)`, `importlib.import_module(f"agent.transports.{name}")` and `logging.getLogger("run_agent")`
 2. The mechanical rewrites of `ruff check --fix` and `ruff format` (`Dict` → `dict`, re-wrapping, ...)
 3. Completing type hints so mypy strict passes (such as `**kwargs` → `**kwargs: Any`), and wrapping
    over-long docstrings and comments without changing their wording
@@ -61,6 +61,10 @@ follows this repository's standards. Only four kinds of change are allowed:
 
 Cutting features that are out of scope is not part of the copy. It goes in a separate commit right
 after it, so that commit's diff shows only what was removed.
+
+A cut commit mostly deletes: whole lines, whole blocks, or the part of a line that belongs to an out-of-scope feature (an inline cut), with the rest left as it was. A few rewrites for the sake of a smaller file are allowed, such as reading a value directly instead of through a removed helper, but **each rewrite has a row in the deviations table below**. Before committing, run `uv run python scripts/port_check.py --cut-from <port commit>`. It sorts what the cut did not keep whole into `prose` (comments and docstrings), `inline` (inline cuts) and `rewrite`. The first two need no record; apart from changes 3 and 4, every `rewrite` must be in the deviations table.
+
+Docstrings and comments are prose: no import rewriting, and after a cut they may be rewritten to match the code, which is not a departure. When code is deleted, a comment that only describes that code goes with it.
 
 Every ported file opens with two lines naming its source:
 
@@ -102,14 +106,15 @@ For example, `agent/agent_runtime_helpers.py` holds only `_ra()` and `create_ope
 
 ## Deviations
 
-Places where Mertina's structure or behavior departs from upstream, so the departure is not mistaken for drift. Cutting out-of-scope features is not a departure; the cut commits show those.
+Every rewrite in a cut commit (a line `port_check --cut-from` reports as `rewrite`) is recorded here so it is not mistaken for drift. Plain deletions, inline cuts, rewritten comments and docstrings, and rule 2's changes 1 to 4 are not recorded here.
 
 | Upstream | Mertina | Why |
 |---|---|---|
-| `chat_completions.py`: `reasoning_details` is replayed to OpenRouter and Nous only | Always stripped on the wire; responses still parse it and history keeps it | Replaying per route is a provider special case. The cost is that OpenRouter's reasoning does not carry across turns |
-| `chat_completions.py`: integer and upper-case `finish_reason` values are folded | Used as is, with `"stop"` when missing | The folding targets Poolside and some Gemini gateways, a provider special case |
-| `chat_completions.py`: `_STRIP_MSG_KEYS` has 9 keys | The 5 persistence keys stay; the 4 codex, anthropic and bedrock keys go | Those 4 only appear after a mid-session switch from their transports; whether the loop writes the persistence keys is settled in step 6 |
-| `client_lifecycle.py`: `_is_openai_client_closed` treats `unittest.mock.Mock` as open | The special case is gone | Upstream put it in production code for its own tests |
+| `chat_completions._apply_max_tokens`: tries `ephemeral_max_output_tokens`, then `max_tokens` | `max_tokens` only: `candidate = params.get("max_tokens")` | `ephemeral_max_output_tokens` budgets upstream's internal tasks (titles, recovery), which v0.1 does not have |
+| `chat_completions.convert_messages`: `reasoning_details` is replayed only to OpenRouter and Nous routes and to profiles that declare a native type | Always stripped on the wire: `strip_reasoning_details = True`; responses still parse it and history keeps it | **Behavior change.** Replaying per route is a provider special case, and keeping it means porting `utils.base_url_host_matches`. The cost is that OpenRouter's reasoning does not carry across turns |
+| `chat_completions.build_kwargs`: the result goes through `_finish_kwargs`, which adds `prompt_cache_key` | `return api_kwargs` directly | Prompt-cache routing needs the Codex transport |
+| `chat_completions.normalize_response`: `finish_reason` is folded by `normalize_finish_reason` (integer and upper-case values) | `_fr = ...` kept as is; the next line becomes `finish_reason = _fr or "stop"` | **Behavior change.** The folding targets Poolside and some Gemini gateways; keeping it means porting `message_sanitization` |
+| `chat_completions.validate_response`: ends with `return not is_router_timeout_shim(response)` | `return True` | **Behavior change:** a router's fake success (HTTP 200 carrying a timeout message) is no longer recognized. Keeping it keeps four more definitions |
 
 ## Comparing against upstream
 
@@ -121,8 +126,10 @@ uv run python scripts/port_check.py
 
 It reads each upstream file at the SHA its ported file's header records (`git show <sha>:<path>`, so the checkout's branch does not matter), applies changes 1 and 2 of rule 2, and compares line by line:
 
-- It lists every line that is not in upstream. Cuts leave none, so each one should trace back to the provenance header, changes 3 and 4, or a rewrite a cut forced
+- It lists every line that is not in upstream. Cuts leave none, so each one should trace back to the provenance header, changes 3 and 4, or a row of the deviations table
 - It fails, with a non-zero exit status, when kept definitions are out of upstream order, when an import root was not rewritten (module paths inside strings included), or when a package `__init__.py` was not ported
+
+With `--cut-from <port commit>` it also lists what the cut did not keep whole, sorted into `prose`, `inline` and `rewrite` (see rule 2).
 
 Remember that our copy is deliberately smaller: features outside the current milestone were removed
 on purpose, and a large diff is the expected result, not a problem to fix.

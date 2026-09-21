@@ -161,8 +161,9 @@ class ChatCompletionsTransport(ProviderTransport):
         Returns the input list unchanged when nothing needs sanitizing.
         """
         strip_extra_content = not _model_consumes_thought_signature(kwargs.get("model"))
+        strip_reasoning_details = True
         sanitized_pairs = [
-            (m, _sanitize_message(m, strip_extra_content, strip_reasoning_details=True))
+            (m, _sanitize_message(m, strip_extra_content, strip_reasoning_details))
             for m in messages
         ]
         if all(s is None for _, s in sanitized_pairs):
@@ -194,7 +195,8 @@ class ChatCompletionsTransport(ProviderTransport):
         """
         choice = response.choices[0]
         msg: Any = getattr(choice, "message", None)
-        finish_reason = getattr(choice, "finish_reason", None) or "stop"
+        _fr = getattr(choice, "finish_reason", None)
+        finish_reason = _fr or "stop"
 
         tool_calls = None
         if getattr(msg, "tool_calls", None):

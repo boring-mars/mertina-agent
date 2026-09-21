@@ -45,12 +45,16 @@ Mertina Agent 是 Nous Research 的 [Hermes Agent](https://github.com/NousResear
 
 「逐字拷贝」指**语义逐字**：行为和结构不变，形式服从本仓库的规范。允许的改动只有四类：
 
-1. 按规则 1 改写 import 根：`from agent.` → `from mertina.agent.`，`hermes_cli` → `mertina.cli`，`import hermes_bootstrap` → `from mertina import bootstrap`。**写在字符串里的模块路径也算**，例如 `_forward("agent.agent_runtime_helpers", ...)`、`importlib.import_module(f"agent.transports.{name}")`
+1. 按规则 1 改写 import 根：`from agent.` → `from mertina.agent.`，`hermes_cli` → `mertina.cli`，`import hermes_bootstrap` → `from mertina import bootstrap`。**写在字符串里的模块路径也算**，例如 `_forward("agent.agent_runtime_helpers", ...)`、`importlib.import_module(f"agent.transports.{name}")`、`logging.getLogger("run_agent")`
 2. `ruff check --fix` 和 `ruff format` 的机械改写（`Dict` → `dict`、重新换行等）
 3. 为通过 mypy strict 补全类型标注（如 `**kwargs` → `**kwargs: Any`），以及把超长的 docstring 和注释折行，措辞不变
 4. 为保留上游写法而加的 `# noqa` 或 `# type: ignore`，同一行写明原因（例如保留上游的参数名 `id`，或上游把两个签名不同的函数绑在同一个名字上）
 
 删减范围外的功能不属于拷贝：它放在紧随其后的单独 commit 里，让那次 diff 只包含被删掉的东西。
+
+删减 commit 以删除为主：删掉整行、整块，或一行中属于范围外功能的那一段（行内删减），剩下的原样保留。为了精简，允许少量改写，例如把依赖已删功能的表达式换成直接取值；**每一处改写都要在下面的偏离记录里有一行**。提交前运行 `uv run python scripts/port_check.py --cut-from <逐字搬运 commit>`，它把删减后不是整行保留的内容分成三类：`prose`（注释和 docstring）、`inline`（行内删减）、`rewrite`（改写）。前两类不用登记；除去第 3、4 类改动，每一条 `rewrite` 都必须能在偏离记录里找到。
+
+docstring 和注释是文字说明：不做 import 改写；删减之后可以按实际代码改写，让描述和代码一致，不算偏离。删掉一段代码时，只描述这段代码的注释随它一起删掉。
 
 每个移植文件开头用两行注明来源：
 
@@ -89,14 +93,15 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 
 ## 偏离记录
 
-Mertina 的结构或行为与上游不同的地方，记录下来以免被误认为是无意的漂移。单纯删掉范围外的功能不算偏离，那些在删减 commit 里可以看到。
+删减 commit 里的每一处改写（`port_check --cut-from` 报为 `rewrite` 的行）记录在这里，以免被误认为是无意的漂移。单纯删除、行内删减、注释和 docstring 的改写，以及规则 2 的第 1–4 类改动都不在这里记录。
 
 | 上游 | Mertina | 原因 |
 |---|---|---|
-| `chat_completions.py`：`reasoning_details` 只回传给 OpenRouter 和 Nous | 发送时一律剥掉；响应照常解析，历史照常保存 | 按路由回传属于 provider 特判。代价是 OpenRouter 的推理链路在多轮之间不连续 |
-| `chat_completions.py`：把整数和大写的 `finish_reason` 归一化 | 原样使用，为空时补 `"stop"` | 归一化针对 Poolside 和部分 Gemini 网关，属于 provider 特判 |
-| `chat_completions.py`：`_STRIP_MSG_KEYS` 有 9 个键 | 保留 5 个持久化用的键，删掉 codex / anthropic / bedrock 的 4 个 | 那 4 个只在会话中途从对应 transport 切换过来时出现；持久化键要等步骤 6 确认循环是否写入 |
-| `client_lifecycle.py`：`_is_openai_client_closed` 把 `unittest.mock.Mock` 视为未关闭 | 去掉这个特例 | 这是上游为自己的测试写进生产代码的 |
+| `chat_completions._apply_max_tokens`：依次尝试 `ephemeral_max_output_tokens` 和 `max_tokens` | 只取 `max_tokens`：`candidate = params.get("max_tokens")` | `ephemeral_max_output_tokens` 是上游内部任务（标题生成、恢复）的预算，v0.1 没有这些任务 |
+| `chat_completions.convert_messages`：`reasoning_details` 只回传给 OpenRouter / Nous 路由和声明了原生类型的 profile | 发送时一律剥掉：`strip_reasoning_details = True`；响应照常解析，历史照常保存 | **行为改变。** 按路由回传属于 provider 特判，保留它还要搬 `utils.base_url_host_matches`。代价是 OpenRouter 的推理链路不跨轮 |
+| `chat_completions.build_kwargs`：末尾经 `_finish_kwargs` 计算 `prompt_cache_key` 后返回 | 直接 `return api_kwargs` | prompt 缓存路由依赖 Codex transport |
+| `chat_completions.normalize_response`：`finish_reason` 经 `normalize_finish_reason` 折叠整数和大写取值 | 原样保留 `_fr = ...`，下一行改为 `finish_reason = _fr or "stop"` | **行为改变。** 折叠针对 Poolside 和部分 Gemini 网关；保留它还要搬 `message_sanitization` |
+| `chat_completions.validate_response`：最后 `return not is_router_timeout_shim(response)` | `return True` | **行为改变：** 不再识别「HTTP 200 + 超时提示」的路由器伪装响应。保留它要多留 4 个定义 |
 
 ## 与上游对照
 
@@ -108,7 +113,9 @@ uv run python scripts/port_check.py
 
 它按每个移植文件头里记录的 SHA 读取上游文件（`git show <sha>:<path>`，不受检出所在分支影响），先做规则 2 的第 1、2 类改动，再逐行比较：
 
-- 列出所有不在上游里的行。删减不会产生这种行，所以每一行都应能归到来源头、第 3、4 类改动，或删减带来的连带改写
+- 列出所有不在上游里的行。删减不会产生这种行，所以每一行都应能归到来源头、第 3、4 类改动，或偏离记录里的一行
 - 保留下来的定义不按上游顺序、import 根没改写（包括字符串里的模块路径）、包目录的 `__init__.py` 没搬时，报失败并以非零状态退出
+
+加上 `--cut-from <逐字搬运 commit>` 时，它还会把删减后不是整行保留的内容分成 `prose`、`inline`、`rewrite` 三类列出（见规则 2）。
 
 注意我们的副本是刻意更小的：当前里程碑范围外的特性是有意删除的，diff 很大是预期结果，不是要修复的问题。

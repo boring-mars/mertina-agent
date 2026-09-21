@@ -12,7 +12,7 @@ from typing import Any
 from mertina.agent.lazy_forward import forward as _forward
 
 logger = logging.getLogger(
-    "run_agent"
+    "mertina.run_agent"
 )  # origin module's logger name: log records / caplog filters unchanged
 
 
