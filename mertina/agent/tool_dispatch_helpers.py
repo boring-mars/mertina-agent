@@ -1,25 +1,15 @@
 # Ported from hermes-agent agent/tool_dispatch_helpers.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
 # Partial: only the parts ported so far. Upstream order is kept.
-"""Tool-dispatch helpers — parallelism gating, multimodal envelopes, mutation tracking.
+"""Tool-dispatch helpers: the tool-result message constructor with untrusted-content wrapping.
 
-Stateless utilities extracted from ``run_agent.py`` (which re-exports each name): the
-batch-parallelism planner (path-overlap admission; V4A patch scope comes from patch-body
-headers, not a decoy ``path=``), multimodal ``{"_multimodal": True, "content": [...],
-"text_summary": ...}`` envelope helpers, file-mutation verifier inputs, trajectory
-normalisation, and the tool-result message constructor with untrusted-content wrapping.
+Stateless utilities extracted from ``run_agent.py``.
 """
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any
-
-from mertina.agent.message_metadata import stamp_message_timestamp
-from mertina.tools.threat_patterns import scan_for_threats
-
-logger = logging.getLogger(__name__)
 
 
 def _is_text_part(p: Any) -> bool:
@@ -49,22 +39,13 @@ def make_tool_result_message(
     # Elision notice is appended to the RAW content first, THEN wrapped, so it sits inside
     # the untrusted block next to the data it describes — once, at construction (cache-safe).
     wrapped = _maybe_wrap_untrusted(name, _maybe_append_elision_notice(name, content))
-    message = stamp_message_timestamp(
-        {
-            "role": "tool",
-            "name": name,
-            "tool_name": name,
-            "content": wrapped,
-            "tool_call_id": tool_call_id,
-        }
-    )
-    try:
-        risk_metadata = _tool_output_risk_metadata(name, content)
-    except Exception as exc:
-        logger.debug("Tool output risk scan failed for %s: %s", name, exc)
-    else:
-        if risk_metadata is not None:
-            message["_tool_output_risk"] = risk_metadata
+    message = {
+        "role": "tool",
+        "name": name,
+        "tool_name": name,
+        "content": wrapped,
+        "tool_call_id": tool_call_id,
+    }
     if effect_disposition is not None:
         message["effect_disposition"] = effect_disposition
     return message
@@ -132,28 +113,6 @@ def _maybe_append_elision_notice(name: str, content: Any) -> Any:
     if _is_untrusted_tool(name) and _detect_upstream_elision(content):
         return content + _UPSTREAM_ELISION_NOTICE
     return content
-
-
-def _tool_output_risk_metadata(name: str, content: Any) -> dict[str, Any] | None:
-    """Internal-only advisory classification of attacker-controlled output: deterministic
-    finding ids, never blocks or redacts, omits the scanned text."""
-    if not _is_untrusted_tool(name):
-        return None
-    if isinstance(content, str):
-        text_parts = [content]
-    elif isinstance(content, list):
-        text_parts = [item["text"] for item in content if _is_text_item(item)]
-    else:
-        return None
-    if not text_parts:
-        return None
-
-    findings: list[str] = []
-    for text in text_parts:
-        for finding in scan_for_threats(text, scope="context"):
-            if finding not in findings:
-                findings.append(finding)
-    return {"risk": "high" if findings else "low", "findings": findings, "redacted": False}
 
 
 def _neutralize_delimiters(content: str) -> str:
