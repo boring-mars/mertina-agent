@@ -1,0 +1,78 @@
+[project]
+name = "mertina-agent"
+# Maintained by the release tooling. Do not edit by hand in feature PRs.
+version = "0.0.0"
+description = "A tool-using agent loop for OpenAI-compatible models"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+# Hermes caps this at <3.14 because pydantic-core had no cp314 wheel and fell
+# back to a maturin source build. Our only dependency tree resolves
+# pydantic-core 2.46.5, which ships cp314 wheels, so we take no upper bound
+# and CI tests 3.14.
+requires-python = ">=3.11"
+dependencies = [
+    # Direct dependencies are exact-pinned to ==X.Y.Z, following Hermes: a
+    # range lets PyPI ship a fresh version into an install without a review on
+    # our side. An exact pin means a new version reaches a user only through an
+    # intentional bump here plus a regenerated uv.lock. Hermes tightened this
+    # after the Mini Shai-Hulud worm hit mistralai 2.4.6.
+    #
+    # Pinned to the version the ported transport code was read against.
+    "openai==2.24.0",
+]
+
+[dependency-groups]
+# Exact-pinned for the same reason as the runtime dependencies above.
+dev = [
+    "mypy==2.3.1",
+    "pre-commit==4.6.2",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.8",
+]
+
+[tool.uv]
+# The project ships as an application run from a checkout or a Docker image,
+# not as an installable library. See docs/en/development/coding-style.md.
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "C4",   # flake8-comprehensions
+    "PTH",  # flake8-use-pathlib
+    "RUF",  # ruff-specific
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["mertina", "tests"]
+strict = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The project is not installed (package = false), so the checkout root carries the import path.
+pythonpath = ["."]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "integration: talks to real external services; deselect with -m 'not integration'",
+]
+
+[tool.coverage.run]
+source = ["mertina"]

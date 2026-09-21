@@ -135,5 +135,8 @@ def load_session(session_id: str, *, timeout_s: float = 5.0) -> Session:
 - 使用 `uv add <包名>`（运行时依赖）或 `uv add --group dev <包名>`（仅开发依赖）添加，并提交 `uv.lock`
 - 添加依赖前，确认它仍在积极维护、被广泛使用、许可证与 MIT 兼容
 - 为了一个小功能，优先使用标准库或已有的依赖，而不是引入新依赖
-- `pyproject.toml` 中不要锁死具体版本，只声明兼容的最低版本（`httpx>=0.27`），精确版本由 `uv.lock` 锁定
+- `pyproject.toml` 中每个直接依赖都锁死到精确版本（`httpx==0.28.1`），版本的抬升是一次有意的改动。
+  声明区间意味着 PyPI 上的新版本不经我们 review 就能进入用户的安装；`uv.lock` 只堵住了在本仓库里
+  开发的人这一侧，而本项目是从 checkout 运行的（`package = false`），不是到处都带着 lock 文件
+- 每次移动某个 pin，都用 `uv lock` 重新生成 `uv.lock`，保持传递依赖的解析一致
 - 新增依赖的 PR 要在描述中说明原因

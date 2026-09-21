@@ -136,5 +136,9 @@ Code that runs locally, including the CLI, tests and scripts, must work on all t
 - Add with `uv add <package>` (runtime) or `uv add --group dev <package>` (development only), and commit `uv.lock`
 - Before adding a dependency, check that it is actively maintained, widely used, and MIT-compatible in license
 - Prefer the standard library or an existing dependency over adding a new one for a small feature
-- Don't pin exact versions in `pyproject.toml`. Declare a compatible lower bound (`httpx>=0.27`). `uv.lock` pins exact versions
+- Pin every direct dependency to an exact version in `pyproject.toml` (`httpx==0.28.1`), and bump the
+  pin deliberately. A range lets PyPI ship a fresh version into an install without a review on our
+  side; `uv.lock` closes that hole only for people working in this repository, and the project is run
+  from a checkout (`package = false`) rather than from a lock file everywhere
+- Regenerate `uv.lock` with `uv lock` whenever a pin moves, so the transitive resolution stays consistent
 - A PR that adds a dependency explains why in the description
