@@ -11,6 +11,7 @@ import asyncio
 import logging
 import re
 import threading
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,12 +30,12 @@ logger = logging.getLogger(__name__)
 # clients stay bound to a live loop, so their GC cleanup can't hit "Event loop
 # is closed". Main thread shares one loop; worker threads own thread-local loops.
 
-_tool_loop = None  # persistent loop for the main (CLI) thread
+_tool_loop: asyncio.AbstractEventLoop | None = None  # persistent loop for the main (CLI) thread
 _tool_loop_lock = threading.Lock()
 _worker_thread_local = threading.local()  # per-worker-thread persistent loops
 
 
-def _get_tool_loop():
+def _get_tool_loop() -> asyncio.AbstractEventLoop:
     """Long-lived event loop for async tool handlers on the main thread."""
     global _tool_loop
     with _tool_loop_lock:
@@ -43,9 +44,9 @@ def _get_tool_loop():
         return _tool_loop
 
 
-def _get_worker_loop():
+def _get_worker_loop() -> asyncio.AbstractEventLoop:
     """Persistent event loop for the current worker thread (thread-local)."""
-    loop = getattr(_worker_thread_local, "loop", None)
+    loop: asyncio.AbstractEventLoop | None = getattr(_worker_thread_local, "loop", None)
     if loop is None or loop.is_closed():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -53,7 +54,7 @@ def _get_worker_loop():
     return loop
 
 
-def _run_async(coro):
+def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
     """Run a coroutine from sync code; safe under a running loop (gateway/RL env)."""
     try:
         loop = asyncio.get_running_loop()
@@ -68,7 +69,7 @@ def _run_async(coro):
         worker_loop: asyncio.AbstractEventLoop | None = None
         loop_ready = threading.Event()
 
-        def _run_in_worker():
+        def _run_in_worker() -> Any:
             nonlocal worker_loop
             worker_loop = asyncio.new_event_loop()
             loop_ready.set()
@@ -128,7 +129,7 @@ def get_tool_definitions(
     quiet_mode suppresses status prints.
     """
 
-    def compute():
+    def compute() -> list[dict[str, Any]]:
         return _compute_tool_definitions(
             quiet_mode,
         )
@@ -147,7 +148,7 @@ def _compute_tool_definitions(
 
     if not quiet_mode:
         print(
-            f"🛠️  Final tool selection ({len(filtered_tools)} tools): {', '.join(_last_resolved_tool_names)}"
+            f"🛠️  Final tool selection ({len(filtered_tools)} tools): {', '.join(_last_resolved_tool_names)}"  # noqa: E501  # upstream's message
             if filtered_tools
             else "🛠️  No tools selected (all filtered out or unavailable)"
         )
@@ -230,7 +231,7 @@ def handle_function_call(
     browser_snapshot.
     """
     if not isinstance(function_args, dict):
-        function_args = {}
+        function_args = {}  # type: ignore[unreachable]  # models can send non-object arguments
     ids = _CallIds(task_id, session_id, tool_call_id, turn_id, api_request_id)
 
     try:
@@ -240,7 +241,7 @@ def handle_function_call(
             ids,
             user_task=user_task,
         )
-        return result
+        return result  # type: ignore[no-any-return]  # dispatch may return the multimodal dict
 
     except Exception as e:
         error_msg = f"Error executing {function_name}: {e!s}"

@@ -15,6 +15,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -131,24 +132,24 @@ class ToolEntry:
 
     name: str
     toolset: str
-    schema: dict
-    handler: Callable
-    check_fn: Callable | None
-    requires_env: list
+    schema: dict[str, Any]
+    handler: Callable[..., Any]
+    check_fn: Callable[[], Any] | None
+    requires_env: list[str]
     is_async: bool
     description: str
     emoji: str
     max_result_size_chars: int | float | None = None
     # Zero-arg callable whose dict is shallow-merged onto the schema at every get_definitions()
     # — for fields tracking runtime config (delegate_task's description reflects limits).
-    dynamic_schema_overrides: Callable | None = None
+    dynamic_schema_overrides: Callable[[], Any] | None = None
 
 
-def _fn_label(fn: Callable) -> object:
+def _fn_label(fn: Callable[..., Any]) -> object:
     return getattr(fn, "__qualname__", fn)
 
 
-def _run_check_fn_uncached(fn: Callable) -> bool:
+def _run_check_fn_uncached(fn: Callable[[], Any]) -> bool:
     """Run an availability check without cache/grace handling."""
     try:
         return bool(fn())
@@ -161,12 +162,12 @@ def _run_check_fn_uncached(fn: Callable) -> bool:
     return False
 
 
-def _check_fn_cached(fn: Callable) -> bool:
+def _check_fn_cached(fn: Callable[[], Any]) -> bool:
     """Return bool(fn()); the TTL cache is not ported, so every call probes."""
     return _run_check_fn_uncached(fn)
 
 
-def _memo_check(fn: Callable, memo: dict[Callable, bool]) -> bool:
+def _memo_check(fn: Callable[[], Any], memo: dict[Callable[[], Any], bool]) -> bool:
     """Per-pass memo: one probe per distinct check_fn."""
     if fn not in memo:
         memo[fn] = _check_fn_cached(fn)
@@ -176,9 +177,9 @@ def _memo_check(fn: Callable, memo: dict[Callable, bool]) -> bool:
 class ToolRegistry:
     """Singleton registry that collects tool schemas + handlers from tool files."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._tools: dict[str, ToolEntry] = {}  # built-in / process-global registrations
-        self._toolset_checks: dict[str, Callable] = {}
+        self._toolset_checks: dict[str, Callable[[], Any]] = {}
         self._lock = threading.RLock()
         # Bumped on every mutation; get_tool_definitions memoizes against it.
         self._generation: int = 0
@@ -195,7 +196,7 @@ class ToolRegistry:
         """Return the registered tools."""
         return {**self._tools}
 
-    def _snapshot_state(self) -> tuple[list[ToolEntry], dict[str, Callable]]:
+    def _snapshot_state(self) -> tuple[list[ToolEntry], dict[str, Callable[[], Any]]]:
         """Return a coherent snapshot of registry entries and toolset checks."""
         with self._lock:
             entries = list(self._merged_tools().values())
@@ -210,7 +211,7 @@ class ToolRegistry:
         """True when at least one tool in *toolset* would be exposed. Mirrors
         :meth:`get_definitions` per-tool filtering: mixed toolsets must not be gated
         by the first ``check_fn``."""
-        memo: dict[Callable, bool] = {}
+        memo: dict[Callable[[], Any], bool] = {}
         members = (e for e in entries if e.toolset == toolset)
         return any(not e.check_fn or _memo_check(e.check_fn, memo) for e in members)
 
@@ -225,17 +226,17 @@ class ToolRegistry:
         self,
         name: str,
         toolset: str,
-        schema: dict,
-        handler: Callable,
-        check_fn: Callable = None,
-        requires_env: list = None,
+        schema: dict[str, Any],
+        handler: Callable[..., Any],
+        check_fn: Callable[[], Any] | None = None,
+        requires_env: list[str] | None = None,
         is_async: bool = False,
         description: str = "",
         emoji: str = "",
         max_result_size_chars: int | float | None = None,
-        dynamic_schema_overrides: Callable = None,
+        dynamic_schema_overrides: Callable[[], Any] | None = None,
         override: bool = False,
-    ):
+    ) -> None:
         """Register a tool (called at import time by each tool file). ``override=True`` is an
         explicit opt-in for replacing a tool from another toolset; without it, cross-toolset
         shadowing is rejected."""
@@ -294,11 +295,11 @@ class ToolRegistry:
 
     # ---- Schema retrieval --------------------------------------------
 
-    def get_definitions(self, tool_names: set[str], quiet: bool = False) -> list[dict]:
+    def get_definitions(self, tool_names: set[str], quiet: bool = False) -> list[dict[str, Any]]:
         """OpenAI-format schemas for the requested tools whose ``check_fn`` passes (or is
         absent)."""
         result = []
-        check_results: dict[Callable, bool] = {}
+        check_results: dict[Callable[[], Any], bool] = {}
         entries_by_name = {entry.name: entry for entry in self._snapshot_entries()}
         for name in sorted(tool_names):
             entry = entries_by_name.get(name)
@@ -328,7 +329,7 @@ class ToolRegistry:
     # ---- Dispatch ----------------------------------------------------
 
     @staticmethod
-    def _normalize_handler_result(name: str, result):
+    def _normalize_handler_result(name: str, result: Any) -> str | dict[str, Any]:
         """Results must be a string or the multimodal envelope; anything else becomes a
         string error so logging/hooks/budgeting/persistence never receive values they
         cannot slice or size."""
@@ -349,7 +350,7 @@ class ToolRegistry:
             result_type=result_type,
         )
 
-    def dispatch(self, name: str, args: dict, **kwargs) -> str | dict:
+    def dispatch(self, name: str, args: dict[str, Any], **kwargs: Any) -> str | dict[str, Any]:
         """Execute a tool handler by name: async handlers bridged via ``_run_async()``,
         results normalized, every exception returned as ``{"error": ...}``."""
         entry = self.get_entry(name)
@@ -378,14 +379,14 @@ class ToolRegistry:
 
     # ---- Query helpers -----------------------------------------------
 
-    def _attr(self, name: str, attr: str):
+    def _attr(self, name: str, attr: str) -> Any:
         return getattr(self.get_entry(name), attr, None)
 
     def get_all_tool_names(self) -> list[str]:
         return sorted(entry.name for entry in self._snapshot_entries())
 
     def get_toolset_for_tool(self, name: str) -> str | None:
-        return self._attr(name, "toolset")
+        return self._attr(name, "toolset")  # type: ignore[no-any-return]  # upstream reads fields by name
 
     def check_toolset_requirements(self) -> dict[str, bool]:
         entries = self._snapshot_entries()
@@ -403,12 +404,12 @@ registry = ToolRegistry()
 # ``json.dumps({"error": msg}, ensure_ascii=False)`` boilerplate.
 
 
-def tool_error(message, **extra) -> str:
+def tool_error(message: object, **extra: Any) -> str:
     """``'{"error": "<message>", **extra}'`` — the error body is bounded so a raw
     exception can't bloat history across retries."""
     return json.dumps({"error": _bound_error_text(str(message)), **extra}, ensure_ascii=False)
 
 
-def tool_result(data=None, **kwargs) -> str:
+def tool_result(data: Any = None, **kwargs: Any) -> str:
     """JSON-encode a dict positional arg *or* keyword arguments (not both)."""
     return json.dumps(data if data is not None else kwargs, ensure_ascii=False)
