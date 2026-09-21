@@ -39,9 +39,28 @@ Mertina Agent 是 Nous Research 的 [Hermes Agent](https://github.com/NousResear
 
 我们自己写的、上游没有对应物的文件，按自身合适的方式组织，不编造对应关系。
 
-### 2. 保留版权头
+### 2. 语义逐字，并注明来源
 
-逐字拷贝的文件保留原始版权头，这是 MIT 许可的要求。读懂后重写的文件，注明它源自上游的哪个文件。
+「逐字拷贝」指**语义逐字**：行为和结构不变，形式服从本仓库的规范。允许的改动只有四类：
+
+1. 改写 import 根：`from agent.` → `from mertina.agent.`
+2. `ruff check --fix` 和 `ruff format` 的机械改写（`Dict` → `dict`、重新换行等）
+3. 为通过 mypy strict 补全类型标注（如 `**kwargs` → `**kwargs: Any`），以及把超长的 docstring 和注释折行，措辞不变
+4. 为保留上游签名而加的 `# noqa`，同一行写明原因
+
+删减范围外的功能不属于拷贝：它放在紧随其后的单独 commit 里，让那次 diff 只包含被删掉的东西。
+
+每个移植文件开头用两行注明来源：
+
+```python
+# Ported from hermes-agent agent/transports/base.py @ fbc4ea8b96
+# Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
+```
+
+读懂后重写、而不是拷贝的文件，把第一行的 `Ported from` 换成 `Derived from`。
+
+上游的 `.py` 文件本身没有版权头，版权声明只在上游根目录的 `LICENSE` 里。本仓库的 `LICENSE`
+同时列出了 Nous Research 和我们的版权行，满足 MIT 要求的「副本附带版权和许可声明」。
 
 ### 3. 保留抽象，不保留实现
 
@@ -65,13 +84,18 @@ Mertina 的结构与上游不同的地方，记录下来以免被误认为是无
 
 ## 与上游对照
 
-在本仓库旁边放一份 Hermes 检出，已移植的文件可以直接和它的对应文件 diff：
+在本仓库旁边放一份 Hermes 检出，已移植的文件可以和它的对应文件 diff。先把上游文件按规则 2
+的第 1、2 类改动处理一遍，这两类差异就会消失：
 
 ```bash
-diff <(sed 's/^from \(agent\|tools\)\./from mertina.\1./' ../hermes-agent/agent/turn_tool_round.py) \
-     mertina/agent/turn_tool_round.py
+f=agent/turn_tool_round.py
+tmp=$(mktemp --suffix=.py)
+sed 's/^from \(agent\|tools\)\./from mertina.\1./' ../hermes-agent/$f > "$tmp"
+uv run ruff check --config pyproject.toml --fix-only --quiet "$tmp"
+uv run ruff format --config pyproject.toml --quiet "$tmp"
+diff "$tmp" mertina/$f
 ```
 
-`sed` 过滤把上游的 import 根改写成我们的，剩下的差异就只有语义差异了。
+剩下的差异是来源头、第 3、4 类改动，以及被删减的功能。
 
 注意我们的副本是刻意更小的：当前里程碑范围外的特性是有意删除的，diff 很大是预期结果，不是要修复的问题。

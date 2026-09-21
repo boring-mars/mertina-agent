@@ -46,10 +46,32 @@ own path.
 Files we write ourselves, with no upstream counterpart, are organised however suits them.
 No correspondence is invented.
 
-### 2. Keep the copyright header
+### 2. Copy verbatim in substance, and say where it came from
 
-A file copied verbatim keeps its original copyright header, as the MIT License requires. A file
-that was read and rewritten carries a note naming the upstream file it descends from.
+"Copied verbatim" means **verbatim in substance**: behavior and structure are unchanged, and the form
+follows this repository's standards. Only four kinds of change are allowed:
+
+1. Rewriting the import root: `from agent.` → `from mertina.agent.`
+2. The mechanical rewrites of `ruff check --fix` and `ruff format` (`Dict` → `dict`, re-wrapping, ...)
+3. Completing type hints so mypy strict passes (such as `**kwargs` → `**kwargs: Any`), and wrapping
+   over-long docstrings and comments without changing their wording
+4. A `# noqa` that keeps an upstream signature, with the reason on the same line
+
+Cutting features that are out of scope is not part of the copy. It goes in a separate commit right
+after it, so that commit's diff shows only what was removed.
+
+Every ported file opens with two lines naming its source:
+
+```python
+# Ported from hermes-agent agent/transports/base.py @ fbc4ea8b96
+# Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
+```
+
+A file that was read and rewritten rather than copied says `Derived from` instead of `Ported from`.
+
+Upstream's `.py` files carry no copyright header of their own; the notice lives only in upstream's
+root `LICENSE`. This repository's `LICENSE` lists both Nous Research's copyright line and ours, which
+satisfies MIT's requirement that copies include the copyright and permission notice.
 
 ### 3. Keep abstractions, not implementations
 
@@ -75,15 +97,19 @@ Places where Mertina's structure departs from upstream, so the departure is not 
 
 ## Comparing against upstream
 
-With a Hermes checkout alongside this repository, a ported file diffs directly against its twin:
+With a Hermes checkout alongside this repository, a ported file diffs against its twin. Put the
+upstream file through changes 1 and 2 of rule 2 first, and those two kinds of difference disappear:
 
 ```bash
-diff <(sed 's/^from \(agent\|tools\)\./from mertina.\1./' ../hermes-agent/agent/turn_tool_round.py) \
-     mertina/agent/turn_tool_round.py
+f=agent/turn_tool_round.py
+tmp=$(mktemp --suffix=.py)
+sed 's/^from \(agent\|tools\)\./from mertina.\1./' ../hermes-agent/$f > "$tmp"
+uv run ruff check --config pyproject.toml --fix-only --quiet "$tmp"
+uv run ruff format --config pyproject.toml --quiet "$tmp"
+diff "$tmp" mertina/$f
 ```
 
-The `sed` filter rewrites upstream's import roots to ours, so the only differences left are
-semantic ones.
+What remains is the provenance header, changes 3 and 4, and the features that were cut.
 
 Remember that our copy is deliberately smaller: features outside the current milestone were removed
 on purpose, and a large diff is the expected result, not a problem to fix.

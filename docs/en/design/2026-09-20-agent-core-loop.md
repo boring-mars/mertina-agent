@@ -78,7 +78,7 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 
 | Layer | Contents | Lines | Treatment |
 |---|---|---:|---|
-| **L0** interface leaves | `agent/transports/base.py`, `agent/transports/types.py`, `agent/iteration_budget.py`, `agent/retry_utils.py`, `agent/web_search_provider.py`, `tools/interrupt.py` | 601 | **Copied verbatim**, MIT copyright headers kept |
+| **L0** interface leaves | `agent/transports/base.py`, `agent/transports/types.py`, `agent/iteration_budget.py`, `agent/retry_utils.py`, `agent/web_search_provider.py`, `tools/interrupt.py` | 601 | **Copied verbatim in substance** (defined in rule 2 of [Porting from Hermes](../development/porting-from-hermes.md)), with a provenance header |
 | **L1** loop skeleton | `conversation_loop.py` + 15 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + 14 `AIAgent` mixins + `hermes_cli/config.py` + the ddgs provider under `plugins/web/` and others, 46 files in all | 28,234 | **Copied into vendor, then trimmed** — this is the part that has to be understood |
 | **L2** platform layer | `agent_runtime_helpers.py` (3,509), `model_metadata.py` (2,551), `turn_recovery.py` (1,813), `error_classifier.py` (1,394), `redact.py` (1,335), `display.py` (1,118), `hermes_constants.py` (1,515), `hermes_logging.py` (764) and others | ~36,000 | **Not copied**; written from scratch as needed |
 
