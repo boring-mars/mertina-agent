@@ -17,11 +17,16 @@ logger = logging.getLogger(
 
 
 class ClientLifecycleMixin:
+    # Set by AIAgent; declared here so the mixin type-checks on its own.
+    client: Any
+    _client_kwargs: dict[str, Any]
+
     def _client_log_context(self) -> str:
         thread = threading.current_thread()
         return (
             f"thread={thread.name}:{thread.ident} provider={getattr(self, 'provider', 'unknown')} "
-            f"base_url={getattr(self, 'base_url', 'unknown')} model={getattr(self, 'model', 'unknown')}"
+            f"base_url={getattr(self, 'base_url', 'unknown')} "
+            f"model={getattr(self, 'model', 'unknown')}"
         )
 
     def _openai_client_lock(self) -> threading.RLock:

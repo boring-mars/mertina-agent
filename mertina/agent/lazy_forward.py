@@ -7,23 +7,24 @@ intercepts and the heavy agent modules stay off the ``run_agent`` import path.
 """
 
 import importlib
+from typing import Any
 
 
-def lazy_attr(module: str, name: str):
+def lazy_attr(module: str, name: str) -> Any:
     """Resolve ``module.name`` at call time."""
     return getattr(importlib.import_module(module), name)
 
 
-def forward(module: str, name: str, *, static: bool = False):
+def forward(module: str, name: str, *, static: bool = False) -> Any:
     """Build an AIAgent method that lazily forwards to ``module.name``
     (``target(self, *args, **kwargs)``; ``static=True`` drops ``self``)."""
     if static:
 
-        def forwarder(*args, **kwargs):
+        def forwarder(*args: Any, **kwargs: Any) -> Any:
             return lazy_attr(module, name)(*args, **kwargs)
     else:
 
-        def forwarder(self, *args, **kwargs):
+        def forwarder(self: Any, *args: Any, **kwargs: Any) -> Any:  # type: ignore[misc]  # upstream binds both variants to one name
             return lazy_attr(module, name)(self, *args, **kwargs)
 
     forwarder.__name__ = forwarder.__qualname__ = name
@@ -31,5 +32,5 @@ def forward(module: str, name: str, *, static: bool = False):
     return staticmethod(forwarder) if static else forwarder
 
 
-def forward_static(module: str, name: str):
+def forward_static(module: str, name: str) -> Any:
     return forward(module, name, static=True)

@@ -9,15 +9,17 @@ Lazy OpenAI SDK import (``_OpenAIProxy`` keeps ``isinstance`` and
 
 from __future__ import annotations
 
-_OPENAI_CLS_CACHE = None
+from typing import Any
+
+_OPENAI_CLS_CACHE: type | None = None
 
 
 def _load_openai_cls() -> type:
     """Import and cache ``openai.OpenAI``."""
     global _OPENAI_CLS_CACHE
     if _OPENAI_CLS_CACHE is None:
-        from openai import OpenAI as _OPENAI_CLS_CACHE
-    return _OPENAI_CLS_CACHE
+        from openai import OpenAI as _OPENAI_CLS_CACHE  # noqa: N814  # upstream idiom
+    return _OPENAI_CLS_CACHE  # type: ignore[return-value]  # the import above sets it
 
 
 class _OpenAIProxy:
@@ -25,13 +27,13 @@ class _OpenAIProxy:
 
     __slots__ = ()
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return _load_openai_cls()(*args, **kwargs)
 
-    def __instancecheck__(self, obj):
+    def __instancecheck__(self, obj: object) -> bool:
         return isinstance(obj, _load_openai_cls())
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "<lazy openai.OpenAI proxy>"
 
 

@@ -23,7 +23,8 @@ _STRIP_MSG_KEYS = (
 
 
 def _model_consumes_thought_signature(model: Any) -> bool:
-    """True for Gemini-family targets, which require tool-call ``extra_content`` (thought_signature) replay.
+    """True for Gemini-family targets, which require tool-call ``extra_content``
+    (thought_signature) replay.
 
     Every other strict provider rejects it, so it is stripped for non-Gemini targets.
     """
@@ -49,7 +50,8 @@ def _has_replayable_thought_signature(extra_content: Any) -> bool:
 
 
 def _attr_or_model_extra(obj: Any, name: str) -> Any:
-    """``obj.<name>``, else the same key from pydantic ``model_extra`` (some SDKs park fields there)."""
+    """``obj.<name>``, else the same key from pydantic ``model_extra`` (some SDKs park fields
+    there)."""
     value = getattr(obj, name, None)
     if value is None and hasattr(obj, "model_extra"):
         value = (obj.model_extra if isinstance(obj.model_extra, dict) else {}).get(name)
@@ -57,7 +59,8 @@ def _attr_or_model_extra(obj: Any, name: str) -> Any:
 
 
 def _dump_extra_content(extra: Any) -> Any:
-    """Plain-dict form of a pydantic ``extra_content``; older pydantic lacks ``warnings=``, so retry without it."""
+    """Plain-dict form of a pydantic ``extra_content``; older pydantic lacks ``warnings=``, so
+    retry without it."""
     if hasattr(extra, "model_dump"):
         for dump_kwargs in ({"warnings": False}, {}):
             try:
@@ -69,7 +72,7 @@ def _dump_extra_content(extra: Any) -> Any:
     return extra
 
 
-def _apply_max_tokens(api_kwargs: dict, params: dict) -> None:
+def _apply_max_tokens(api_kwargs: dict[str, Any], params: dict[str, Any]) -> None:
     """Preserve provider protocol exceptions."""
     max_tokens_fn = params.get("max_tokens_param_fn")
     candidate = params.get("max_tokens")
@@ -77,7 +80,9 @@ def _apply_max_tokens(api_kwargs: dict, params: dict) -> None:
         api_kwargs.update(max_tokens_fn(candidate))
 
 
-def _base_kwargs(model: str, sanitized: list, tools: Any, params: dict) -> dict[str, Any]:
+def _base_kwargs(
+    model: str, sanitized: list[dict[str, Any]], tools: Any, params: dict[str, Any]
+) -> dict[str, Any]:
     """Shared ``{model, messages[, timeout][, tools]}`` scaffold."""
     api_kwargs: dict[str, Any] = {"model": model, "messages": sanitized}
     if params.get("timeout") is not None:
@@ -91,7 +96,7 @@ def _sanitize_message(
     msg: Any,
     strip_extra_content: bool,
     strip_reasoning_details: bool = False,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Sanitized copy of ``msg``, or None when nothing needs stripping.
 
     Drops persistence sidecars, ``_``-prefixed scaffolding markers, tool-call
@@ -127,7 +132,7 @@ def _sanitize_message(
         for tc_idx, tc in enumerate(tool_calls):
             if not isinstance(tc, dict):
                 continue
-            keys = []
+            keys: list[str] = []
             if "extra_content" in tc and (
                 strip_extra_content or not _has_replayable_thought_signature(tc["extra_content"])
             ):
@@ -148,7 +153,9 @@ class ChatCompletionsTransport(ProviderTransport):
     def api_mode(self) -> str:
         return "chat_completions"
 
-    def convert_messages(self, messages: list[dict[str, Any]], **kwargs) -> list[dict[str, Any]]:
+    def convert_messages(
+        self, messages: list[dict[str, Any]], **kwargs: Any
+    ) -> list[dict[str, Any]]:
         """Strip internal fields that strict chat-completions providers reject (HTTP 400/422).
 
         Returns the input list unchanged when nothing needs sanitizing.
@@ -171,7 +178,7 @@ class ChatCompletionsTransport(ProviderTransport):
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        **params,
+        **params: Any,
     ) -> dict[str, Any]:
         """Build chat.completions.create() kwargs."""
         sanitized = self.convert_messages(messages, model=model)
@@ -179,14 +186,14 @@ class ChatCompletionsTransport(ProviderTransport):
         _apply_max_tokens(api_kwargs, params)
         return api_kwargs
 
-    def normalize_response(self, response: Any, **kwargs) -> NormalizedResponse:
+    def normalize_response(self, response: Any, **kwargs: Any) -> NormalizedResponse:
         """Normalize an OpenAI ChatCompletion.
 
         Gemini ``extra_content`` rides on ToolCall.provider_data; ``reasoning_content`` and
         ``reasoning_details`` stay distinct in provider_data because downstream reads them so.
         """
         choice = response.choices[0]
-        msg = getattr(choice, "message", None)
+        msg: Any = getattr(choice, "message", None)
         finish_reason = getattr(choice, "finish_reason", None) or "stop"
 
         tool_calls = None
@@ -233,7 +240,8 @@ class ChatCompletionsTransport(ProviderTransport):
         )
 
     def _normalize_tool_call(self, tc: Any) -> ToolCall | None:
-        """One SDK tool call -> ToolCall; None when it lacks a function/name (matches Relay's codec)."""
+        """One SDK tool call -> ToolCall; None when it lacks a function/name (matches Relay's
+        codec)."""
         tc_function = getattr(tc, "function", None)
         name = getattr(tc_function, "name", None)
         if tc_function is None or name is None:
@@ -254,7 +262,8 @@ class ChatCompletionsTransport(ProviderTransport):
         return True
 
     def extract_cache_stats(self, response: Any) -> dict[str, int] | None:
-        """Cache stats from prompt_tokens_details (OpenRouter/OpenAI) or DeepSeek's top-level prompt_cache_hit_tokens."""
+        """Cache stats from prompt_tokens_details (OpenRouter/OpenAI) or DeepSeek's top-level
+        prompt_cache_hit_tokens."""
         usage = getattr(response, "usage", None)
         if usage is None:
             return None
