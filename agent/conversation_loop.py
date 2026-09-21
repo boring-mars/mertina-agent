@@ -1,40 +1,41 @@
-# 版本V0.1变更说明
-# 当前真正执行的部分只保留“模型请求 -> 工具执行 -> 模型继续请求 -> 最终回答”的最小闭环。有效代码约 288 行
-# 注释代码用于保留原始实现、记录功能边界
-# 已注释的主要功能：
-# MoA 多模型顾问、Nous entitlement/billing、Copilot 凭据恢复、
-# Ollama 窗口扩容、多 provider failover/fallback、prompt cache、上下文压缩、
-# reference handoff、运行预算提醒、review fork、Fast mode、redirect、continuation、
-# repetition guard、verification/Kanban、插件兼容层、Memory/MCP、SessionDB 持久化、
-# 图片上下文包装、解释器退出异常识别、内容策略阻断结果、部分 turn 结果，
-# 以及这些功能对应的 helper、状态字段和内部变量。
+# 版本 V0.1 变更说明
+# 当前真正执行的部分只保留“模型请求 -> 工具执行 -> 模型继续请求 -> 最终回答”的最小闭环。
+# 注释代码用于保留原始实现、记录功能边界；下面按“行号范围 + 功能”标出具体位置。
+#
+# 已注释的主要功能（范围对应当前文件中的注释代码）：
+#
+# - [122–148、238–259、1041–1122、1311–1327、1599–1605、1646–1649] 上下文压缩、preflight、压缩超时和恢复结果；
+# - [198–245] reference handoff；[163–195] 运行预算提醒；[151–161] review fork 输入预算；
+# - [294–321、1156–1192、1296–1308、1389–1395、1504–1507、1538–1540] MoA 多模型顾问及其状态、传参和 prompt 装饰；
+# - [491–648、1456–1461] Nous entitlement/billing 和 Nous 限流 guard；
+# - [373–399、1515–1520] Copilot provider 判断、过期凭据识别和每轮凭据刷新；
+# - [431–484] Ollama 上下文窗口检查和本地窗口扩容；
+# - [1124–1145、1578–1592] 多 provider failover/fallback 及 Codex fallback 分支；
+# - [64–70、1162–1192] prompt cache 导入、缓存重装和 provider 切换后的缓存处理；
+# - [1513] Fast mode 初始化；[325–371] redirect；[873–930] continuation 提示；
+# - [334–338、1384–1388] repetition guard 和 verification 状态；Kanban 当前没有独立可执行函数，随 turn 编排一并移除；
+# - [1760–1819] 插件兼容层及其 lazy import；
+# - [686–836、1545–1558、1701–1739] Memory/MCP、系统提示词缓存、SessionDB 持久化和 failed-turn 收尾；
+# - [1675–1698、279–290、1018–1027、1030–1040] 图片上下文包装、解释器退出异常、内容策略阻断和部分 turn 结果。
 #
 # 源代码改动点：
-# - _LoopState/_CTX_FIELDS 收窄，只保留消息、请求、工具、重试和结果所需状态。
-# - _run_phase 去掉 provider overflow 的锁存回写，phase 返回状态直接覆盖当前状态。
-# - _run_api_retry_loop 保留原内部 retry while，执行请求构造、调用、响应检查和异常出口；
-#   仅去掉 Nous 限流 guard 及其他 provider 专属恢复。
-# - 本轮初始化去掉 MoA、Fast mode、凭据刷新、preflight、压缩等附加状态准备。
-# - run_conversation 去掉图片包装、turn boundary 导出和 durable failed-turn 收尾，
-#   直接返回核心对话循环结果。
-# - _LoopState 的 @dataclass 是核心状态实例化所必需，当前恢复为有效代码；它不是新增
-#   功能，原始位置的注释行仅记录此前的删除结果。
-# - 原始入口参数仍部分保留，仅用于兼容现有调用方，不代表对应附加功能已启用。
+# - [1331–1420] `_LoopState`/`_CTX_FIELDS` 收窄，只保留消息、请求、工具、重试和结果所需状态；
+# - [1428–1446] `_run_phase` 去掉 provider overflow 的锁存回写，phase 返回状态直接覆盖当前状态；
+# - [1450–1481] `_run_api_retry_loop` 保留原内部 retry while，执行请求构造、调用、响应检查和基础异常出口；
+# - [1504–1572] 本轮初始化去掉 MoA、Fast mode、凭据刷新、preflight、压缩等附加状态准备；
+# - [1653–1754] `run_conversation` 去掉图片包装、turn boundary 导出和 durable failed-turn 收尾，直接返回核心循环结果；
+# - [1331–1332] `_LoopState` 的 `@dataclass` 是核心状态实例化所必需，不是新增功能；
+# - [1653–1667] 原始入口参数仍部分保留，仅用于兼容现有调用方，不代表对应附加功能已启用。
 #
 # 新增代码：
 # - 没有新增 provider、工具、缓存、压缩、持久化或自动恢复功能。
 # - 本次新增的有效内容只有本文件顶部的变更说明；其余保留逻辑均来自原始核心路径。
 #
-# 当前保留函数和功能（简述）：
-# - _ra：延迟取得 run_agent，用于保持原有调用兼容。
-# - _canonicalize_tool_call_arguments、_clone_message_for_send、
-#   _canonicalize_api_tool_calls：规范化工具参数并保护发送侧消息副本。
-# - _invalid_tool_name_error_content：生成未知工具名称的错误信息。
-# - _LoopState：保存当前 turn 的消息、请求、工具、重试和最终结果状态。
-# - _run_phase：调用 phase helper，并同步 phase 返回状态。
-# - _run_api_retry_loop：执行一次模型请求、响应检查和基础异常处理。
-# - _run_conversation_turn：运行预算循环，串联模型请求、工具调用和最终文本处理。
-# - run_conversation：对外入口，接收用户输入并返回本轮结果。
+# 当前保留函数和功能：
+# - [485–488] `_ra`：延迟取得 run_agent，用于保持原有调用兼容；
+# - [949–1002] 工具参数规范化和发送侧消息保护；[1004–1015] 未知工具名称错误内容；
+# - [1331–1481] turn 状态、phase 调度和基础 API retry；[1483–1650] 核心模型请求、工具轮次和最终响应；
+# - [1653–1754] `run_conversation` 对外入口，接收用户输入并返回本轮结果。
 
 """The agent conversation loop — extracted from ``run_agent.AIAgent``.
 
