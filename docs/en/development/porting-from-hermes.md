@@ -117,6 +117,8 @@ Every rewrite in a cut commit (a line `port_check --cut-from` reports as `rewrit
 | `chat_completions.validate_response`: ends with `return not is_router_timeout_shim(response)` | `return True` | **Behavior change:** a router's fake success (HTTP 200 carrying a timeout message) is no longer recognized. Keeping it keeps four more definitions |
 | `registry.ToolRegistry.register`: `target = self._slot(scope, create=True)` picks the table by profile scope | `target = self._tools` | Plugin and profile scopes are outside v0.1, so every tool registers in the global table |
 | `model_tools._compute_tool_definitions`: `tools_to_include = _select_tool_names(enabled_toolsets, disabled_toolsets, quiet_mode)` selects by toolset | `tools_to_include = set(registry.get_all_tool_names())` | **Behavior change:** toolsets are no longer enabled or disabled; every registered tool goes to the model. Toolset selection needs the static tables in `toolsets.py`, and v0.1 has one tool, `get_time` |
+| `tool_executor._run_agent_tool_execution_middleware`: `state.result, _relay_args = relay_tools.execute(function_name, function_args, _hermes_pipeline, ...)` dispatches through Relay and the tool middleware | `state.result = _authorized_dispatch(function_args)` | Relay and the tool middleware layer are outside v0.1; the call is dispatched once directly |
+| `tool_executor.execute_tool_calls_sequential`: splits by terminal approval and calls `_execute_tool_calls_sequential` per run with `SimpleNamespace(tool_calls=calls)` | Passes `assistant_message` in one call | Terminal approval batches are outside v0.1 |
 
 ## Comparing against upstream
 

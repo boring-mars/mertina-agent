@@ -104,6 +104,8 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 | `chat_completions.validate_response`：最后 `return not is_router_timeout_shim(response)` | `return True` | **行为改变：** 不再识别「HTTP 200 + 超时提示」的路由器伪装响应。保留它要多留 4 个定义 |
 | `registry.ToolRegistry.register`：`target = self._slot(scope, create=True)`，按 profile 作用域选注册表 | `target = self._tools` | 插件和 profile 作用域不在 v0.1 内，所有工具都注册到全局表 |
 | `model_tools._compute_tool_definitions`：`tools_to_include = _select_tool_names(enabled_toolsets, disabled_toolsets, quiet_mode)`，按 toolset 选择 | `tools_to_include = set(registry.get_all_tool_names())` | **行为改变：** 不再按 toolset 启用或禁用，所有已注册工具都发给模型。toolset 选择依赖 `toolsets.py` 的静态表，v0.1 只有 `get_time` 一个工具 |
+| `tool_executor._run_agent_tool_execution_middleware`：`state.result, _relay_args = relay_tools.execute(function_name, function_args, _hermes_pipeline, ...)`，经 Relay 和工具中间件后派发 | `state.result = _authorized_dispatch(function_args)` | Relay 和工具中间件整层不在 v0.1 内，直接派发一次 |
+| `tool_executor.execute_tool_calls_sequential`：按终端审批分段，每段以 `SimpleNamespace(tool_calls=calls)` 调用 `_execute_tool_calls_sequential` | 传入 `assistant_message`，调用一次 | 终端审批批次不在 v0.1 内 |
 
 ## 与上游对照
 
