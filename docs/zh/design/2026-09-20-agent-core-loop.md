@@ -79,7 +79,7 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 | 层 | 内容 | 行数 | 处理 |
 |---|---|---:|---|
 | **L0** 接口叶子 | `agent/transports/base.py`、`agent/transports/types.py`、`agent/iteration_budget.py`、`agent/retry_utils.py`、`agent/web_search_provider.py`、`tools/interrupt.py` | 601 | **逐字抄**，保留 MIT 版权头 |
-| **L1** 循环骨架 | `conversation_loop.py` + 15 个 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + `AIAgent` 的 12 个 mixin 等，共 44 个文件 | 24,754 | **拷进 vendor 后裁剪**，这是需要读懂的部分 |
+| **L1** 循环骨架 | `conversation_loop.py` + 15 个 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + `AIAgent` 的 14 个 mixin + `hermes_cli/config.py` + `plugins/web/` 的 ddgs provider 等，共 46 个文件 | 28,234 | **拷进 vendor 后裁剪**，这是需要读懂的部分 |
 | **L2** 平台层 | `agent_runtime_helpers.py`(3,509)、`model_metadata.py`(2,551)、`turn_recovery.py`(1,813)、`error_classifier.py`(1,394)、`redact.py`(1,335)、`display.py`(1,118)、`hermes_constants.py`(1,515)、`hermes_logging.py`(764) 等 | ~36,000 | **不拷**，需要什么自己写什么 |
 
 L0/L1/L2 划分的是**拷贝边界**（哪些文件进 vendor、哪些不进），与 §8 的里程碑划分是两个维度。L0 的 6 个文件都在边界内，但落地时间不同：`transports/base.py`、`transports/types.py`、`iteration_budget.py` 在 v0.1.0，`retry_utils.py`、`tools/interrupt.py` 在 v0.1.1，`web_search_provider.py` 在 v0.1.2。
@@ -296,7 +296,7 @@ v0.1.0 只做预算和基本的 stop flag；重试与流式中断在 v0.1.1。
 |---|---|---|
 | **v0.1.0**（本分支） | L0 叶子 + transports + registry + loop + `get_time` | fake client 下跑通完整循环 |
 | v0.1.1 | 流式输出 + 重试 + 中断（`tools/interrupt.py`、`agent/prompt_builder.py`、`agent/system_prompt.py`） | Roadmap 的 stop 语义达标 |
-| v0.1.2 | `web_search` + `WebSearchProvider` 接口 + 配置层（`mertina_cli/config.py`） | 真实 endpoint 跑通 Roadmap 验收场景 |
+| v0.1.2 | `web_search` + `WebSearchProvider` 接口 + 配置层（`mertina/cli/config.py`） | 真实 endpoint 跑通 Roadmap 验收场景 |
 
 v0.1.2 完成时，Roadmap v0.1 的三条「Done when」全部满足。
 

@@ -79,7 +79,7 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 | Layer | Contents | Lines | Treatment |
 |---|---|---:|---|
 | **L0** interface leaves | `agent/transports/base.py`, `agent/transports/types.py`, `agent/iteration_budget.py`, `agent/retry_utils.py`, `agent/web_search_provider.py`, `tools/interrupt.py` | 601 | **Copied verbatim**, MIT copyright headers kept |
-| **L1** loop skeleton | `conversation_loop.py` + 15 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + 12 `AIAgent` mixins and others, 44 files in all | 24,754 | **Copied into vendor, then trimmed** — this is the part that has to be understood |
+| **L1** loop skeleton | `conversation_loop.py` + 15 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + 14 `AIAgent` mixins + `hermes_cli/config.py` + the ddgs provider under `plugins/web/` and others, 46 files in all | 28,234 | **Copied into vendor, then trimmed** — this is the part that has to be understood |
 | **L2** platform layer | `agent_runtime_helpers.py` (3,509), `model_metadata.py` (2,551), `turn_recovery.py` (1,813), `error_classifier.py` (1,394), `redact.py` (1,335), `display.py` (1,118), `hermes_constants.py` (1,515), `hermes_logging.py` (764) and others | ~36,000 | **Not copied**; written from scratch as needed |
 
 L0/L1/L2 is the **copy boundary** (what goes into vendor and what does not); it is a different axis from the milestone split in §8. All six L0 files are inside the boundary but land at different times: `transports/base.py`, `transports/types.py` and `iteration_budget.py` in v0.1.0; `retry_utils.py` and `tools/interrupt.py` in v0.1.1; `web_search_provider.py` in v0.1.2.
@@ -303,7 +303,7 @@ The `get_time` tool needs no network, so the tool path is covered end to end.
 |---|---|---|
 | **v0.1.0** (this branch) | L0 leaves + transports + registry + loop + `get_time` | The full loop runs against a fake client |
 | v0.1.1 | Streaming + retry + interruption (`tools/interrupt.py`, `agent/prompt_builder.py`, `agent/system_prompt.py`) | The Roadmap's stop semantics are met |
-| v0.1.2 | `web_search` + the `WebSearchProvider` interface + the config layer (`mertina_cli/config.py`) | The Roadmap's acceptance scenario runs against a real endpoint |
+| v0.1.2 | `web_search` + the `WebSearchProvider` interface + the config layer (`mertina/cli/config.py`) | The Roadmap's acceptance scenario runs against a real endpoint |
 
 When v0.1.2 lands, all three of the Roadmap's v0.1 "Done when" items are satisfied.
 
