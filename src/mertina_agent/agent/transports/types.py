@@ -136,6 +136,19 @@ class Usage:
 
 
 @dataclass(frozen=True)
+class StreamUpdate:
+    """What one streamed chunk contributed that a consumer may display.
+
+    Attributes:
+        text: Visible text delta, withheld once the response started a tool call.
+        tools_started: Tool names that became known in this chunk.
+    """
+
+    text: str | None = None
+    tools_started: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class NormalizedResponse:
     """One completion with explicit terminal metadata and immutable tool ordering.
 

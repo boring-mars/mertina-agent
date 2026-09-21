@@ -19,7 +19,13 @@ from types import TracebackType
 from typing import Self, cast
 
 from mertina_agent.agent.conversation_loop import run_conversation
-from mertina_agent.agent.events import EventCallback, RunCompleted, emit_event
+from mertina_agent.agent.events import (
+    EventCallback,
+    RunCompleted,
+    RunFailed,
+    RunStopped,
+    emit_event,
+)
 from mertina_agent.agent.interrupt import InterruptSignal, bind_interrupt_signal
 from mertina_agent.agent.model_client import ModelClient, ModelClientProtocol
 from mertina_agent.agent.system_prompt import build_system_prompt
@@ -36,6 +42,25 @@ logger = logging.getLogger(__name__)
 
 def _local_now() -> datetime:
     return datetime.now().astimezone()
+
+
+def _final_event(result: ConversationResult) -> RunCompleted | RunStopped | RunFailed:
+    """The single event that reports how a turn ended."""
+    if result["interrupted"]:
+        return RunStopped(
+            final_response=result["final_response"], turn_exit_reason=result["turn_exit_reason"]
+        )
+    if result["failed"]:
+        return RunFailed(
+            error=result.get("error", result["turn_exit_reason"]),
+            final_response=result["final_response"],
+            turn_exit_reason=result["turn_exit_reason"],
+        )
+    return RunCompleted(
+        final_response=result["final_response"],
+        completed=result["completed"],
+        turn_exit_reason=result["turn_exit_reason"],
+    )
 
 
 class Agent:
@@ -163,6 +188,7 @@ class Agent:
                     tool_registry=self._tool_registry,
                     max_iterations=self.max_iterations,
                     retry_policy=self._retry_policy,
+                    stream=self._settings.llm_stream,
                     event_callback=self._event_callback,
                     turn_id=uuid.uuid4().hex,
                 )
@@ -171,14 +197,7 @@ class Agent:
             # A stop request applies to one turn; it must not leak into the next.
             self._interrupt.clear()
 
-        emit_event(
-            self._event_callback,
-            RunCompleted(
-                final_response=result["final_response"],
-                completed=result["completed"],
-                turn_exit_reason=result["turn_exit_reason"],
-            ),
-        )
+        emit_event(self._event_callback, _final_event(result))
         return result
 
     def interrupt(self, reason: str | None = None) -> bool:

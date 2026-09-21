@@ -7,7 +7,13 @@ import json
 import pytest
 
 from mertina_agent.agent.core import Agent
-from mertina_agent.agent.events import RunCompleted, ToolCallFinished, ToolCallStarted
+from mertina_agent.agent.events import (
+    RunCompleted,
+    TextDelta,
+    ToolCallFinished,
+    ToolCallStarted,
+    ToolGenerationStarted,
+)
 from mertina_agent.agent.transports import NormalizedResponse
 from mertina_agent.agent.transports.types import Usage
 from mertina_agent.agent.turn_failure_copy import (
@@ -121,10 +127,17 @@ def test_events_report_tool_progress_and_completion(make_agent, fake):
 
     run(agent)
 
-    assert [type(event) for event in events] == [ToolCallStarted, ToolCallFinished, RunCompleted]
-    assert events[0].call_id == "c1"
-    assert events[1].is_error is False
-    assert events[2].completed is True
+    assert [type(event) for event in events] == [
+        ToolGenerationStarted,
+        ToolCallStarted,
+        ToolCallFinished,
+        TextDelta,
+        RunCompleted,
+    ]
+    assert events[1].call_id == "c1"
+    assert events[2].is_error is False
+    assert events[3].text == "Done."
+    assert events[4].completed is True
 
 
 def test_failing_event_callback_does_not_break_the_turn(make_agent, fake):

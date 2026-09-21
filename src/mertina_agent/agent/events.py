@@ -2,9 +2,9 @@
 
 Hermes reports progress through a dozen positional callbacks (stream deltas,
 ``tool.started`` / ``tool.completed`` progress, status lines). Mertina delivers
-the same moments as typed events through a single ``event_callback``. This
-module holds the events available at this checkpoint; streaming events arrive
-with the streaming transport.
+the same moments as typed events through a single ``event_callback``. Every
+turn ends with exactly one of :class:`RunCompleted`, :class:`RunStopped` or
+:class:`RunFailed`.
 
 Adapted from the callback contract in Hermes agent/tool_executor.py and
 agent/stream_delivery.py at 4cefeed7debc7091ed65240cbc7e2c36435c0b6b.
@@ -16,6 +16,28 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TextDelta:
+    """A piece of the model's visible answer, delivered while it streams.
+
+    Attributes:
+        text: The new text, to be appended to what was delivered before.
+    """
+
+    text: str
+
+
+@dataclass(frozen=True)
+class ToolGenerationStarted:
+    """The model started writing a tool call; its arguments are still streaming.
+
+    Attributes:
+        name: Tool name.
+    """
+
+    name: str
 
 
 @dataclass(frozen=True)
@@ -70,7 +92,7 @@ class RetryScheduled:
 
 @dataclass(frozen=True)
 class RunCompleted:
-    """A turn ended, whether with an answer, a partial result or a failure.
+    """A turn ended without being stopped or failing, possibly with a partial answer.
 
     Attributes:
         final_response: Text delivered to the user, if any.
@@ -83,7 +105,44 @@ class RunCompleted:
     turn_exit_reason: str
 
 
-type AgentEvent = ToolCallStarted | ToolCallFinished | RetryScheduled | RunCompleted
+@dataclass(frozen=True)
+class RunStopped:
+    """A turn ended because it was asked to stop; its history is closed and reusable.
+
+    Attributes:
+        final_response: Partial text or cancellation note, if any.
+        turn_exit_reason: Where the stop took effect.
+    """
+
+    final_response: str | None
+    turn_exit_reason: str
+
+
+@dataclass(frozen=True)
+class RunFailed:
+    """A turn ended because of an error; its history is closed and reusable.
+
+    Attributes:
+        error: Safe description of the failure, without credentials or prompts.
+        final_response: Explanation delivered to the user.
+        turn_exit_reason: Category of the failure.
+    """
+
+    error: str
+    final_response: str | None
+    turn_exit_reason: str
+
+
+type AgentEvent = (
+    TextDelta
+    | ToolGenerationStarted
+    | ToolCallStarted
+    | ToolCallFinished
+    | RetryScheduled
+    | RunCompleted
+    | RunStopped
+    | RunFailed
+)
 type EventCallback = Callable[[AgentEvent], None]
 
 

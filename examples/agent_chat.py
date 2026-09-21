@@ -17,7 +17,13 @@ from datetime import datetime
 from pathlib import Path
 
 from mertina_agent.agent.core import Agent
-from mertina_agent.agent.events import AgentEvent, ToolCallFinished, ToolCallStarted
+from mertina_agent.agent.events import (
+    AgentEvent,
+    RetryScheduled,
+    TextDelta,
+    ToolCallFinished,
+    ToolCallStarted,
+)
 from mertina_agent.agent.model_client import ModelClient
 from mertina_agent.agent.transports.types import FunctionDefinition, JsonObject
 from mertina_agent.config import Settings, load_settings
@@ -60,9 +66,20 @@ def _explicit_settings(env_file: Path) -> Settings:
     return settings
 
 
+def _printable(text: str) -> str:
+    """Escape control characters so model output cannot drive the terminal."""
+    return "".join(
+        char if char in "\n\t" or char.isprintable() else repr(char)[1:-1] for char in text
+    )
+
+
 def _report_event(event: AgentEvent) -> None:
     # Progress goes to stderr so stdout stays a single JSON document.
-    if isinstance(event, ToolCallStarted):
+    if isinstance(event, TextDelta):
+        sys.stderr.write(_printable(event.text))
+    elif isinstance(event, RetryScheduled):
+        sys.stderr.write(f"\n[retrying in {event.wait_s:.1f}s: {event.reason}]\n")
+    elif isinstance(event, ToolCallStarted):
         sys.stderr.write(f"-> tool {event.name} ({event.call_id})\n")
     elif isinstance(event, ToolCallFinished):
         outcome = "error" if event.is_error else "ok"
@@ -80,6 +97,7 @@ async def _run_turn(settings: Settings, prompt: str) -> bool:
         ) as agent,
     ):
         result = await agent.run_conversation(prompt)
+    sys.stderr.write("\n")  # End the streamed text before the summary.
     tools_used = [
         call["function"]["name"]
         for message in result["messages"]

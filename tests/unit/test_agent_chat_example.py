@@ -8,6 +8,7 @@ from typing import ClassVar
 
 import pytest
 
+from mertina_agent.agent.events import RetryScheduled
 from mertina_agent.agent.transports.types import NormalizedResponse, ToolCall, Usage
 from mertina_agent.exceptions import ModelInputError, ModelRequestError
 
@@ -54,6 +55,13 @@ def fake_client(example, monkeypatch):
             if isinstance(step, BaseException):
                 raise step
             return step
+
+        async def stream(self, messages, *, tools=(), on_text_delta=None, on_tool_started=None):
+            del on_tool_started
+            response = await self.complete(messages, tools=tools)
+            if response.content and on_text_delta is not None:
+                on_text_delta(response.content)
+            return response
 
         async def aclose(self):
             return None
@@ -126,7 +134,10 @@ def test_output_escapes_terminal_control_characters(
 
     example.main(["--env-file", str(explicit_env_file)])
 
-    assert "\x1b" not in capsys.readouterr().out
+    output = capsys.readouterr()
+    assert "\x1b" not in output.out
+    assert "\x1b" not in output.err
+    assert "red \\x1b[31m text" in output.err
 
 
 def test_failed_turn_exits_with_one_and_still_prints_the_summary(
@@ -147,6 +158,12 @@ def test_input_errors_do_not_echo_their_details(example, explicit_env_file, fake
 
     assert status == 1
     assert "sensitive input detail" not in capsys.readouterr().err
+
+
+def test_retries_are_announced_on_stderr(example, capsys):
+    example._report_event(RetryScheduled(attempt=1, max_attempts=3, wait_s=2.5, reason="http 503"))
+
+    assert capsys.readouterr().err == "\n[retrying in 2.5s: http 503]\n"
 
 
 def test_keyboard_interrupt_exits_with_130(example, explicit_env_file, fake_client):

@@ -160,6 +160,22 @@
 | 未运行时调用 `interrupt()` 也会置位 | 无运行中的轮次时返回 `False` 且不置位 | 避免遗留的停止请求意外中断下一轮 |
 | 停止请求在工具开始前到达时，`web_search_tool` 返回 `Interrupted` | 相同（保留 Hermes 行为） | 工具入口检查中断 |
 
+### CP5：流式与事件
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 流式由 `_call_chat_completions` 在请求线程中消费，并带 stale-stream 看门狗、单写入器、relay | `ModelClient.stream()` 异步消费 SDK 流；transport 的 `ChatCompletionsStreamAccumulator` 负责组装 | 与第二阶段分层一致：transport 只做转换与校验，客户端负责 I/O |
+| `_ToolCallAccumulator` 原样 | 复制：同 index 不同 id 分槽、name 赋值、参数分片最后拼接；去掉 Gemini `extra_content` | 语义一致 |
+| 流在无 finish_reason 时结束：返回部分流 stub，进入续写或重试 | 抛 `ModelResponseError`，由重试策略重新请求 | Mertina 没有续写；中断的回复绝不当作完整答案 |
+| 参数无法解析时尝试修复，失败才标记截断 | 不修复；无法解析即标记 `length`，循环拒绝执行 | 与第二阶段"绝不修复参数"一致 |
+| 首次 delta 后才判断 SSE 回显、router shim 等 | 删除 | 厂商特判 |
+| 端点拒绝 `stream_options` 时本会话不再发送 | 相同：`_rejects_stream_options` 原文复制，客户端生命周期内记住 | 语义一致 |
+| 流中错误事件、连接中断由多处辅助函数识别 | SDK 3.16.2 对错误事件抛通用 `APIError`、对中断抛 `APIConnectionError`（离线实验确认），分别映射为可重试的 `ModelRequestError` | 以实验证据为准 |
+| 回调：`stream_delta_callback`、`tool_gen_callback`、状态行等十余个 | 类型化事件：`TextDelta`、`ToolGenerationStarted`；每轮以 `RunCompleted` / `RunStopped` / `RunFailed` 之一结束 | 单一 `event_callback`，便于 v0.2 转为 SSE |
+| 工具调用开始后的文本只送往显示层做标签提取 | 不再作为 `TextDelta` 报告，但保留在最终内容中 | 与 Hermes"工具回合不流式前言"一致 |
+| 中断时保留已流式输出的文本（并对重复失控内容做隐藏） | 保留部分文本作为 assistant 消息与最终回复；重复检测删除 | 重复检测属于 P1 |
+| 默认总是流式 | `MERTINA_LLM_STREAM` 默认 true，可关闭 | 兼容不支持流式的端点 |
+
 ## 异步改写
 
 | Hermes 机制 | Mertina 机制 | 保持的语义 |

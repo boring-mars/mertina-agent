@@ -158,6 +158,10 @@ def test_agent_feeds_wrapped_search_results_back_to_the_model():
             requests.append((list(messages), list(tools)))
             return self.script.pop(0)
 
+        async def stream(self, messages, *, tools=(), on_text_delta=None, on_tool_started=None):
+            del on_text_delta, on_tool_started
+            return await self.complete(messages, tools=tools)
+
         async def aclose(self):
             return None
 

@@ -55,6 +55,13 @@ def fake_client(example, monkeypatch):
                 raise step
             return step
 
+        async def stream(self, messages, *, tools=(), on_text_delta=None, on_tool_started=None):
+            del on_tool_started
+            response = await self.complete(messages, tools=tools)
+            if response.content and on_text_delta is not None:
+                on_text_delta(response.content)
+            return response
+
         async def aclose(self):
             return None
 

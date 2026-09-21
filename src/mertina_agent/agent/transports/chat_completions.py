@@ -6,22 +6,28 @@ Distributed under the MIT license; see LICENSES/Hermes-Agent-MIT.txt and
 docs/sources/hermes-model-transport.md for source symbols and deliberate cuts.
 """
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from typing import cast
 
 from openai.types.chat import (
     ChatCompletion,
+    ChatCompletionChunk,
     ChatCompletionMessageParam,
     ChatCompletionToolUnionParam,
 )
-from openai.types.chat.completion_create_params import CompletionCreateParamsNonStreaming
+from openai.types.chat.completion_create_params import (
+    CompletionCreateParamsNonStreaming,
+    CompletionCreateParamsStreaming,
+)
 
-from mertina_agent.agent.transports.base import ProviderTransport
+from mertina_agent.agent.transports.base import ProviderTransport, StreamAccumulator
 from mertina_agent.agent.transports.types import (
     ChatMessage,
     JsonValue,
     NormalizedResponse,
+    StreamUpdate,
     ToolCall,
     ToolDefinition,
     Usage,
@@ -247,6 +253,35 @@ class ChatCompletionsTransport(ProviderTransport):
             api_kwargs["tools"] = converted_tools
         return api_kwargs
 
+    def build_stream_kwargs(
+        self,
+        model: str,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[ToolDefinition] = (),
+        *,
+        include_usage: bool = True,
+    ) -> CompletionCreateParamsStreaming:
+        """Build one streaming request with the same validation as :meth:`build_kwargs`.
+
+        ``include_usage`` asks for a final usage chunk; strict endpoints that
+        reject ``stream_options`` are called again without it.
+        """
+        base = self.build_kwargs(model, messages, tools)
+        api_kwargs: CompletionCreateParamsStreaming = {
+            "model": base["model"],
+            "messages": base["messages"],
+            "stream": True,
+        }
+        if "tools" in base:
+            api_kwargs["tools"] = base["tools"]
+        if include_usage:
+            api_kwargs["stream_options"] = {"include_usage": True}
+        return api_kwargs
+
+    def stream_accumulator(self) -> StreamAccumulator:
+        """Return a fresh accumulator for one streamed response."""
+        return ChatCompletionsStreamAccumulator()
+
     def normalize_response(self, response: object) -> NormalizedResponse:
         """Normalize one choice while preserving refusal, truncation and unknown usage.
 
@@ -279,4 +314,188 @@ class ChatCompletionsTransport(ProviderTransport):
             finish_reason=cast(str, finish_reason),
             refusal=_response_text(message_data.get("refusal"), "refusal", nullable=True),
             usage=_normalize_usage(data.get("usage")),
+        )
+
+
+def _optional_text(mapping: Mapping[str, object], key: str, context: str) -> str | None:
+    return _response_text(mapping.get(key), context, nullable=True)
+
+
+class _ToolCallAccumulator:
+    """Assemble streamed tool-call deltas into complete tool calls.
+
+    Copied from Hermes agent/chat_completion_helpers.py (``_ToolCallAccumulator``)
+    at 4cefeed7debc7091ed65240cbc7e2c36435c0b6b. Ollama-compatible endpoints reuse
+    index 0 for every call of a parallel batch and tell them apart only by ID, so a
+    new ID at an already-seen index is redirected to a fresh slot. Argument
+    fragments are collected per slot and joined once, because ``+=`` per chunk is
+    quadratic on large arguments.
+    """
+
+    def __init__(self) -> None:
+        self.slots: dict[int, dict[str, str]] = {}
+        self._notified: set[int] = set()
+        self._last_id_at_index: dict[int, str] = {}
+        self._active_slot_by_index: dict[int, int] = {}
+        self._argument_parts: dict[int, list[str]] = {}
+
+    def feed(self, delta: object) -> str | None:
+        """Merge one tool-call delta; return the tool name the first time it is known."""
+        data = _response_mapping(delta, "tool call delta")
+        raw_index = data.get("index")
+        if raw_index is None:
+            raw_index = 0
+        if type(raw_index) is not int or raw_index < 0:
+            message = "Response tool call delta index must be a non-negative integer."
+            raise ModelResponseError(message)
+        call_id = _optional_text(data, "id", "tool call delta id") or ""
+
+        self._active_slot_by_index.setdefault(raw_index, raw_index)
+        if (
+            call_id
+            and raw_index in self._last_id_at_index
+            and call_id != self._last_id_at_index[raw_index]
+        ):
+            self._active_slot_by_index[raw_index] = max(self.slots, default=-1) + 1
+        if call_id:
+            self._last_id_at_index[raw_index] = call_id
+        slot = self._active_slot_by_index[raw_index]
+
+        entry = self.slots.setdefault(slot, {"id": "", "name": "", "arguments": ""})
+        parts = self._argument_parts.setdefault(slot, [])
+        if call_id:
+            entry["id"] = call_id
+        function_data = data.get("function")
+        if function_data is not None:
+            function = _response_mapping(function_data, "tool call delta function")
+            name = _optional_text(function, "name", "tool call delta name")
+            if name:
+                # Assignment, not +=: some providers resend the full name every chunk.
+                entry["name"] = name
+            arguments = _optional_text(function, "arguments", "tool call delta arguments")
+            if arguments:
+                parts.append(arguments)
+        if entry["name"] and slot not in self._notified:
+            self._notified.add(slot)
+            return entry["name"]
+        return None
+
+    def materialize(self) -> list[dict[str, str]]:
+        """Join buffered argument fragments and return the entries in slot order."""
+        for slot, parts in self._argument_parts.items():
+            self.slots[slot]["arguments"] = "".join(parts)
+        return [self.slots[slot] for slot in sorted(self.slots)]
+
+
+class ChatCompletionsStreamAccumulator(StreamAccumulator):
+    """Assemble streamed chunks into the same result a non-streaming call returns.
+
+    The end-of-stream rules are copied from Hermes ``_finish_chat_stream``: a
+    stream that ends without a finish reason is a dropped connection, not a
+    completion, so it is never reported as a normal answer. Where Hermes turns a
+    dropped stream into a continuation stub, Mertina raises
+    :class:`ModelResponseError`, which the agent retries. Argument repair and
+    reasoning deltas are left out.
+    """
+
+    def __init__(self) -> None:
+        """Create an empty accumulator."""
+        self._content_parts: list[str] = []
+        self._refusal_parts: list[str] = []
+        self._tool_calls = _ToolCallAccumulator()
+        self._finish_reason: str | None = None
+        self._usage: Usage | None = None
+
+    def feed(self, chunk: object) -> StreamUpdate:
+        """Merge one chunk and return what it adds for display.
+
+        Raises:
+            ModelResponseError: If the chunk is malformed.
+        """
+        if isinstance(chunk, ChatCompletionChunk):
+            chunk = chunk.model_dump(mode="python", warnings=False)
+        data = _response_mapping(chunk, "chunk")
+        usage = _normalize_usage(data.get("usage"))
+        if usage is not None:
+            self._usage = usage
+        choices = data.get("choices")
+        if choices is None or choices == []:
+            # A choiceless chunk carries usage (``include_usage``) or nothing.
+            return StreamUpdate()
+        if not isinstance(choices, list) or len(choices) != 1:
+            message = "Response chunk must contain exactly one choice."
+            raise ModelResponseError(message)
+        choice = _response_mapping(choices[0], "chunk choice")
+        finish_reason = _optional_text(choice, "finish_reason", "finish_reason")
+        if finish_reason:
+            self._finish_reason = finish_reason
+        delta_data = choice.get("delta")
+        delta = _response_mapping(delta_data if delta_data is not None else {}, "chunk delta")
+
+        refusal = _optional_text(delta, "refusal", "refusal")
+        if refusal:
+            self._refusal_parts.append(refusal)
+        tools_started: list[str] = []
+        raw_calls = delta.get("tool_calls")
+        if raw_calls is not None:
+            if not isinstance(raw_calls, list):
+                message = "Response tool call deltas must be an array or null."
+                raise ModelResponseError(message)
+            for raw_call in raw_calls:
+                name = self._tool_calls.feed(raw_call)
+                if name is not None:
+                    tools_started.append(name)
+        text = _optional_text(delta, "content", "content")
+        visible: str | None = None
+        if text:
+            self._content_parts.append(text)
+            # Tool-call turns do not stream their preamble, as in Hermes.
+            if not self._tool_calls.slots:
+                visible = text
+        return StreamUpdate(text=visible, tools_started=tuple(tools_started))
+
+    def finish(self) -> NormalizedResponse:
+        """Validate the whole stream and return the normalized result.
+
+        Raises:
+            ModelResponseError: If the stream was empty, dropped mid-way, or its
+                assembled result violates the response contract.
+        """
+        content = "".join(self._content_parts) or None
+        refusal = "".join(self._refusal_parts) or None
+        entries = self._tool_calls.materialize()
+        finish_reason = self._finish_reason
+        if finish_reason is None and not (content or refusal or entries):
+            message = "Model stream ended without any content or finish reason."
+            raise ModelResponseError(message)
+
+        truncated_arguments = False
+        for entry in entries:
+            arguments = entry["arguments"]
+            if arguments.strip():
+                try:
+                    json.loads(arguments)
+                except json.JSONDecodeError:
+                    truncated_arguments = True
+            elif finish_reason is None:
+                # A name with no argument bytes and no finish reason was cut off.
+                truncated_arguments = True
+        if finish_reason is None and truncated_arguments:
+            message = "Model stream ended in the middle of a tool call."
+            raise ModelResponseError(message)
+        if finish_reason is None and not entries and self._usage is None:
+            # A final usage chunk proves the provider finished; without it the
+            # text may be cut short and must not be reported as complete.
+            message = "Model stream ended before the response was complete."
+            raise ModelResponseError(message)
+
+        return NormalizedResponse(
+            content=content,
+            tool_calls=tuple(
+                ToolCall(id=entry["id"], name=entry["name"], arguments=entry["arguments"])
+                for entry in entries
+            ),
+            finish_reason="length" if truncated_arguments else (finish_reason or "stop"),
+            refusal=refusal,
+            usage=self._usage,
         )

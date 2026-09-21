@@ -74,6 +74,7 @@ async def _run_api_retry_loop(
     api_messages: list[ChatMessage],
     tools: Sequence[ToolDefinition],
     retry_policy: RetryPolicy,
+    stream: bool,
     event_callback: EventCallback | None,
 ) -> ConversationResult | None:
     """One model call with its retry loop.
@@ -86,7 +87,9 @@ async def _run_api_retry_loop(
     retry_count = 0
     while True:
         try:
-            call = await perform_api_call(model_client, api_messages, tools)
+            call = await perform_api_call(
+                model_client, api_messages, tools, stream=stream, event_callback=event_callback
+            )
         except (ModelRequestError, ModelResponseError) as exc:
             verdict = await handle_api_error(
                 exc,
@@ -104,7 +107,9 @@ async def _run_api_retry_loop(
         if call.action == "interrupted":
             s.interrupted = True
             s.turn_exit_reason = "interrupted_during_api_call"
-            s.final_response = handle_api_interrupt(api_start_time=api_start_time).final_response
+            s.final_response = handle_api_interrupt(
+                api_start_time=api_start_time, partial_text=call.partial_text, messages=s.messages
+            ).final_response
             return None
         s.response = call.response
         return None
@@ -121,6 +126,7 @@ async def _run_conversation_turn(
     tool_registry: ToolRegistry,
     max_iterations: int,
     retry_policy: RetryPolicy,
+    stream: bool,
     event_callback: EventCallback | None,
     turn_id: str,
 ) -> tuple[ConversationResult, int]:
@@ -158,6 +164,7 @@ async def _run_conversation_turn(
             api_messages=api_messages,
             tools=tools,
             retry_policy=retry_policy,
+            stream=stream,
             event_callback=event_callback,
         )
         if early_result is not None:
@@ -236,6 +243,7 @@ async def run_conversation(
     tool_registry: ToolRegistry,
     max_iterations: int,
     retry_policy: RetryPolicy | None = None,
+    stream: bool = False,
     event_callback: EventCallback | None = None,
     turn_id: str,
 ) -> ConversationResult:
@@ -254,6 +262,7 @@ async def run_conversation(
         tool_registry=tool_registry,
         max_iterations=max_iterations,
         retry_policy=retry_policy if retry_policy is not None else RetryPolicy(),
+        stream=stream,
         event_callback=event_callback,
         turn_id=turn_id,
     )

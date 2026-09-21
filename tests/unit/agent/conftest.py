@@ -25,6 +25,7 @@ class ScriptedModelClient:
     script: list[NormalizedResponse | Exception]
     requests: list[dict] = field(default_factory=list)
     closed: bool = False
+    streamed_calls: int = 0
 
     async def complete(self, messages, *, tools=()):
         self.requests.append({"messages": copy.deepcopy(list(messages)), "tools": list(tools)})
@@ -35,6 +36,17 @@ class ScriptedModelClient:
         if isinstance(step, Exception):
             raise step
         return step
+
+    async def stream(self, messages, *, tools=(), on_text_delta=None, on_tool_started=None):
+        """Deliver the scripted response the way ``ModelClient.stream`` reports it."""
+        self.streamed_calls += 1
+        response = await self.complete(messages, tools=tools)
+        for tool_call in response.tool_calls:
+            if on_tool_started is not None:
+                on_tool_started(tool_call.name)
+        if response.content and not response.tool_calls and on_text_delta is not None:
+            on_text_delta(response.content)
+        return response
 
     async def aclose(self):
         self.closed = True

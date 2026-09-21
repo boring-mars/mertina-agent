@@ -216,3 +216,43 @@ def test_default_backoff_returns_early_when_the_run_is_stopped():
             return await interruptible_backoff_sleep(30)
 
     assert asyncio.run(asyncio.wait_for(scenario(), 5)) is True
+
+
+def test_failed_stream_is_retried_after_telling_consumers_to_discard_partial_text(
+    settings, tool_registry, fake
+):
+    class FlakyStream:
+        def __init__(self):
+            self.attempts = 0
+
+        async def stream(self, messages, *, tools=(), on_text_delta=None, on_tool_started=None):
+            del messages, tools, on_tool_started
+            self.attempts += 1
+            if self.attempts == 1:
+                on_text_delta("Partial ans")
+                message = "Model stream ended before the response was complete."
+                raise ModelResponseError(message)
+            on_text_delta("Full answer.")
+            return fake.text("Full answer.")
+
+        async def aclose(self):
+            return None
+
+    events = []
+    agent = Agent(
+        settings,
+        model_client=FlakyStream(),
+        tool_registry=tool_registry,
+        retry_policy=fake.retry_policy(),
+        event_callback=events.append,
+    )
+
+    result = run(agent)
+
+    assert [type(event).__name__ for event in events] == [
+        "TextDelta",
+        "RetryScheduled",
+        "TextDelta",
+        "RunCompleted",
+    ]
+    assert result["final_response"] == "Full answer."

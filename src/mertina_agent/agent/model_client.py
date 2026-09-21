@@ -5,7 +5,9 @@ Copyright (c) 2025 Nous Research. MIT; see LICENSES/Hermes-Agent-MIT.txt
 and docs/sources/hermes-model-transport.md for the pinned source and reductions.
 """
 
-from collections.abc import Sequence
+import logging
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from json import JSONDecodeError
 from types import TracebackType
 from typing import Protocol, Self
@@ -20,6 +22,53 @@ from mertina_agent.config import Settings
 from mertina_agent.exceptions import ConfigurationError, ModelRequestError, ModelResponseError
 
 _NO_AUTH_KEY = "mertina-no-auth-placeholder"
+
+logger = logging.getLogger(__name__)
+
+type TextDeltaCallback = Callable[[str], None]
+type ToolStartedCallback = Callable[[str], None]
+
+
+@contextmanager
+def _translate_sdk_errors() -> Iterator[None]:
+    """Map SDK and decoding failures to safe project errors, keeping the cause chained."""
+    try:
+        yield
+    except openai.APITimeoutError as exc:
+        message = "Model request timed out"
+        raise ModelRequestError(message, kind="timeout") from exc
+    except openai.APIConnectionError as exc:
+        message = "Could not connect to the model endpoint"
+        raise ModelRequestError(message, kind="connection") from exc
+    except openai.APIStatusError as exc:
+        message = f"Model endpoint returned HTTP {exc.status_code}"
+        raise ModelRequestError(
+            message,
+            kind="http",
+            status_code=exc.status_code,
+            retry_after=exc.response.headers.get("retry-after"),
+        ) from exc
+    except (openai.APIResponseValidationError, JSONDecodeError, UnicodeDecodeError) as exc:
+        message = "Model endpoint returned an invalid response"
+        raise ModelResponseError(message) from exc
+    except openai.APIError as exc:
+        # The SDK raises a bare APIError for an error event inside a stream.
+        message = "Model stream reported an error"
+        raise ModelRequestError(message, kind="connection") from exc
+
+
+def _rejects_stream_options(error: BaseException | None) -> bool:
+    """Whether a 400/422 names ``stream_options`` as an unknown or extra field.
+
+    Copied from Hermes agent/chat_completion_helpers.py (``_rejects_stream_options``):
+    strict OpenAI-compatible endpoints reject the usage extension outright.
+    """
+    if not isinstance(error, openai.APIStatusError) or error.status_code not in (400, 422):
+        return False
+    body = f"{error.body or ''} {error}".lower()
+    return "stream_options" in body and any(
+        word in body for word in ("extra", "not supported", "unrecognized", "unexpected", "unknown")
+    )
 
 
 class ModelClientProtocol(Protocol):
@@ -36,6 +85,17 @@ class ModelClientProtocol(Protocol):
         tools: Sequence[ToolDefinition] = (),
     ) -> NormalizedResponse:
         """Send one request and return its normalized result without executing tools."""
+        ...
+
+    async def stream(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        tools: Sequence[ToolDefinition] = (),
+        on_text_delta: TextDeltaCallback | None = None,
+        on_tool_started: ToolStartedCallback | None = None,
+    ) -> NormalizedResponse:
+        """Stream one request, reporting visible text deltas and tool starts."""
         ...
 
     async def aclose(self) -> None:
@@ -126,6 +186,11 @@ class ModelClient:
                 "Authorization": f"Bearer {self._key}" if self._key else Omit(),
             }
         )
+        self._stream_headers: dict[str, str | Omit] = {
+            **self._headers,
+            "Accept": "text/event-stream",
+        }
+        self._stream_options_unsupported = False
 
     @staticmethod
     def _check_injected_client(sdk_client: AsyncOpenAI) -> None:
@@ -165,7 +230,7 @@ class ModelClient:
         """
         self._ensure_open()
         kwargs = self._transport.build_kwargs(self._settings.llm_model, messages, tools)
-        try:
+        with _translate_sdk_errors():
             # SDK models are not our protocol validator. Use its supported raw
             # response API to validate wire values before any model conversion
             # or serialization, including malformed counts and unknown reasons.
@@ -173,24 +238,64 @@ class ModelClient:
                 **kwargs, extra_headers=self._headers
             )
             payload: object = response.http_response.json()
-        except openai.APITimeoutError as exc:
-            message = "Model request timed out"
-            raise ModelRequestError(message, kind="timeout") from exc
-        except openai.APIConnectionError as exc:
-            message = "Could not connect to the model endpoint"
-            raise ModelRequestError(message, kind="connection") from exc
-        except openai.APIStatusError as exc:
-            message = f"Model endpoint returned HTTP {exc.status_code}"
-            raise ModelRequestError(
-                message,
-                kind="http",
-                status_code=exc.status_code,
-                retry_after=exc.response.headers.get("retry-after"),
-            ) from exc
-        except (openai.APIResponseValidationError, JSONDecodeError, UnicodeDecodeError) as exc:
-            message = "Model endpoint returned an invalid response"
-            raise ModelResponseError(message) from exc
         return self._transport.normalize_response(payload)
+
+    async def stream(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        tools: Sequence[ToolDefinition] = (),
+        on_text_delta: TextDeltaCallback | None = None,
+        on_tool_started: ToolStartedCallback | None = None,
+    ) -> NormalizedResponse:
+        """Stream one request, reporting visible text as it arrives.
+
+        The result is the same as :meth:`complete` would return. Text that
+        follows the start of a tool call is not reported, as in Hermes. An
+        endpoint that rejects the ``stream_options`` usage extension is called
+        again without it, and not asked again for the life of this client.
+
+        Raises:
+            ModelInputError: If input is outside the supported text contract.
+            ModelRequestError: For timeout, connection, HTTP, stream-error or
+                closed failures.
+            ModelResponseError: If a chunk is malformed or the stream ends early.
+        """
+        self._ensure_open()
+        delivered = False
+        while True:
+            include_usage = not self._stream_options_unsupported
+            kwargs = self._transport.build_stream_kwargs(
+                self._settings.llm_model, messages, tools, include_usage=include_usage
+            )
+            accumulator = self._transport.stream_accumulator()
+            try:
+                with _translate_sdk_errors():
+                    stream = await self._sdk.chat.completions.create(
+                        **kwargs, extra_headers=self._stream_headers
+                    )
+                    try:
+                        async for chunk in stream:
+                            update = accumulator.feed(chunk)
+                            if update.text and on_text_delta is not None:
+                                delivered = True
+                                on_text_delta(update.text)
+                            for name in update.tools_started:
+                                if on_tool_started is not None:
+                                    on_tool_started(name)
+                    finally:
+                        # Release the connection on success, failure or cancellation.
+                        await stream.close()
+            except ModelRequestError as exc:
+                if include_usage and not delivered and _rejects_stream_options(exc.__cause__):
+                    logger.info(
+                        "Endpoint rejected stream_options (HTTP %s); retrying without it",
+                        exc.status_code,
+                    )
+                    self._stream_options_unsupported = True
+                    continue
+                raise
+            return accumulator.finish()
 
     def _ensure_open(self) -> None:
         if self._closed or self._sdk.is_closed():

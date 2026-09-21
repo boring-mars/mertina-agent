@@ -6,7 +6,7 @@ import threading
 import pytest
 
 from mertina_agent.agent.core import Agent
-from mertina_agent.agent.events import RunCompleted
+from mertina_agent.agent.events import RunStopped
 from mertina_agent.agent.tool_executor import INTERRUPTED_TOOL_RESULT
 from mertina_agent.agent.turn_api_call import INTERRUPT_WAITING_FOR_MODEL_PREFIX, perform_api_call
 from mertina_agent.agent.turn_failure_copy import FAILED_TURN_NOTICE, LOCAL_PROCESSING_ERROR
@@ -30,6 +30,10 @@ class HangingClient:
             self.cancelled = True
             raise
         raise AssertionError  # pragma: no cover - never reached
+
+    async def stream(self, messages, *, tools=(), on_text_delta=None, on_tool_started=None):
+        del on_text_delta, on_tool_started
+        return await self.complete(messages, tools=tools)
 
     async def aclose(self):
         return None
@@ -55,7 +59,8 @@ def test_stop_while_waiting_for_the_model_abandons_the_request(settings, tool_re
     assert result["turn_exit_reason"] == "interrupted_during_api_call"
     assert result["final_response"].startswith(INTERRUPT_WAITING_FOR_MODEL_PREFIX)
     assert result["messages"][-1]["content"] == FAILED_TURN_NOTICE
-    assert isinstance(events[-1], RunCompleted)
+    assert isinstance(events[-1], RunStopped)
+    assert events[-1].turn_exit_reason == "interrupted_during_api_call"
     fake.assert_replayable(result["messages"])
 
 
@@ -192,3 +197,35 @@ def test_local_bug_ends_the_turn_with_a_valid_history(settings, fake):
 )
 def test_short_detail_keeps_the_first_line_within_bounds(error, expected):
     assert short_detail(error) == expected
+
+
+class PartlyStreamingClient(HangingClient):
+    """Streams some text, then hangs until it is cancelled."""
+
+    async def stream(self, messages, *, tools=(), on_text_delta=None, on_tool_started=None):
+        del on_tool_started
+        on_text_delta("The answer is ")
+        on_text_delta("forty")
+        return await self.complete(messages, tools=tools)
+
+
+def test_stop_mid_stream_keeps_the_text_already_streamed(settings, tool_registry, fake):
+    client = PartlyStreamingClient()
+    events = []
+    agent = Agent(
+        settings, model_client=client, tool_registry=tool_registry, event_callback=events.append
+    )
+
+    async def scenario():
+        turn = asyncio.create_task(agent.run_conversation("Hi"))
+        await client.started.wait()
+        agent.interrupt()
+        return await asyncio.wait_for(turn, 5)
+
+    result = asyncio.run(scenario())
+
+    assert result["final_response"] == "The answer is forty"
+    assert result["messages"][-1] == {"role": "assistant", "content": "The answer is forty"}
+    assert [event.text for event in events if hasattr(event, "text")] == ["The answer is ", "forty"]
+    assert isinstance(events[-1], RunStopped)
+    fake.assert_replayable(result["messages"])

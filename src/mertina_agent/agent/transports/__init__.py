@@ -1,7 +1,10 @@
 """Explicit model transport contracts without dynamic provider discovery."""
 
-from mertina_agent.agent.transports.base import ProviderTransport
-from mertina_agent.agent.transports.chat_completions import ChatCompletionsTransport
+from mertina_agent.agent.transports.base import ProviderTransport, StreamAccumulator
+from mertina_agent.agent.transports.chat_completions import (
+    ChatCompletionsStreamAccumulator,
+    ChatCompletionsTransport,
+)
 from mertina_agent.agent.transports.types import (
     AssistantMessage,
     ChatMessage,
@@ -11,6 +14,7 @@ from mertina_agent.agent.transports.types import (
     JsonObject,
     JsonValue,
     NormalizedResponse,
+    StreamUpdate,
     SystemMessage,
     ToolCall,
     ToolCallMessage,
@@ -22,6 +26,7 @@ from mertina_agent.agent.transports.types import (
 
 __all__ = [
     "AssistantMessage",
+    "ChatCompletionsStreamAccumulator",
     "ChatCompletionsTransport",
     "ChatMessage",
     "DeveloperMessage",
@@ -31,6 +36,8 @@ __all__ = [
     "JsonValue",
     "NormalizedResponse",
     "ProviderTransport",
+    "StreamAccumulator",
+    "StreamUpdate",
     "SystemMessage",
     "ToolCall",
     "ToolCallMessage",
