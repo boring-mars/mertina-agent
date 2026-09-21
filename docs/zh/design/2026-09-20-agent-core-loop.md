@@ -78,7 +78,7 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 
 | 层 | 内容 | 行数 | 处理 |
 |---|---|---:|---|
-| **L0** 接口叶子 | `agent/transports/base.py`、`agent/transports/types.py`、`agent/iteration_budget.py`、`agent/retry_utils.py`、`agent/web_search_provider.py`、`tools/interrupt.py` | 601 | **语义逐字抄**（定义见[从 Hermes 移植](../development/porting-from-hermes.md)规则 2），加来源头 |
+| **L0** 接口叶子 | `agent/transports/base.py`、`agent/transports/types.py`、`agent/iteration_budget.py`、`agent/retry_utils.py`、`agent/web_search_provider.py`、`tools/interrupt.py` | 601 | **语义逐字抄**（定义见[从 Hermes 移植](../development/porting-from-hermes.md)规则 2），加来源头；范围外的功能在紧随其后的单独 commit 里删除，各文件删什么见 §7.1 |
 | **L1** 循环骨架 | `conversation_loop.py` + 15 个 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + `AIAgent` 的 14 个 mixin + `hermes_cli/config.py` + `plugins/web/` 的 ddgs provider 等，共 46 个文件 | 28,234 | **拷进 vendor 后裁剪**，这是需要读懂的部分 |
 | **L2** 平台层 | `agent_runtime_helpers.py`(3,509)、`model_metadata.py`(2,551)、`turn_recovery.py`(1,813)、`error_classifier.py`(1,394)、`redact.py`(1,335)、`display.py`(1,118)、`hermes_constants.py`(1,515)、`hermes_logging.py`(764) 等 | ~36,000 | **不拷**，需要什么自己写什么 |
 
@@ -99,7 +99,7 @@ mertina/              ← 裁剪后搬出的代码，始终可运行（agent/ to
 
 搬运顺序，每步跑通再进下一步：
 
-1. L0 叶子（逐字抄）
+1. L0 叶子（语义逐字抄，删减另起一个 commit）
 2. `agent/transports/`
 3. `tools/registry.py` + `model_tools.py`
 4. `agent/tool_executor.py` + 工具分发
@@ -229,12 +229,12 @@ Python 版本跟随 Hermes：`>=3.11`。
 
 | 路径 | 来源 | 说明 |
 |---|---|---|
-| `mertina/agent/transports/base.py` | L0 逐字抄 | `ProviderTransport` ABC |
-| `mertina/agent/transports/types.py` | L0 逐字抄 | `ToolCall` / `Usage` / `NormalizedResponse`，裁掉 codex/bedrock/anthropic 的 `provider_data` 兼容属性 |
+| `mertina/agent/transports/base.py` | L0 语义逐字抄 | `ProviderTransport` ABC，无删减 |
+| `mertina/agent/transports/types.py` | L0 语义逐字抄 + 删减 | `ToolCall` / `Usage` / `NormalizedResponse`，裁掉 Codex / Bedrock / Anthropic 的 `provider_data` 兼容属性（`call_id`、`response_item_id`、`anthropic_content_blocks`、`bedrock_content_blocks`、`codex_reasoning_items`、`codex_message_items`）；保留 `extra_content`（Gemini 的 `thought_signature`）、`reasoning_content`、`reasoning_details`，它们在 OpenAI 兼容的 Chat Completions 上同样会出现 |
 | `mertina/agent/transports/__init__.py` | L1 裁剪 | transport 注册表，只注册 `chat_completions` |
 | `mertina/agent/transports/chat_completions.py` | L1 裁剪 | 保留 sanitize → build_kwargs → normalize_response 三步，去掉各家特判 |
 | `mertina/agent/client_lifecycle.py` | L1 裁剪 | 单个 OpenAI 客户端的构造与关闭。上游把构造放在 L2 的 `agent_runtime_helpers.py`，因为它要处理 MoA facade、Gemini 原生客户端、provider profile、SSL/代理校验——我们都没有，故合并到本文件，并在偏离表记一条 |
-| `mertina/agent/iteration_budget.py` | L0 逐字抄 | 去掉 `normalize_budget_warning_ratio` |
+| `mertina/agent/iteration_budget.py` | L0 语义逐字抄 + 删减 | 去掉 `normalize_budget_warning_ratio` |
 | `mertina/agent/conversation_loop.py` | L1 裁剪 | `run_conversation()` 入口与 turn 调度 |
 | `mertina/agent/turn_api_request.py` | L1 裁剪 | 请求组装 |
 | `mertina/agent/turn_response_intake.py` | L1 裁剪 | 响应归一化 |

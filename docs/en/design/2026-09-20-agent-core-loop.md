@@ -78,7 +78,7 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 
 | Layer | Contents | Lines | Treatment |
 |---|---|---:|---|
-| **L0** interface leaves | `agent/transports/base.py`, `agent/transports/types.py`, `agent/iteration_budget.py`, `agent/retry_utils.py`, `agent/web_search_provider.py`, `tools/interrupt.py` | 601 | **Copied verbatim in substance** (defined in rule 2 of [Porting from Hermes](../development/porting-from-hermes.md)), with a provenance header |
+| **L0** interface leaves | `agent/transports/base.py`, `agent/transports/types.py`, `agent/iteration_budget.py`, `agent/retry_utils.py`, `agent/web_search_provider.py`, `tools/interrupt.py` | 601 | **Copied verbatim in substance** (defined in rule 2 of [Porting from Hermes](../development/porting-from-hermes.md)), with a provenance header; out-of-scope features are cut in a separate commit right after, and §7.1 says what each file loses |
 | **L1** loop skeleton | `conversation_loop.py` + 15 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + 14 `AIAgent` mixins + `hermes_cli/config.py` + the ddgs provider under `plugins/web/` and others, 46 files in all | 28,234 | **Copied into vendor, then trimmed** — this is the part that has to be understood |
 | **L2** platform layer | `agent_runtime_helpers.py` (3,509), `model_metadata.py` (2,551), `turn_recovery.py` (1,813), `error_classifier.py` (1,394), `redact.py` (1,335), `display.py` (1,118), `hermes_constants.py` (1,515), `hermes_logging.py` (764) and others | ~36,000 | **Not copied**; written from scratch as needed |
 
@@ -99,7 +99,7 @@ mertina/              <- trimmed code moved out, runnable at all times (agent/, 
 
 Move-out order; each step runs before the next begins:
 
-1. L0 leaves (verbatim)
+1. L0 leaves (verbatim in substance, with the cuts in a commit of their own)
 2. `agent/transports/`
 3. `tools/registry.py` + `model_tools.py`
 4. `agent/tool_executor.py` and tool dispatch
@@ -236,12 +236,12 @@ Python version follows Hermes: `>=3.11`.
 
 | Path | Origin | Notes |
 |---|---|---|
-| `mertina/agent/transports/base.py` | L0 verbatim | The `ProviderTransport` ABC |
-| `mertina/agent/transports/types.py` | L0 verbatim | `ToolCall` / `Usage` / `NormalizedResponse`, minus the codex/bedrock/anthropic `provider_data` accessors |
+| `mertina/agent/transports/base.py` | L0 verbatim in substance | The `ProviderTransport` ABC, nothing cut |
+| `mertina/agent/transports/types.py` | L0 verbatim in substance, then cut | `ToolCall` / `Usage` / `NormalizedResponse`, minus the Codex, Bedrock and Anthropic `provider_data` accessors (`call_id`, `response_item_id`, `anthropic_content_blocks`, `bedrock_content_blocks`, `codex_reasoning_items`, `codex_message_items`); `extra_content` (Gemini's `thought_signature`), `reasoning_content` and `reasoning_details` stay, since they also appear on OpenAI-compatible Chat Completions |
 | `mertina/agent/transports/__init__.py` | L1 trimmed | Transport registry, registering `chat_completions` only |
 | `mertina/agent/transports/chat_completions.py` | L1 trimmed | Keeps sanitize → build_kwargs → normalize_response; vendor-specific special cases removed |
 | `mertina/agent/client_lifecycle.py` | L1 trimmed | Construction and teardown of the single OpenAI client. Upstream puts construction in L2's `agent_runtime_helpers.py` because it handles MoA facades, native Gemini clients, provider profiles and SSL/proxy validation — none of which we have — so it merges into this file, recorded as a deviation |
-| `mertina/agent/iteration_budget.py` | L0 verbatim | `normalize_budget_warning_ratio` dropped |
+| `mertina/agent/iteration_budget.py` | L0 verbatim in substance, then cut | `normalize_budget_warning_ratio` dropped |
 | `mertina/agent/conversation_loop.py` | L1 trimmed | The `run_conversation()` entry point and turn scheduling |
 | `mertina/agent/turn_api_request.py` | L1 trimmed | Request assembly |
 | `mertina/agent/turn_response_intake.py` | L1 trimmed | Response normalization |
