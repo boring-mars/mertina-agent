@@ -9,6 +9,8 @@ import logging
 import threading
 from typing import Any
 
+from mertina.agent.lazy_forward import forward as _forward
+
 logger = logging.getLogger(
     "run_agent"
 )  # origin module's logger name: log records / caplog filters unchanged
@@ -51,6 +53,8 @@ class ClientLifecycleMixin:
         if http_client is not None:
             return bool(getattr(http_client, "is_closed", False))
         return False
+
+    _create_openai_client = _forward("mertina.agent.agent_runtime_helpers", "create_openai_client")
 
     def _close_openai_client(self, client: Any, *, reason: str, shared: bool) -> None:
         if client is None:
