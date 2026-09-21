@@ -11,9 +11,10 @@ instead. ``asyncio.to_thread`` copies the context, which keeps
 change to how tools call it.
 """
 
+import asyncio
 import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 
 
@@ -30,6 +31,7 @@ class InterruptSignal:
         self._flag = threading.Event()
         self._lock = threading.Lock()
         self._reason: str | None = None
+        self._waiters: set[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = set()
 
     def set(self, reason: str | None = None) -> None:
         """Request a stop.
@@ -41,6 +43,12 @@ class InterruptSignal:
         with self._lock:
             self._reason = reason
             self._flag.set()
+            waiters = list(self._waiters)
+        # Wake awaiting coroutines on their own loops; set() may run on any thread.
+        for loop, event in waiters:
+            # A loop that closed meanwhile has nothing left to wake.
+            with suppress(RuntimeError):
+                loop.call_soon_threadsafe(event.set)
 
     def clear(self) -> None:
         """Withdraw the stop request and forget its reason."""
@@ -51,6 +59,33 @@ class InterruptSignal:
     def is_set(self) -> bool:
         """Return whether a stop has been requested."""
         return self._flag.is_set()
+
+    async def wait(self, timeout_s: float | None = None) -> bool:
+        """Wait until a stop is requested or ``timeout_s`` elapses.
+
+        Hermes polls its interrupt flag in 200 ms slices; awaiting the signal
+        reacts immediately with the same outcome.
+
+        Returns:
+            ``True`` if a stop was requested, ``False`` if the timeout elapsed.
+        """
+        if self._flag.is_set():
+            return True
+        waiter = (asyncio.get_running_loop(), asyncio.Event())
+        with self._lock:
+            self._waiters.add(waiter)
+        try:
+            # A stop set between the check above and the registration is seen here.
+            if self._flag.is_set():
+                return True
+            try:
+                await asyncio.wait_for(waiter[1].wait(), timeout_s)
+            except TimeoutError:
+                return False
+            return True
+        finally:
+            with self._lock:
+                self._waiters.discard(waiter)
 
     @property
     def reason(self) -> str | None:
@@ -76,6 +111,11 @@ def bind_interrupt_signal(signal: InterruptSignal) -> Iterator[InterruptSignal]:
         yield signal
     finally:
         _current_signal.reset(token)
+
+
+def current_interrupt_signal() -> InterruptSignal | None:
+    """Return the signal bound to the current context, if any."""
+    return _current_signal.get()
 
 
 def is_interrupted() -> bool:

@@ -1,6 +1,7 @@
 """Run-scoped interrupt signal and its context binding."""
 
 import asyncio
+import threading
 
 import pytest
 
@@ -87,3 +88,51 @@ def test_concurrent_runs_observe_only_their_own_signal():
         return await asyncio.gather(observe(stopped), observe(running))
 
     assert asyncio.run(scenario()) == [True, False]
+
+
+def test_wait_times_out_when_no_stop_arrives():
+    assert asyncio.run(InterruptSignal().wait(0.01)) is False
+
+
+def test_wait_returns_at_once_when_already_stopped():
+    signal = InterruptSignal()
+    signal.set()
+
+    assert asyncio.run(signal.wait(30)) is True
+
+
+def test_wait_wakes_when_another_thread_requests_a_stop():
+    signal = InterruptSignal()
+
+    async def scenario():
+        waiting = asyncio.create_task(signal.wait(30))
+        await asyncio.sleep(0.01)
+        thread = threading.Thread(target=signal.set)
+        thread.start()
+        thread.join()
+        return await asyncio.wait_for(waiting, 5)
+
+    assert asyncio.run(scenario()) is True
+
+
+class StopOnAcquire:
+    """A lock that requests a stop while ``wait`` registers, forcing the race it guards."""
+
+    def __init__(self, signal):
+        self._signal = signal
+        self._inner = threading.Lock()
+
+    def __enter__(self):
+        self._inner.acquire()
+        self._signal._flag.set()
+        return self
+
+    def __exit__(self, *exc_info):
+        self._inner.release()
+
+
+def test_stop_arriving_during_registration_is_not_missed():
+    signal = InterruptSignal()
+    signal._lock = StopOnAcquire(signal)
+
+    assert asyncio.run(asyncio.wait_for(signal.wait(30), 5)) is True

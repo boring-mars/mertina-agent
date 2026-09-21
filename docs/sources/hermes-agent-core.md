@@ -144,6 +144,22 @@
 | 通过 AST 扫描 `tools/` 发现内置工具 | `discover_builtin_tools()` 导入显式列表 | 启动可预测，内置工具一处可审阅 |
 | 合成的跳过/取消结果与搜索结果一样经过 untrusted 包装 | 相同（保留 Hermes 行为） | 包装无害；不对内容做"是否已包装"的特判 |
 
+### CP4：重试、停止与错误收尾
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 错误分类器按数十种原因决定重试、轮换、fallback、压缩 | 只保留可重试判定：timeout、connection、HTTP 408/429/5xx、无效响应可重试；其他 4xx 与 `closed` 不重试 | 与 Hermes 状态表一致；其余恢复手段属于 P1 |
+| 退避以 200ms 切片 sleep 并轮询中断标志 | `InterruptSignal.wait(timeout)` 直接等待 | 语义相同，停止即时生效 |
+| 请求在线程中执行并轮询中断，抛 `InterruptedError` 进入重试循环 | 请求任务与停止信号赛跑，结果以 `ApiCallVerdict` 返回 | 异步等价写法，沿用 Hermes 的 verdict 模式 |
+| 抖动种子取自墙钟与计数器 | `RetryPolicy` 注入随机源与 sleep 函数，默认 `SystemRandom` | 测试规范要求注入时钟与随机源 |
+| 中断时保留已流式输出的部分文本 | CP4 只给出等待时长文案；部分文本随 CP5 流式加入 | 检查点分步交付 |
+| 未被恢复的错误文案包含 `/model`、`hermes doctor` 等命令与 provider 名称 | 文案只描述失败与下一步，不引用不存在的命令 | Mertina 没有这些命令 |
+| 外层异常按 traceback 模块区分本地与 API 错误，API 错误可重试，本地错误保持 `failed=False` | 逃逸异常一律视为本地缺陷：补齐未应答工具结果并以 `failed=True` 结束 | 模型错误已由重试循环、工具错误已由 registry 处理；如实标记失败 |
+| `apply_retry_restarts` 处理四种 restart 标志 | 不需要：重试循环直接返回响应、终止结果或中断状态 | redirect/压缩/fallback/续写均未迁移 |
+| `RetryScheduled` 类事件在计划中属于 CP5 | 随重试一起在 CP4 加入 | 事件与产生它的机制同步交付 |
+| 未运行时调用 `interrupt()` 也会置位 | 无运行中的轮次时返回 `False` 且不置位 | 避免遗留的停止请求意外中断下一轮 |
+| 停止请求在工具开始前到达时，`web_search_tool` 返回 `Interrupted` | 相同（保留 Hermes 行为） | 工具入口检查中断 |
+
 ## 异步改写
 
 | Hermes 机制 | Mertina 机制 | 保持的语义 |

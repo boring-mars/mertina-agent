@@ -2,6 +2,7 @@
 
 import copy
 import json
+import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ import pytest
 
 from mertina_agent.agent.transports import ChatCompletionsTransport, NormalizedResponse, ToolCall
 from mertina_agent.agent.transports.types import Usage
+from mertina_agent.agent.turn_api_error import RetryPolicy
 from mertina_agent.config import Settings
 from mertina_agent.tools.registry import ToolRegistry
 
@@ -103,6 +105,24 @@ def tool_registry(tool_calls_seen):
     return tool_registry
 
 
+@dataclass
+class RecordingSleep:
+    """Backoff that returns at once, records each wait and can report a stop."""
+
+    waits: list[float] = field(default_factory=list)
+    stop_on_call: int | None = None
+
+    async def __call__(self, wait_s):
+        self.waits.append(wait_s)
+        return self.stop_on_call is not None and len(self.waits) >= self.stop_on_call
+
+
+def retry_policy(max_attempts=3, *, sleep=None, seed=7):
+    return RetryPolicy(
+        max_attempts=max_attempts, rng=random.Random(seed), sleep=sleep or RecordingSleep()
+    )
+
+
 @pytest.fixture
 def fake():
     """Helpers for scripting model responses, exposed as a fixture for test modules."""
@@ -113,4 +133,6 @@ def fake():
         call=call,
         assert_replayable=assert_replayable,
         now=FIXED_NOW,
+        retry_policy=retry_policy,
+        sleep=RecordingSleep,
     )

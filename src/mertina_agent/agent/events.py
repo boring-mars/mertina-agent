@@ -49,6 +49,26 @@ class ToolCallFinished:
 
 
 @dataclass(frozen=True)
+class RetryScheduled:
+    """A failed model call will be retried after a backoff.
+
+    Consumers that displayed partial output of the failed attempt should discard
+    it: the retry starts the response over.
+
+    Attributes:
+        attempt: Number of the attempt that failed, starting at 1.
+        max_attempts: Attempts allowed for this model call.
+        wait_s: Backoff before the next attempt.
+        reason: Safe failure category, e.g. ``"http 503"`` or ``"invalid_response"``.
+    """
+
+    attempt: int
+    max_attempts: int
+    wait_s: float
+    reason: str
+
+
+@dataclass(frozen=True)
 class RunCompleted:
     """A turn ended, whether with an answer, a partial result or a failure.
 
@@ -63,7 +83,7 @@ class RunCompleted:
     turn_exit_reason: str
 
 
-type AgentEvent = ToolCallStarted | ToolCallFinished | RunCompleted
+type AgentEvent = ToolCallStarted | ToolCallFinished | RetryScheduled | RunCompleted
 type EventCallback = Callable[[AgentEvent], None]
 
 

@@ -20,6 +20,7 @@ def test_defaults_apply_when_nothing_is_set():
     assert settings.max_iterations == 10
     assert settings.web_search_backend == "ddgs"
     assert settings.web_search_timeout_s == 30.0
+    assert settings.llm_max_attempts == 3
 
 
 def test_environment_variables_override_defaults(monkeypatch: pytest.MonkeyPatch):
@@ -102,6 +103,7 @@ def test_missing_env_file_is_not_an_error(tmp_path: Path):
         ("MERTINA_LLM_BASE_URL", "https://example.test/\x7fbad"),
         ("MERTINA_LLM_MODEL", "  "),
         ("MERTINA_WEB_SEARCH_BACKEND", "google"),
+        ("MERTINA_LLM_MAX_ATTEMPTS", "0"),
         ("MERTINA_WEB_SEARCH_TIMEOUT_S", "0"),
         ("MERTINA_WEB_SEARCH_TIMEOUT_S", "inf"),
     ],

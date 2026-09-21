@@ -14,24 +14,33 @@ explicit arguments and returns a verdict whose fields the loop copies back.
 The loop is asynchronous. The v0.2 gateway will run turns as tasks on its event
 loop rather than handing them to a thread pool.
 
-At this checkpoint a failed model request ends the turn; retries, interrupting
-an in-flight request and outer-loop error recovery are added later.
+A failed model call is retried by ``_run_api_retry_loop`` without touching the
+history or the iteration budget; a stop request is honoured before each call,
+while a call is in flight, during backoff and before each tool.
 """
 
 import logging
+import time
 from collections.abc import Collection, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from mertina_agent.agent.events import EventCallback
 from mertina_agent.agent.iteration_budget import IterationBudget
 from mertina_agent.agent.model_client import ModelClientProtocol
-from mertina_agent.agent.transports.types import ChatMessage, ToolDefinition, Usage
-from mertina_agent.agent.turn_api_call import perform_api_call
+from mertina_agent.agent.transports.types import (
+    ChatMessage,
+    NormalizedResponse,
+    ToolDefinition,
+    Usage,
+)
+from mertina_agent.agent.turn_api_call import handle_api_interrupt, perform_api_call
+from mertina_agent.agent.turn_api_error import RetryPolicy, handle_api_error
 from mertina_agent.agent.turn_context import build_api_messages, build_turn_context
 from mertina_agent.agent.turn_failure_copy import failed_turn_notice
 from mertina_agent.agent.turn_final_response import finish_text_response
 from mertina_agent.agent.turn_finalizer import finalize_turn
 from mertina_agent.agent.turn_iteration_prep import begin_iteration
+from mertina_agent.agent.turn_loop_errors import handle_outer_loop_error
 from mertina_agent.agent.turn_response_intake import normalize_model_response
 from mertina_agent.agent.turn_result import EMPTY_USAGE, ConversationResult, add_usage
 from mertina_agent.agent.turn_tool_round import run_tool_round
@@ -39,8 +48,6 @@ from mertina_agent.exceptions import ModelRequestError, ModelResponseError
 from mertina_agent.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
-
-MODEL_REQUEST_FAILED = "The model request failed: {detail}"
 
 
 @dataclass
@@ -54,9 +61,53 @@ class _LoopState:
     interrupted: bool = False
     failed: bool = False
     turn_exit_reason: str = "unknown"
-    usage: Usage = field(default=EMPTY_USAGE)
+    usage: Usage = EMPTY_USAGE
     invalid_tool_retries: int = 0
     invalid_json_retries: int = 0
+    response: NormalizedResponse | None = None
+
+
+async def _run_api_retry_loop(
+    s: _LoopState,
+    *,
+    model_client: ModelClientProtocol,
+    api_messages: list[ChatMessage],
+    tools: Sequence[ToolDefinition],
+    retry_policy: RetryPolicy,
+    event_callback: EventCallback | None,
+) -> ConversationResult | None:
+    """One model call with its retry loop.
+
+    Returns a turn result when an error ends the turn; otherwise ``None`` with
+    either ``s.response`` set or ``s.interrupted`` set by a stop in flight.
+    """
+    s.response = None
+    api_start_time = time.monotonic()
+    retry_count = 0
+    while True:
+        try:
+            call = await perform_api_call(model_client, api_messages, tools)
+        except (ModelRequestError, ModelResponseError) as exc:
+            verdict = await handle_api_error(
+                exc,
+                retry_count=retry_count,
+                policy=retry_policy,
+                messages=s.messages,
+                api_call_count=s.api_call_count,
+                usage=s.usage,
+                event_callback=event_callback,
+            )
+            if verdict.action == "return":
+                return verdict.result
+            retry_count = verdict.retry_count
+            continue
+        if call.action == "interrupted":
+            s.interrupted = True
+            s.turn_exit_reason = "interrupted_during_api_call"
+            s.final_response = handle_api_interrupt(api_start_time=api_start_time).final_response
+            return None
+        s.response = call.response
+        return None
 
 
 async def _run_conversation_turn(
@@ -69,6 +120,7 @@ async def _run_conversation_turn(
     valid_tool_names: Collection[str],
     tool_registry: ToolRegistry,
     max_iterations: int,
+    retry_policy: RetryPolicy,
     event_callback: EventCallback | None,
     turn_id: str,
 ) -> tuple[ConversationResult, int]:
@@ -100,52 +152,62 @@ async def _run_conversation_turn(
             break
 
         api_messages = build_api_messages(s.messages, active_system_prompt=active_system_prompt)
-        try:
-            response = await perform_api_call(model_client, api_messages, tools)
-        except (ModelRequestError, ModelResponseError) as exc:
-            logger.warning("Model request #%d failed: %s", s.api_call_count, exc)
-            return {
-                "final_response": MODEL_REQUEST_FAILED.format(detail=exc),
-                "messages": s.messages,
-                "api_calls": s.api_call_count,
-                "completed": False,
-                "failed": True,
-                "interrupted": False,
-                "partial": False,
-                "turn_exit_reason": "model_request_failed",
-                "usage": s.usage,
-                "error": str(exc),
-            }, s.current_turn_user_idx
+        early_result = await _run_api_retry_loop(
+            s,
+            model_client=model_client,
+            api_messages=api_messages,
+            tools=tools,
+            retry_policy=retry_policy,
+            event_callback=event_callback,
+        )
+        if early_result is not None:
+            return early_result, s.current_turn_user_idx
+        if s.interrupted or s.response is None:
+            break
+        response = s.response
         s.usage = add_usage(s.usage, response.usage)
 
-        intake = normalize_model_response(
-            response, messages=s.messages, api_call_count=s.api_call_count, usage=s.usage
-        )
-        if intake.action == "return" and intake.result is not None:
-            return intake.result, s.current_turn_user_idx
-
-        if response.tool_calls:
-            round_verdict = await run_tool_round(
-                response,
-                messages=s.messages,
-                valid_tool_names=valid_tool_names,
-                tool_registry=tool_registry,
-                event_callback=event_callback,
-                api_call_count=s.api_call_count,
-                invalid_tool_retries=s.invalid_tool_retries,
-                invalid_json_retries=s.invalid_json_retries,
-                usage=s.usage,
+        try:
+            intake = normalize_model_response(
+                response, messages=s.messages, api_call_count=s.api_call_count, usage=s.usage
             )
-            s.invalid_tool_retries = round_verdict.invalid_tool_retries
-            s.invalid_json_retries = round_verdict.invalid_json_retries
-            if round_verdict.action == "return" and round_verdict.result is not None:
-                return round_verdict.result, s.current_turn_user_idx
-            continue
+            if intake.action == "return" and intake.result is not None:
+                return intake.result, s.current_turn_user_idx
 
-        final = finish_text_response(response, messages=s.messages, api_call_count=s.api_call_count)
-        s.final_response = final.final_response
-        s.turn_exit_reason = final.turn_exit_reason
-        break
+            if response.tool_calls:
+                round_verdict = await run_tool_round(
+                    response,
+                    messages=s.messages,
+                    valid_tool_names=valid_tool_names,
+                    tool_registry=tool_registry,
+                    event_callback=event_callback,
+                    api_call_count=s.api_call_count,
+                    invalid_tool_retries=s.invalid_tool_retries,
+                    invalid_json_retries=s.invalid_json_retries,
+                    usage=s.usage,
+                )
+                s.invalid_tool_retries = round_verdict.invalid_tool_retries
+                s.invalid_json_retries = round_verdict.invalid_json_retries
+                if round_verdict.action == "return" and round_verdict.result is not None:
+                    return round_verdict.result, s.current_turn_user_idx
+                continue
+
+            final = finish_text_response(
+                response, messages=s.messages, api_call_count=s.api_call_count
+            )
+            s.final_response = final.final_response
+            s.turn_exit_reason = final.turn_exit_reason
+            break
+        except Exception as exc:
+            # The turn is the outermost boundary of the loop: a local bug ends it
+            # with a valid history instead of leaving the caller without one.
+            outer = handle_outer_loop_error(
+                exc, messages=s.messages, api_call_count=s.api_call_count
+            )
+            s.final_response = outer.final_response
+            s.turn_exit_reason = outer.turn_exit_reason
+            s.failed = True
+            break
 
     result = await finalize_turn(
         final_response=s.final_response,
@@ -173,6 +235,7 @@ async def run_conversation(
     valid_tool_names: Collection[str],
     tool_registry: ToolRegistry,
     max_iterations: int,
+    retry_policy: RetryPolicy | None = None,
     event_callback: EventCallback | None = None,
     turn_id: str,
 ) -> ConversationResult:
@@ -190,6 +253,7 @@ async def run_conversation(
         valid_tool_names=valid_tool_names,
         tool_registry=tool_registry,
         max_iterations=max_iterations,
+        retry_policy=retry_policy if retry_policy is not None else RetryPolicy(),
         event_callback=event_callback,
         turn_id=turn_id,
     )

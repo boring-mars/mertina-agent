@@ -35,6 +35,23 @@ MAX_ITERATIONS_NO_SUMMARY = (
     "produce a summary. Send `continue` to keep going, or raise MERTINA_MAX_ITERATIONS."
 )
 
+MODEL_REQUEST_FAILED = "The model request failed: {detail}"
+
+RETRIES_EXHAUSTED = "The model request failed after {attempts} attempts: {detail}"
+
+RATE_LIMITED_EXHAUSTED = (
+    "The model provider is rate limiting requests and still refused after {attempts} attempts: "
+    "{detail}. Wait a moment and send your message again."
+)
+
+NEXT_STEPS_LOOP = "Your message is saved. Send `continue` to try again."
+
+LOCAL_PROCESSING_ERROR = (
+    "The agent hit an internal error while handling the model's reply and stopped this turn. "
+    + NEXT_STEPS_LOOP
+    + "\n\nDetails: {detail}"
+)
+
 EMPTY_SUMMARY_RESPONSE = "I reached the iteration limit and couldn't generate a summary."
 
 

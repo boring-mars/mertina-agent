@@ -37,6 +37,8 @@ class Settings(BaseSettings):
             as a local model server usually does.
         llm_model: Model name sent with every request.
         llm_timeout_s: Timeout for each network operation, not the whole turn.
+        llm_max_attempts: Attempts per model call, including the first; failed
+            attempts that can succeed on retry are retried with backoff.
         max_iterations: Model calls a single turn may spend before the agent
             gives up on the tool loop.
         web_search_backend: Provider behind the ``web_search`` tool.
@@ -58,6 +60,7 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     llm_model: str = "gpt-4o-mini"
     llm_timeout_s: float = Field(default=60.0, gt=0.0, allow_inf_nan=False)
+    llm_max_attempts: int = Field(default=3, ge=1)
     max_iterations: int = Field(default=10, ge=1)
     web_search_backend: Literal["ddgs"] = "ddgs"
     web_search_timeout_s: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)

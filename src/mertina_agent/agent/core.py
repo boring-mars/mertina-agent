@@ -24,6 +24,7 @@ from mertina_agent.agent.interrupt import InterruptSignal, bind_interrupt_signal
 from mertina_agent.agent.model_client import ModelClient, ModelClientProtocol
 from mertina_agent.agent.system_prompt import build_system_prompt
 from mertina_agent.agent.transports.types import ChatMessage, ToolDefinition
+from mertina_agent.agent.turn_api_error import RetryPolicy
 from mertina_agent.agent.turn_result import ConversationResult
 from mertina_agent.config import Settings
 from mertina_agent.exceptions import AgentBusyError, ModelInputError
@@ -59,6 +60,7 @@ class Agent:
         system_message: str | None = None,
         event_callback: EventCallback | None = None,
         clock: Callable[[], datetime] = _local_now,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         """Create an agent.
 
@@ -72,6 +74,8 @@ class Agent:
             system_message: Extra instructions added to the system prompt.
             event_callback: Receives progress events; failures in it are logged only.
             clock: Returns the current timezone-aware time for the prompt's date line.
+            retry_policy: How failed model calls are retried; defaults to
+                ``settings.llm_max_attempts`` attempts with jittered backoff.
 
         Raises:
             ConfigurationError: If a named toolset has no registered tools.
@@ -85,6 +89,11 @@ class Agent:
         self._system_message = system_message
         self._event_callback = event_callback
         self._clock = clock
+        self._retry_policy = (
+            retry_policy
+            if retry_policy is not None
+            else RetryPolicy(max_attempts=settings.llm_max_attempts)
+        )
         self.tools: list[ToolDefinition] = get_tool_definitions(
             enabled_toolsets, disabled_toolsets, tool_registry=tool_registry
         )
@@ -153,6 +162,7 @@ class Agent:
                     valid_tool_names=self.valid_tool_names,
                     tool_registry=self._tool_registry,
                     max_iterations=self.max_iterations,
+                    retry_policy=self._retry_policy,
                     event_callback=self._event_callback,
                     turn_id=uuid.uuid4().hex,
                 )
@@ -170,6 +180,34 @@ class Agent:
             ),
         )
         return result
+
+    def interrupt(self, reason: str | None = None) -> bool:
+        """Ask the running turn to stop; safe to call from any thread or task.
+
+        The turn stops before its next model call, abandons a call in flight,
+        cuts a retry backoff short and skips tools not yet started. Calls that
+        were never started, and tool calls left open, are answered so the
+        returned history stays valid for the next turn.
+
+        Args:
+            reason: Optional user-safe cause; never the user's message text.
+
+        Returns:
+            ``True`` if a running turn was signalled, ``False`` if none was running.
+        """
+        if not self._running:
+            return False
+        self._interrupt.set(reason)
+        return True
+
+    def clear_interrupt(self) -> None:
+        """Withdraw a stop request that the running turn has not acted on yet."""
+        self._interrupt.clear()
+
+    @property
+    def is_interrupted(self) -> bool:
+        """Whether a stop has been requested for the running turn."""
+        return self._interrupt.is_set()
 
     async def chat(self, message: str) -> str:
         """Run one turn without history and return only the final text.

@@ -30,7 +30,12 @@ from mertina_agent.exceptions import (
 def make_agent(settings, tool_registry, fake):
     def _make(script, **kwargs):
         client = fake.client(script)
-        options = {"tool_registry": tool_registry, "clock": lambda: fake.now, **kwargs}
+        options = {
+            "tool_registry": tool_registry,
+            "clock": lambda: fake.now,
+            "retry_policy": fake.retry_policy(),
+            **kwargs,
+        }
         return Agent(options.pop("settings", settings), model_client=client, **options), client
 
     return _make
@@ -321,18 +326,22 @@ def test_refusal_is_returned_as_the_answer_and_kept_in_history(make_agent, fake)
 
 
 def test_model_request_failure_ends_the_turn_with_a_valid_history(make_agent, fake):
-    agent, _ = make_agent([ModelRequestError("Model endpoint returned HTTP 500", kind="http")])
+    agent, _ = make_agent(
+        [ModelRequestError("Model endpoint returned HTTP 401", kind="http", status_code=401)]
+    )
 
     result = run(agent)
 
     assert result["failed"] is True
-    assert result["error"] == "Model endpoint returned HTTP 500"
+    assert result["error"] == "Model endpoint returned HTTP 401"
     assert result["messages"][-1]["content"] == FAILED_TURN_NOTICE
     fake.assert_replayable(result["messages"])
 
 
 def test_failure_after_a_tool_ran_warns_that_actions_may_have_run(make_agent, fake):
-    agent, _ = make_agent([fake.calls(fake.call()), ModelRequestError("timed out", kind="timeout")])
+    agent, _ = make_agent(
+        [fake.calls(fake.call()), ModelRequestError("HTTP 403", kind="http", status_code=403)]
+    )
 
     result = run(agent)
 
