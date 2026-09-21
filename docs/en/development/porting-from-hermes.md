@@ -135,5 +135,7 @@ It reads each upstream file at the SHA its ported file's header records (`git sh
 
 With `--cut-from <port commit>` it also lists what the cut did not keep whole, sorted into `prose`, `inline` and `rewrite` (see rule 2).
 
+It matches in order: each kept line is looked for after the previous match. When a line also appears later in upstream (such as `if agent._interrupt_requested:` or `assistant_message,`), the match jumps there and the next few dozen lines are all reported as `rewrite`. When a long run of `rewrite` shows up, classify the suspect functions on their own before deciding what to record. Likewise, the script cannot see module names built by joining strings (such as `".".join(("tools", *parts))`); check those by hand.
+
 Remember that our copy is deliberately smaller: features outside the current milestone were removed
 on purpose, and a large diff is the expected result, not a problem to fix.

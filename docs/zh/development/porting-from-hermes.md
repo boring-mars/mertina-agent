@@ -122,4 +122,6 @@ uv run python scripts/port_check.py
 
 加上 `--cut-from <逐字搬运 commit>` 时，它还会把删减后不是整行保留的内容分成 `prose`、`inline`、`rewrite` 三类列出（见规则 2）。
 
+它按顺序匹配：每一行保留下来的代码，都去上一行匹配位置之后找第一处相同的行。如果某一行在上游更后面也出现（例如 `if agent._interrupt_requested:`、`assistant_message,`），匹配位置会跳过去，之后几十行都被报成 `rewrite`。遇到一长串连续的 `rewrite` 时，先把可疑的函数单独取出来分类核对，再决定哪些要登记。同样，拼接出来的模块名（例如 `".".join(("tools", *parts))`）脚本认不出来，要人工检查。
+
 注意我们的副本是刻意更小的：当前里程碑范围外的特性是有意删除的，diff 很大是预期结果，不是要修复的问题。
