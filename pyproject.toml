@@ -61,7 +61,7 @@ quote-style = "double"
 
 [tool.mypy]
 python_version = "3.11"
-files = ["mertina", "tests"]
+files = ["mertina", "tests", "scripts"]
 strict = true
 warn_unreachable = true
 
