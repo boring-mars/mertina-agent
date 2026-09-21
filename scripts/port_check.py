@@ -37,7 +37,11 @@ PACKAGE = REPO / "mertina"
 HEADER = re.compile(r"^# (?:Ported|Derived) from hermes-agent (\S+) @ ([0-9a-f]+)")
 
 # Upstream top-level modules and packages that move under ``mertina`` (porting rule 1).
-ROOTS = {"agent", "tools", "providers", "plugins", "utils", "run_agent", "model_tools"}
+ROOTS = {
+    *("acp_adapter", "agent", "cron", "gateway", "plugins", "providers", "tools", "tui_gateway"),
+    *("batch_runner", "mcp_serve", "mini_swe_runner", "model_tools", "registration_lifecycle"),
+    *("run_agent", "toolset_distributions", "toolsets", "trajectory_compressor", "utils"),
+}
 # Calls that take a module name as a string: lazy imports and logger names.
 MODULE_NAME_CALLS = {"forward", "forward_static", "lazy_attr", "import_module", "getLogger"}
 # How far past the last kept line an inline cut may reach for the rest of its words.
