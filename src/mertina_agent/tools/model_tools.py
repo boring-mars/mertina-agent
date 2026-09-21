@@ -9,11 +9,27 @@ middleware, Tool Search and connector bridges. Mertina selects directly from
 the toolsets registered in the registry and dispatches straight to it.
 """
 
+import importlib
 from collections.abc import Collection, Sequence
 
 from mertina_agent.agent.transports.types import JsonObject, ToolDefinition
 from mertina_agent.exceptions import ConfigurationError
 from mertina_agent.tools.registry import ToolRegistry, registry, tool_error
+
+# Built-in tool modules register into the default registry when imported.
+# Hermes discovers them by scanning tools/; an explicit list keeps start-up
+# predictable and makes the set of built-in tools reviewable in one place.
+_BUILTIN_TOOL_MODULES = ("mertina_agent.tools.web_tools",)
+
+
+def discover_builtin_tools() -> list[str]:
+    """Import every built-in tool module; return the module names, in order."""
+    for module_name in _BUILTIN_TOOL_MODULES:
+        importlib.import_module(module_name)
+    return list(_BUILTIN_TOOL_MODULES)
+
+
+discover_builtin_tools()
 
 
 def select_tool_names(

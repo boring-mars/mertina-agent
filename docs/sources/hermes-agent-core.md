@@ -125,6 +125,25 @@
 | 同一 agent 实例的并发调用由网关层保证互斥 | `Agent` 拒绝重入并抛 `AgentBusyError` | 中断信号与缓存属于实例，并发会互相干扰 |
 | 结果 dict 在多个模块中拼装 | `ConversationResult` TypedDict 与构造函数集中在 `agent/turn_result.py` | 类型化；phase 模块无需导入循环模块 |
 
+### CP3：并行工具执行与 web_search
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 并行批次用守护线程池（上限 8），批次超时可配置 | asyncio 任务 + 信号量（上限 8）；同步 handler 由 registry 放入线程；批次超时不迁移 | 异步循环；超时配置属于 P1 |
+| 中断后等待 3 秒再合成取消结果 | 相同：轮询中断，宽限 3 秒后放弃未完成调用，逐个补取消结果 | 语义一致 |
+| 并行安全工具有十余个，另有按路径冲突的规划 | 仅 `web_search`；路径规划删除 | Mertina 只有这一个外部读取工具 |
+| ddgs 子进程以脚本运行并改写 `PYTHONPATH`；测试钩子由环境变量开启 | 以已安装包的 `python -m` 运行；测试注入整个 worker 命令 | 去掉路径变通与测试专用代码路径 |
+| 子进程环境经 `_sanitize_subprocess_env` 去除 Hermes 管理的密钥 | 去除 `MERTINA_*` 与 `OPENAI_*` 变量，保留代理等网络变量 | 同一目的：搜索子进程不应拿到模型凭据 |
+| 日志记录搜索 query 原文 | 只记录结果数量与上限 | 日志规范禁止记录可能含用户数据的内容 |
+| `is_available` 通过 `import ddgs` 判断 | `importlib.util.find_spec` | 不产生导入副作用，更轻 |
+| provider 捕获任意 `Exception` | 捕获 `RuntimeError` 与 `OSError`；子进程内在边界处捕获全部异常写入 envelope | 规范要求捕获具体异常；子进程是最外层边界 |
+| worker 返回的行直接信任 | 父进程校验并规范化每一行 | 结果会进入模型上下文 |
+| `web_search_tool` 每次调用读取配置选择 provider，带结果缓存与 rescue | 注册时绑定 provider；`configure_web_search(settings)` 重新绑定；无缓存 | 配置在启动时读取与校验一次（12-factor） |
+| 空 query 直接交给后端 | 返回模型可读的错误 | schema 要求 query；空搜索没有意义 |
+| provider `search` 为同步方法 | `async def search` | 异步循环；子进程由 asyncio 驱动 |
+| 通过 AST 扫描 `tools/` 发现内置工具 | `discover_builtin_tools()` 导入显式列表 | 启动可预测，内置工具一处可审阅 |
+| 合成的跳过/取消结果与搜索结果一样经过 untrusted 包装 | 相同（保留 Hermes 行为） | 包装无害；不对内容做"是否已包装"的特判 |
+
 ## 异步改写
 
 | Hermes 机制 | Mertina 机制 | 保持的语义 |

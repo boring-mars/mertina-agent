@@ -18,6 +18,8 @@ def test_defaults_apply_when_nothing_is_set():
     assert settings.llm_model == "gpt-4o-mini"
     assert settings.llm_timeout_s == 60.0
     assert settings.max_iterations == 10
+    assert settings.web_search_backend == "ddgs"
+    assert settings.web_search_timeout_s == 30.0
 
 
 def test_environment_variables_override_defaults(monkeypatch: pytest.MonkeyPatch):
@@ -26,6 +28,7 @@ def test_environment_variables_override_defaults(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("MERTINA_LLM_MODEL", "qwen3-32b")
     monkeypatch.setenv("MERTINA_LLM_TIMEOUT_S", "12.5")
     monkeypatch.setenv("MERTINA_MAX_ITERATIONS", "3")
+    monkeypatch.setenv("MERTINA_WEB_SEARCH_TIMEOUT_S", "5")
 
     settings = load_settings(env_file=None)
 
@@ -34,6 +37,7 @@ def test_environment_variables_override_defaults(monkeypatch: pytest.MonkeyPatch
     assert settings.llm_model == "qwen3-32b"
     assert settings.llm_timeout_s == 12.5
     assert settings.max_iterations == 3
+    assert settings.web_search_timeout_s == 5.0
 
 
 def test_variable_names_are_case_insensitive(monkeypatch: pytest.MonkeyPatch):
@@ -97,6 +101,9 @@ def test_missing_env_file_is_not_an_error(tmp_path: Path):
         ("MERTINA_LLM_BASE_URL", "https://example.test/v1?"),
         ("MERTINA_LLM_BASE_URL", "https://example.test/\x7fbad"),
         ("MERTINA_LLM_MODEL", "  "),
+        ("MERTINA_WEB_SEARCH_BACKEND", "google"),
+        ("MERTINA_WEB_SEARCH_TIMEOUT_S", "0"),
+        ("MERTINA_WEB_SEARCH_TIMEOUT_S", "inf"),
     ],
 )
 def test_invalid_values_raise_configuration_error(

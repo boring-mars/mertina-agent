@@ -19,7 +19,7 @@ from typing import Literal
 
 from mertina_agent.agent.events import EventCallback
 from mertina_agent.agent.tool_executor import (
-    execute_tool_calls_sequential,
+    execute_tool_calls,
     make_tool_result_message,
 )
 from mertina_agent.agent.transports.types import ChatMessage, NormalizedResponse, Usage
@@ -96,7 +96,7 @@ async def run_tool_round(
 
     valid_calls = [call for call in tool_calls if call.name in valid_tool_names]
     executed: list[ChatMessage] = []
-    await execute_tool_calls_sequential(
+    await execute_tool_calls(
         valid_calls,
         executed,
         enabled_tools=valid_tool_names,

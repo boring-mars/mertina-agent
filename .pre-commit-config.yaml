@@ -39,7 +39,8 @@ repos:
         pass_filenames: false
       - id: pytest
         name: pytest
-        entry: uv run pytest
+        # Commit hooks stay offline; integration tests run with a plain `uv run pytest`.
+        entry: uv run pytest -m "not integration"
         language: system
         types: [python]
         pass_filenames: false

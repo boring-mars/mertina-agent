@@ -39,6 +39,8 @@ class Settings(BaseSettings):
         llm_timeout_s: Timeout for each network operation, not the whole turn.
         max_iterations: Model calls a single turn may spend before the agent
             gives up on the tool loop.
+        web_search_backend: Provider behind the ``web_search`` tool.
+        web_search_timeout_s: Hard wall-clock cap for one web search.
     """
 
     model_config = SettingsConfigDict(
@@ -57,6 +59,8 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_timeout_s: float = Field(default=60.0, gt=0.0, allow_inf_nan=False)
     max_iterations: int = Field(default=10, ge=1)
+    web_search_backend: Literal["ddgs"] = "ddgs"
+    web_search_timeout_s: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
 
     @field_validator("llm_base_url")
     @classmethod

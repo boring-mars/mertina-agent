@@ -115,6 +115,8 @@ def test_turn_runs_the_demo_tool_and_prints_a_summary(
     assert "<- tool get_current_time ok" in output.err
     tool_result = fake_client.requests[1][0][-1]
     assert "now" in json.loads(tool_result["content"])
+    offered = sorted(tool["function"]["name"] for tool in fake_client.requests[0][1])
+    assert offered == ["get_current_time", "web_search"]
 
 
 def test_output_escapes_terminal_control_characters(

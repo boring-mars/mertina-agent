@@ -17,6 +17,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "ddgs>=9.16.0",
     "openai>=3.16.2",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
@@ -132,7 +133,11 @@ branch = true
 
 [tool.coverage.report]
 show_missing = true
-exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+]
 
 [dependency-groups]
 dev = [
