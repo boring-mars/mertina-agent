@@ -42,7 +42,7 @@ def _tc_name(tool_call: Any) -> str:
 _MAX_TOOL_WORKERS = 8  # concurrent worker threads per batch
 
 
-def _parse_tool_arguments(raw_arguments: Any) -> tuple[dict, str | None]:
+def _parse_tool_arguments(raw_arguments: Any) -> tuple[dict[str, Any], str | None]:
     """Parse model-emitted arguments without repairing or coercing them."""
     try:
         arguments = json.loads(raw_arguments)
@@ -59,7 +59,7 @@ def _parse_tool_arguments(raw_arguments: Any) -> tuple[dict, str | None]:
     )
 
 
-def _max_workers_for_tool_batch(runnable_calls) -> int:
+def _max_workers_for_tool_batch(runnable_calls: list[Any]) -> int:
     """Return the worker cap for a concurrent tool batch."""
     if not runnable_calls:
         return 0
@@ -73,10 +73,10 @@ class _ToolCallRef:
     task, the pairing id and the request trace."""
 
     name: str
-    args: dict
+    args: dict[str, Any]
     task_id: str
     call_id: str
-    trace: list
+    trace: list[dict[str, Any]] | None
 
     def middleware_kwargs(self) -> dict[str, Any]:
         """Keyword form ``_run_agent_tool_execution_middleware`` (and tests patching it) expect."""
@@ -88,7 +88,7 @@ class _ToolCallRef:
             "middleware_trace": self.trace,
         }
 
-    def emit_cancelled(self, agent, start_time: float) -> str:
+    def emit_cancelled(self, agent: Any, start_time: float) -> str:
         """Synthesize the ``cancelled`` result for a KeyboardInterrupt mid-tool."""
         message = "Tool execution cancelled by user interrupt"
         result = json.dumps({"error": message, "status": "cancelled"}, ensure_ascii=False)
@@ -96,9 +96,9 @@ class _ToolCallRef:
 
 
 def _append_skipped_tool_results(
-    agent,
-    messages: list,
-    tool_calls,
+    agent: Any,
+    messages: list[dict[str, Any]],
+    tool_calls: list[Any],
     effective_task_id: str,
     *,
     content: str,
@@ -122,8 +122,8 @@ class _ParsedCall:
 
     tool_call: Any
     name: str
-    args: dict
-    middleware_trace: list
+    args: dict[str, Any]
+    middleware_trace: list[dict[str, Any]]
     parse_error: str | None
 
     def ref(self, task_id: str) -> _ToolCallRef:
@@ -136,7 +136,7 @@ class _ParsedCall:
         )
 
 
-def _parse_tool_call(agent, tool_call) -> _ParsedCall:
+def _parse_tool_call(agent: Any, tool_call: Any) -> _ParsedCall:
     name = tool_call.function.name
     args, parse_error = _parse_tool_arguments(tool_call.function.arguments)
     return _ParsedCall(tool_call, name, args, [], parse_error)
@@ -146,30 +146,30 @@ def _parse_tool_call(agent, tool_call) -> _ParsedCall:
 class _ManagedToolResult:
     result: Any
     args: dict[str, Any]
-    middleware_trace: list[dict[str, Any]]
+    middleware_trace: list[dict[str, Any]] | None
     blocked: bool
     dispatched: bool
 
 
 def _dispatch_authorized_once(
-    agent,
+    agent: Any,
     state: _ManagedToolResult,
     ref: _ToolCallRef,
     *,
-    execute,
+    execute: Callable[[dict[str, Any]], Any],
 ) -> Any:
     """The one real dispatch."""
     return execute(ref.args)
 
 
 def _run_agent_tool_execution_middleware(
-    agent,
+    agent: Any,
     *,
     function_name: str,
-    function_args: dict,
+    function_args: dict[str, Any],
     effective_task_id: str,
     tool_call_id: str,
-    execute,
+    execute: Callable[[dict[str, Any]], Any],
     middleware_trace: list[dict[str, Any]] | None = None,
 ) -> _ManagedToolResult:
     """Dispatch exactly once."""
@@ -198,13 +198,13 @@ def _run_agent_tool_execution_middleware(
 
 
 def _run_sequential_tool_execution_middleware(
-    agent,
+    agent: Any,
     *,
     function_name: str,
-    function_args: dict,
+    function_args: dict[str, Any],
     effective_task_id: str,
     tool_call_id: str,
-    execute,
+    execute: Callable[[dict[str, Any]], Any],
     middleware_trace: list[dict[str, Any]] | None = None,
 ) -> _ManagedToolResult:
     """Run one sequential call inline on the calling thread."""
@@ -219,20 +219,20 @@ def _run_sequential_tool_execution_middleware(
 
 
 def _commit_tool_result(
-    agent,
-    messages: list,
+    agent: Any,
+    messages: list[dict[str, Any]],
     ref: _ToolCallRef,
-    function_result,
+    function_result: Any,
     *,
     tool_duration: float,
     is_error: bool,
     blocked: bool,
-    effect_disposition,
+    effect_disposition: str | None,
     observed: bool = False,
     error_preview: Callable[[Any], Any] = lambda result: result,
     success_log_chars: int | None = None,
     verbose_text: Callable[[Any], Any] = lambda result: result,
-):
+) -> tuple[Any, Any, Any]:
     """Log the outcome (``observed`` results only), then wrap and append the result.
 
     ``success_log_chars`` (sequential path) also logs the completion line. Returns
@@ -293,8 +293,8 @@ class _ConcurrentBatch:
 
     def __init__(
         self,
-        agent,
-        messages: list,
+        agent: Any,
+        messages: list[dict[str, Any]],
         effective_task_id: str,
         parsed_calls: list[_ParsedCall],
     ) -> None:
@@ -354,17 +354,23 @@ class _ConcurrentBatch:
         if outcome is not None:
             self.results[index] = outcome
 
-    def submit_all(self, executor, runnable: list[int]) -> tuple[list, dict]:
+    def submit_all(
+        self, executor: concurrent.futures.Executor, runnable: list[int]
+    ) -> tuple[list[concurrent.futures.Future[None]], dict[concurrent.futures.Future[None], int]]:
         """Submit every runnable slot."""
-        futures = []
-        future_to_index = {}
+        futures: list[concurrent.futures.Future[None]] = []
+        future_to_index: dict[concurrent.futures.Future[None], int] = {}
         for i in runnable:
             f = executor.submit(self.run_worker, i)
             futures.append(f)
             future_to_index[f] = i
         return futures, future_to_index
 
-    def await_completion(self, futures, future_to_index) -> bool:
+    def await_completion(
+        self,
+        futures: list[concurrent.futures.Future[None]],
+        future_to_index: dict[concurrent.futures.Future[None], int],
+    ) -> bool:
         """Wait with periodic interrupt checks; True when the batch was abandoned
         (interrupt) and the executor must not join its workers."""
         agent = self.agent
@@ -378,7 +384,7 @@ class _ConcurrentBatch:
                 # Tools without interrupt checks (web_search, read_file) run to
                 # completion; cancel unstarted futures so we don't block on them.
                 agent._vprint(
-                    f"{agent.log_prefix}⚡ Interrupt: cancelling {len(not_done)} pending concurrent tool(s)",
+                    f"{agent.log_prefix}⚡ Interrupt: cancelling {len(not_done)} pending concurrent tool(s)",  # noqa: E501  # upstream's message
                     force=True,
                 )
             else:
@@ -411,7 +417,7 @@ class _ConcurrentBatch:
             executor.shutdown(wait=not abandon_executor, cancel_futures=abandon_executor)
 
 
-def _unfinished_tool_result(agent, ref: _ToolCallRef) -> tuple[str, float, str | None]:
+def _unfinished_tool_result(agent: Any, ref: _ToolCallRef) -> tuple[str, float, str | None]:
     """Synthesize the result for a slot no worker filled (interrupt, or a thread that never
     returned) and return ``(function_result, tool_duration, effect_disposition)``."""
     if agent._interrupt_requested:
@@ -426,7 +432,7 @@ def _unfinished_tool_result(agent, ref: _ToolCallRef) -> tuple[str, float, str |
 
 
 def _append_batch_results(
-    agent, messages: list, effective_task_id: str, batch: _ConcurrentBatch
+    agent: Any, messages: list[dict[str, Any]], effective_task_id: str, batch: _ConcurrentBatch
 ) -> bool:
     """Append every slot's result in original call order."""
     for i, pc in enumerate(batch.parsed_calls):
@@ -463,9 +469,9 @@ def _append_batch_results(
 
 
 def execute_tool_calls_concurrent(
-    agent,
-    assistant_message,
-    messages: list,
+    agent: Any,
+    assistant_message: Any,
+    messages: list[dict[str, Any]],
     effective_task_id: str,
     api_call_count: int = 0,
 ) -> None:
@@ -501,8 +507,8 @@ def execute_tool_calls_concurrent(
 class _SequentialDispatch:
     """How one sequential call executes: the callable plus its error policy."""
 
-    execute: Callable[[dict], Any]
-    middleware_trace_arg: list | None = (
+    execute: Callable[[dict[str, Any]], Any]
+    middleware_trace_arg: list[dict[str, Any]] | None = (
         None  # forwarded to the middleware runner (registry closure reads it)
     )
     error_result: Callable[[Exception], str] | None = (
@@ -512,7 +518,9 @@ class _SequentialDispatch:
     handles_keyboard_interrupt: bool = False
 
 
-def _resolve_sequential_dispatch(agent, ref: _ToolCallRef, messages: list) -> _SequentialDispatch:
+def _resolve_sequential_dispatch(
+    agent: Any, ref: _ToolCallRef, messages: list[dict[str, Any]]
+) -> _SequentialDispatch:
     """Pick the execute callable for one sequential call: the registry."""
     function_name, effective_task_id, tool_call_id, middleware_trace = (
         ref.name,
@@ -521,7 +529,7 @@ def _resolve_sequential_dispatch(agent, ref: _ToolCallRef, messages: list) -> _S
         ref.trace,
     )
 
-    def _execute(next_args: dict) -> Any:
+    def _execute(next_args: dict[str, Any]) -> Any:
         from mertina import model_tools
 
         return model_tools.handle_function_call(
@@ -544,7 +552,13 @@ def _resolve_sequential_dispatch(agent, ref: _ToolCallRef, messages: list) -> _S
 
 
 def _skip_remaining_sequential(
-    agent, messages: list, remaining, effective_task_id: str, *, notice: str, **skip_kwargs
+    agent: Any,
+    messages: list[dict[str, Any]],
+    remaining: list[Any],
+    effective_task_id: str,
+    *,
+    notice: str,
+    **skip_kwargs: Any,
 ) -> bool:
     """Announce an interrupt and append one skipped result per unstarted call."""
     agent._vprint(f"{agent.log_prefix}⚡ Interrupt: skipping {len(remaining)} {notice}", force=True)
@@ -553,18 +567,20 @@ def _skip_remaining_sequential(
     )
 
 
-def _append_invalid_arguments_result(agent, messages: list, ref: _ToolCallRef, parse_error: str):
+def _append_invalid_arguments_result(
+    agent: Any, messages: list[dict[str, Any]], ref: _ToolCallRef, parse_error: str
+) -> None:
     """Append the parse-error result for a call whose arguments were not a JSON object."""
     messages.append(make_tool_result_message(ref.name, parse_error, ref.call_id))
 
 
 def _run_sequential_call(
-    agent,
+    agent: Any,
     dispatch: _SequentialDispatch,
     ref: _ToolCallRef,
     *,
-    messages: list,
-    remaining_calls,
+    messages: list[dict[str, Any]],
+    remaining_calls: list[Any],
     tool_start_time: float,
 ) -> tuple[_ManagedToolResult, float]:
     """Run one sequential call with its error policy; returns ``(managed, duration)``.
@@ -608,8 +624,8 @@ def _run_sequential_call(
 
 
 def _publish_sequential_result(
-    agent,
-    messages: list,
+    agent: Any,
+    messages: list[dict[str, Any]],
     ref: _ToolCallRef,
     managed: _ManagedToolResult,
     *,
@@ -642,9 +658,9 @@ def _publish_sequential_result(
 
 
 def execute_tool_calls_sequential(
-    agent,
-    assistant_message,
-    messages: list,
+    agent: Any,
+    assistant_message: Any,
+    messages: list[dict[str, Any]],
     effective_task_id: str,
     api_call_count: int = 0,
 ) -> None:
@@ -658,9 +674,9 @@ def execute_tool_calls_sequential(
 
 
 def _execute_tool_calls_sequential(
-    agent,
-    assistant_message,
-    messages: list,
+    agent: Any,
+    assistant_message: Any,
+    messages: list[dict[str, Any]],
     effective_task_id: str,
     api_call_count: int = 0,
 ) -> None:
@@ -709,7 +725,7 @@ def _execute_tool_calls_sequential(
                 tool_calls[i:],
                 effective_task_id,
                 notice="remaining tool call(s)",
-                content="[Tool execution skipped — {name} was not started. User sent a new message]",
+                content="[Tool execution skipped — {name} was not started. User sent a new message]",  # noqa: E501  # upstream's message
             ):
                 return
             break

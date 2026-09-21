@@ -56,20 +56,20 @@ def create_openai_client(
 
 
 def invoke_tool(
-    agent,
+    agent: Any,
     function_name: str,
-    function_args: dict,
+    function_args: dict[str, Any],
     effective_task_id: str,
     tool_call_id: str | None = None,
-    messages: list = None,
+    messages: list[dict[str, Any]] | None = None,
 ) -> str:
     """Invoke a single registry-dispatched tool and return the result string; no display
     logic. Used by the concurrent path; the sequential path keeps its own inline invocation."""
     if not isinstance(function_args, dict):
-        function_args = {}
+        function_args = {}  # type: ignore[unreachable]  # models can send non-object arguments
 
-    def _execute(next_args: dict) -> Any:
-        dispatch_kwargs = dict(
+    def _execute(next_args: dict[str, Any]) -> Any:
+        dispatch_kwargs = dict(  # noqa: C408  # upstream's form
             tool_call_id=tool_call_id,
             session_id=agent.session_id or "",
             turn_id=getattr(agent, "_current_turn_id", "") or "",
@@ -81,4 +81,4 @@ def invoke_tool(
             function_name, next_args, effective_task_id, **dispatch_kwargs
         )
 
-    return _execute(function_args)
+    return _execute(function_args)  # type: ignore[no-any-return]  # upstream types _execute as Any

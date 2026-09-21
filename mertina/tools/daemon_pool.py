@@ -15,9 +15,14 @@ from __future__ import annotations
 
 import threading
 import weakref
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.thread import _worker
 from contextvars import copy_context
+from typing import Any, ParamSpec, TypeVar
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 __all__ = ["DaemonThreadPoolExecutor"]
 
@@ -25,7 +30,7 @@ __all__ = ["DaemonThreadPoolExecutor"]
 class DaemonThreadPoolExecutor(ThreadPoolExecutor):
     """ThreadPoolExecutor variant whose workers do not block process exit."""
 
-    def submit(self, fn, /, *args, **kwargs):
+    def submit(self, fn: Callable[_P, _T], /, *args: _P.args, **kwargs: _P.kwargs) -> Future[_T]:
         """Submit a callable, propagating the caller's contextvars. Stdlib only does
         this from 3.14; on 3.11-3.13 a bare worker starts with an EMPTY Context and
         drops profile secret scope / HERMES_HOME override — under the multiplexed
@@ -33,7 +38,7 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
         Unconditional: on 3.14+ ``ctx.run`` re-applies the same context (no-op)."""
         ctx = copy_context()
 
-        def _run_with_context(*call_args, **call_kwargs):
+        def _run_with_context(*call_args: _P.args, **call_kwargs: _P.kwargs) -> _T:
             return ctx.run(fn, *call_args, **call_kwargs)
 
         return super().submit(_run_with_context, *args, **kwargs)
@@ -44,13 +49,14 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
         if self._idle_semaphore.acquire(timeout=0):
             return
 
-        def weakref_cb(_, q=self._work_queue):
+        def weakref_cb(_: Any, q: Any = self._work_queue) -> None:
             q.put(None)
 
         num_threads = len(self._threads)
         if num_threads < self._max_workers:
-            thread_name = "%s_%d" % (self._thread_name_prefix or self, num_threads)
+            thread_name = "%s_%d" % (self._thread_name_prefix or self, num_threads)  # noqa: UP031  # mirrors CPython
             executor_ref = weakref.ref(self, weakref_cb)
+            worker_args: tuple[Any, ...]
             if hasattr(self, "_create_worker_context"):
                 # Python 3.14 replaced _initializer/_initargs with a factory
                 # that supplies the worker's initializer context.
@@ -66,8 +72,8 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
                     self._initializer,
                     self._initargs,
                 )
-            # Carry the active profile into the review thread so MEMORY.md / skill review writes land in the
-            # right profile (#54937).
+            # Carry the active profile into the review thread so MEMORY.md / skill review writes
+            # land in the right profile (#54937).
             t = threading.Thread(
                 name=thread_name,
                 target=_worker,
@@ -75,4 +81,4 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
                 args=worker_args,
             )
             t.start()
-            self._threads.add(t)
+            self._threads.add(t)  # type: ignore[attr-defined]  # CPython's _threads is a set

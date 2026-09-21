@@ -29,7 +29,7 @@ def make_tool_result_message(
     tool_call_id: str,
     *,
     effect_disposition: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build a tool-result message: OpenAI ``name`` (wire format) plus internal ``tool_name``
     (session DB). High-risk tool content (web_extract, web_search, browser_*, mcp_*) is
     wrapped in untrusted-data delimiters — the defense against indirect prompt injection.
@@ -67,7 +67,7 @@ _DELIMITER_TOKEN_RE = re.compile(r"untrusted_tool_result", re.IGNORECASE)
 
 def _is_untrusted_tool(name: str | None) -> bool:
     return bool(name) and (
-        name in _UNTRUSTED_TOOL_NAMES or name.startswith(_UNTRUSTED_TOOL_PREFIXES)
+        name in _UNTRUSTED_TOOL_NAMES or name.startswith(_UNTRUSTED_TOOL_PREFIXES)  # type: ignore[union-attr]  # bool(name) rules out None
     )
 
 
@@ -86,7 +86,8 @@ _UPSTREAM_ELISION_PATTERNS = (
 )
 
 
-# Tiny results can't hide an elided enumeration; markers for the sizes that matter sit in the first 64KB.
+# Tiny results can't hide an elided enumeration; markers for the sizes that matter sit in the
+# first 64KB.
 _ELISION_SCAN_MIN_CHARS = 1_000
 
 
