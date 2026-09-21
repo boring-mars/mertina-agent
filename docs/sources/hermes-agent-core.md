@@ -88,6 +88,26 @@
 | [agent/chat_completion_helpers.py:2611 `_ToolCallAccumulator`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/chat_completion_helpers.py#L2611)、[:2964 `_call_chat_completions`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/chat_completion_helpers.py#L2964)、[:3133 `_assemble_tool_calls`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/chat_completion_helpers.py#L3133)、[:3159 `_finish_chat_stream`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/chat_completion_helpers.py#L3159) | `agent/transports/chat_completions.py`、`agent/model_client.py` | CP5 | 同 index 不同 id 分槽、name 赋值而非拼接、参数分片最后拼接、无 finish_reason 的结尾判定、截断参数不可执行、refusal 分片 | reasoning 与 reasoning_details、SSE echo 缓冲、router shim、relay、stale-stream watchdog、参数修复 |
 | [agent/stream_delivery.py:19 `StreamDeliveryMixin`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/stream_delivery.py#L19) | `agent/events.py` | CP2 / CP5 | 文本增量、工具生成、工具开始与完成的投递语义，改为单一 `event_callback` + 类型化事件 | TUI/TTS、单写入器、interim 去重 |
 
+## 有意改变的行为
+
+这些变化是本项目契约要求，不是迁移遗漏。修改相关逻辑时应保留原因注释和回归测试。
+
+### CP1：工具层
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 跨 toolset 同名注册记 error 日志后静默返回 | 抛出 `ToolRegistrationError`，原注册保留 | 开发规范要求不静默吞掉错误；错误声明应在启动时暴露 |
+| 注册只校验 schema 是 dict、`parameters` 是 dict | 另外校验名称格式（1–64 位字母数字 `_` `-`）、schema 名称一致，并复用 transport 的 `convert_tools` 校验 | 与 Hermes 注释同一理由：坏声明会让整轮请求 400，注册时报错能指出是哪个工具 |
+| 依赖调用方正确设置 `is_async` | 协程函数未声明 `is_async=True` 时拒绝注册；同步 handler 返回协程时关闭并报结果契约错误 | 否则产生从未 await 的协程 |
+| `dispatch` 同步，异步 handler 经 `_run_async` 桥接 | `dispatch` 为 `async`；同步 handler 用 `asyncio.to_thread` | 异步循环，避免阻塞事件循环 |
+| `_sanitize_tool_error` 在 `model_tools.py`，registry 延迟导入 | 放在 `registry.py`（下层） | 去掉循环导入，行为不变 |
+| 未知 toolset 只打印警告 | `select_tool_names` 抛 `ConfigurationError` | 12-factor 配置要求启动即失败，避免 Agent 缺工具却照常运行 |
+| `handle_function_call` 不检查工具是否已向模型提供 | 可选 `enabled_tools`：已注册但未提供的工具返回错误结果 | 纵深防御，模型不能调用本轮未提供的工具 |
+| `json.loads` 接受 `NaN` / `Infinity` 参数 | 视为非法参数，不执行工具 | 它们不是 JSON，写回历史后无法再发送给 provider |
+| tool 结果消息带 `name`、`tool_name`、时间戳和风险元数据 | 只含 `role`、`content`、`tool_call_id` | 第二阶段 transport 拒绝未知字段 |
+| untrusted 包装覆盖 `web_extract`、`browser_*`、`mcp_*` | 只覆盖 `web_search` | v0.1 仅有该外部内容工具 |
+| 中断在每个工具前后各检查一次，第二次使用“User sent a new message”文案 | 只在每个工具前检查，统一使用取消文案 | Mertina 的中断只表示停止，没有 steer/redirect |
+
 ## 异步改写
 
 | Hermes 机制 | Mertina 机制 | 保持的语义 |

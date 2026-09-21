@@ -15,6 +15,10 @@ class ConfigurationError(MertinaError):
     """Raised when configuration is missing, malformed or out of range."""
 
 
+class ToolRegistrationError(MertinaError):
+    """Raised when a tool declaration is invalid or would shadow another toolset."""
+
+
 class ModelInputError(MertinaError):
     """Raised before dispatch when messages or tools violate the text contract."""
 
