@@ -64,7 +64,7 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 
 | # | 决策 | 理由 |
 |---|---|---|
-| D1 | 拷贝边界定在 L0+L1，L2 平台层不拷 | 见 §3 |
+| D1 | 拷贝边界定在 L0+L1；L2 平台层不整体拷，用到的函数按需搬到同名文件 | 见 §3 |
 | D2 | 先全拷进 `vendor/`，再逐模块裁剪搬出 | 主线代码任何时刻都能跑，「不可运行期」只存在于 vendor 目录内 |
 | D3 | `vendor/` 不提交 git | 提交会带来 2.5 万行 diff；MIT 署名靠每文件版权头 + 开发规范中的[从 Hermes 移植](../development/porting-from-hermes.md)即可满足 |
 | D4 | 扁平布局（不用 `src/`），顶层只有一个具名包 `mertina`，其内部严格镜像 Hermes | 见 §5 |
@@ -80,11 +80,11 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 |---|---|---:|---|
 | **L0** 接口叶子 | `agent/transports/base.py`、`agent/transports/types.py`、`agent/iteration_budget.py`、`agent/retry_utils.py`、`agent/web_search_provider.py`、`tools/interrupt.py` | 601 | **语义逐字抄**（定义见[从 Hermes 移植](../development/porting-from-hermes.md)规则 2），加来源头；范围外的功能在紧随其后的单独 commit 里删除，各文件删什么见 §7.1 |
 | **L1** 循环骨架 | `conversation_loop.py` + 15 个 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + `AIAgent` 的 14 个 mixin + `hermes_cli/config.py` + `plugins/web/` 的 ddgs provider 等，共 46 个文件 | 28,234 | **拷进 vendor 后裁剪**，这是需要读懂的部分 |
-| **L2** 平台层 | `agent_runtime_helpers.py`(3,509)、`model_metadata.py`(2,551)、`turn_recovery.py`(1,813)、`error_classifier.py`(1,394)、`redact.py`(1,335)、`display.py`(1,118)、`hermes_constants.py`(1,515)、`hermes_logging.py`(764) 等 | ~36,000 | **不拷**，需要什么自己写什么 |
+| **L2** 平台层 | `agent_runtime_helpers.py`(3,509)、`model_metadata.py`(2,551)、`turn_recovery.py`(1,813)、`error_classifier.py`(1,394)、`redact.py`(1,335)、`display.py`(1,118)、`hermes_constants.py`(1,515)、`hermes_logging.py`(764) 等 | ~36,000 | **不整体拷**；循环用到某个函数时，只把它逐字搬到同名文件（见[从 Hermes 移植](../development/porting-from-hermes.md)规则 5） |
 
 L0/L1/L2 划分的是**拷贝边界**（哪些文件进 vendor、哪些不进），与 §8 的里程碑划分是两个维度。L0 的 6 个文件都在边界内，但落地时间不同：`transports/base.py`、`transports/types.py`、`iteration_budget.py` 在 v0.1.0，`retry_utils.py`、`tools/interrupt.py` 在 v0.1.1，`web_search_provider.py` 在 v0.1.2。
 
-L2 不是 agent loop，是模型元数据表、错误分类、脱敏、终端渲染、全局常量。举例：openai 客户端的构造在 `agent_runtime_helpers.create_openai_client` 里，Mertina 自己写约 30 行即可。
+L2 不是 agent loop，是模型元数据表、错误分类、脱敏、终端渲染、全局常量。举例：openai 客户端的构造在 `agent_runtime_helpers.create_openai_client` 里，v0.1.0 只把这一个函数（以及它用到的延迟加载代理 `process_bootstrap.OpenAI`）搬到同名文件，这两个文件其余的几千行不动。
 
 保留 L1 中 `turn_*` 的职责拆分（而不是合并成一个大循环文件），是因为 v0.2–v0.5 往回加功能（压缩、memory 注入、审批）时需要有地方放。
 
@@ -211,7 +211,7 @@ Mertina 自己写的、上游没有对应物的文件，按自身合适的方式
 
 | 包 | 出现位置 | v0.1 |
 |---|---|---|
-| `openai` | 不在边界内（客户端构造在 L2 的 `agent_runtime_helpers.py`） | **v0.1.0 需要**，自己写约 30 行构造 |
+| `openai` | 客户端构造在 L2 的 `agent_runtime_helpers.create_openai_client`，按需部分搬运 | **v0.1.0 需要** |
 | `fire` | `run_agent.py` 的 CLI 入口 | 不需要，改用标准库 `argparse` |
 | `httpx` | `tools/web_tools.py` | openai SDK 自带，不单列 |
 | `ddgs` | `tools/web_tools.py` | v0.1.2（keyless search provider） |
@@ -233,7 +233,12 @@ Python 版本跟随 Hermes：`>=3.11`。
 | `mertina/agent/transports/types.py` | L0 语义逐字抄 + 删减 | `ToolCall` / `Usage` / `NormalizedResponse`，裁掉 Codex / Bedrock / Anthropic 的 `provider_data` 兼容属性（`call_id`、`response_item_id`、`anthropic_content_blocks`、`bedrock_content_blocks`、`codex_reasoning_items`、`codex_message_items`）；保留 `extra_content`（Gemini 的 `thought_signature`）、`reasoning_content`、`reasoning_details`，它们在 OpenAI 兼容的 Chat Completions 上同样会出现 |
 | `mertina/agent/transports/__init__.py` | L1 裁剪 | transport 注册表，只注册 `chat_completions` |
 | `mertina/agent/transports/chat_completions.py` | L1 裁剪 | 保留 sanitize → build_kwargs → normalize_response 三步，去掉各家特判 |
-| `mertina/agent/client_lifecycle.py` | L1 裁剪 | 单个 OpenAI 客户端的构造与关闭。上游把构造放在 L2 的 `agent_runtime_helpers.py`，因为它要处理 MoA facade、Gemini 原生客户端、provider profile、SSL/代理校验——我们都没有，故合并到本文件，并在偏离表记一条 |
+| `mertina/agent/client_lifecycle.py` | L1 裁剪 | 共享客户端的加锁、关闭检测、关闭，以及关闭后重建；构造经 `_forward` 转发给 `agent_runtime_helpers.create_openai_client`，与上游相同 |
+| `mertina/agent/agent_runtime_helpers.py` | L2 部分搬运 | 只有 `_ra()` 和 `create_openai_client`：复制 kwargs、`max_retries=0`、经延迟代理构造 |
+| `mertina/agent/process_bootstrap.py` | L2 部分搬运 | 只有延迟加载的 `OpenAI` 代理 |
+| `mertina/agent/lazy_forward.py` | 边界外，整文件 | `_forward` 转发器：mixin 借它把方法委托给模块级函数 |
+| `mertina/agent/__init__.py`、`mertina/agent/jiter_preload.py` | 边界外，整文件 | 包导入时预加载 OpenAI SDK 的原生 JSON 解析器（部分 Windows 环境下在流式线程里首次加载会失败） |
+| `mertina/tools/__init__.py` | 边界外，逐字 + 删减 | 只剩说明「导入 tools 包不能有副作用」的 docstring |
 | `mertina/agent/iteration_budget.py` | L0 语义逐字抄 + 删减 | 去掉 `normalize_budget_warning_ratio` |
 | `mertina/agent/conversation_loop.py` | L1 裁剪 | `run_conversation()` 入口与 turn 调度 |
 | `mertina/agent/turn_api_request.py` | L1 裁剪 | 请求组装 |
@@ -244,7 +249,7 @@ Python 版本跟随 Hermes：`>=3.11`。
 | `mertina/tools/registry.py` | L1 裁剪 | 保留 `ToolEntry` 形状与 `register()`，去掉插件作用域、发现缓存、`check_fn` 缓存 |
 | `mertina/tools/time_tools.py` | 新写 | `get_time` 占位工具 |
 | `mertina/model_tools.py` | L1 裁剪 | 工具定义收集与分发，去掉 toolset 选择、hook、bridge |
-| `mertina/run_agent.py` | L1 裁剪 | `AIAgent` 摊平 14 个 mixin，`__init__` 参数收敛到本里程碑所需 |
+| `mertina/run_agent.py` | L1 裁剪 | `AIAgent` 摊平 14 个 mixin，`__init__` 参数收敛到本里程碑所需；步骤 7 之前只有模块 logger，供 `_ra()` 使用 |
 
 ### 7.2 数据流
 
@@ -306,4 +311,4 @@ v0.1.2 完成时，Roadmap v0.1 的三条「Done when」全部满足。
 
 - **L2 的替代实现深度未定**：错误分类、脱敏、日志在 v0.1.0 用最简实现，P1 再评估要不要回头参考 Hermes 的对应模块。
 - **`mertina/` 内部是否需要再分层**：v0.1 只有 `agent/` 和 `tools/` 两个子包，规模小。等 gateway、state、cron 进来后，是否需要在 `mertina/` 下引入更多分层，到时再看。
-- **上游跟进机制未定**：开发规范记录了上游 SHA，但「如何发现上游某个已移植文件发生了变更」还没有工具支持。候选方案是一个 `scripts/diff-hermes.sh`，留待 v0.1.2 之后评估。
+- **上游跟进机制未定**：`scripts/port_check.py` 保证已移植文件与文件头记录的上游 SHA 一致，但「上游在更新的 commit 上改了某个已移植文件」仍要靠人发现。给 port_check 加一个对比新 SHA 的模式是候选方案，留待 v0.1.2 之后评估。
