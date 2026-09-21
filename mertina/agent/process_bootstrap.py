@@ -4,10 +4,7 @@
 """Process-level bootstrap helpers for ``run_agent``.
 
 Lazy OpenAI SDK import (``_OpenAIProxy`` keeps ``isinstance`` and
-``patch("agent.process_bootstrap.OpenAI")`` working), crash-resistant stdio
-(``_SafeWriter``), env-only HTTP proxy resolution, and the httpcore backend that
-runs sync httpx connects through the process-wide Happy Eyeballs racer
-(``hermes_bootstrap``).
+``patch("agent.process_bootstrap.OpenAI")`` working).
 """
 
 from __future__ import annotations
@@ -45,12 +42,5 @@ OpenAI = _OpenAIProxy()
 __all__ = [
     "OpenAI",
     "_OpenAIProxy",
-    "_SafeWriter",
-    "_get_proxy_for_base_url",
-    "_get_proxy_from_env",
-    "_install_safe_stdio",
     "_load_openai_cls",
-    "build_keepalive_http_client",
-    "close_shared_transports",
-    "enable_happy_eyeballs_on_client",
 ]
