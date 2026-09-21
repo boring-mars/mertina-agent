@@ -2,8 +2,9 @@
 
 **A personal AI assistant that lives in the cloud and extends to your devices.**
 
-> **Status: pre-alpha.** A typed, asynchronous model client and an explicit smoke-test example
-> are available. The agent loop, tool execution, gateway, and UI are not implemented yet.
+> **Status: pre-alpha.** The v0.1 agent core is available: an asynchronous, tool-using agent loop
+> that streams its answer, runs `web_search` calls in parallel, retries transient model errors and
+> can be stopped mid-turn. The gateway, session storage and web UI are not implemented yet.
 > See the [Roadmap](ROADMAP.md) for what is being built and in what order.
 
 Mertina Agent is a general-purpose personal assistant. It runs as an always-on cloud service
@@ -103,43 +104,79 @@ to an endpoint and model you intend to use. Set `MERTINA_LLM_API_KEY` only if th
 authentication. An empty key selects unauthenticated mode; the client does not fall back to
 `OPENAI_API_KEY`. Never commit `.env` or share its secrets. Environment variables override `.env`.
 
-Run one real request explicitly, from the repository root:
+### Run an agent turn
+
+Run one real agent turn explicitly, from the repository root:
+
+```bash
+uv run python examples/agent_chat.py --env-file .env
+```
+
+The model is offered `web_search` (DuckDuckGo through the `ddgs` package, no key needed) and a
+demonstration clock tool. Streamed text and tool progress go to stderr; a JSON summary with the
+final answer, exit reason, request count, tools used and token usage goes to stdout. Pass your own
+question as an argument. Model requests may incur charges on a hosted endpoint, and web searches
+are sent to DuckDuckGo.
+
+To see a turn stopped while a tool runs and then continued from its history:
+
+```bash
+uv run python examples/stop_and_resume.py --env-file .env
+```
+
+Both examples require an existing env file with an explicit endpoint and model, so an empty file
+cannot silently select a hosted service through library defaults.
+
+### Use the agent from Python
+
+```python
+import asyncio
+
+from mertina_agent.agent.core import Agent
+from mertina_agent.config import load_settings
+
+
+async def main() -> None:
+    settings = load_settings()
+    async with Agent(settings, event_callback=print) as agent:
+        first = await agent.run_conversation("What is new in Python this month?")
+        print(first["final_response"])
+        second = await agent.run_conversation(
+            "Summarize that in one line.", conversation_history=first["messages"]
+        )
+        print(second["final_response"])
+
+
+asyncio.run(main())
+```
+
+`run_conversation()` returns a result with `final_response`, the complete `messages`, `api_calls`,
+`completed` / `failed` / `interrupted` / `partial` flags, `turn_exit_reason` and summed `usage`.
+The caller owns the conversation: pass `messages` back as `conversation_history` to continue it.
+`chat()` returns only the final text. `agent.interrupt()` stops the running turn from any task or
+thread; the returned history stays valid for the next turn. Progress arrives as typed events
+(`TextDelta`, `ToolGenerationStarted`, `ToolCallStarted`, `ToolCallFinished`, `RetryScheduled`,
+and one of `RunCompleted`, `RunStopped` or `RunFailed`) through `event_callback`.
+
+### Current scope
+
+- One OpenAI-compatible Chat Completions endpoint, streaming by default (`MERTINA_LLM_STREAM`).
+- ReAct turns: model call, tool calls, results, repeat, up to `MERTINA_MAX_ITERATIONS` model calls,
+  after which the model is asked once, without tools, for a summary.
+- Independent `web_search` calls run concurrently; results always follow the model's call order.
+- Timeouts, connection errors, HTTP 408/429/5xx and malformed responses are retried with jittered
+  backoff or the provider's `Retry-After`, up to `MERTINA_LLM_MAX_ATTEMPTS` attempts per call.
+- A stop request is honoured before each model call, while a call is in flight, during backoff and
+  before each tool. Unanswered tool calls are closed so the history can be sent again.
+- Truncated tool calls are never executed; a truncated text answer is returned as partial.
+
+`MERTINA_LLM_TIMEOUT_S` controls network-operation timeouts, not a total turn deadline. The SDK
+itself never retries or follows redirects. The lower-level model client remains available on its
+own; see `examples/model_call.py`:
 
 ```bash
 uv run python examples/model_call.py --env-file .env
 ```
-
-This sends the fixed, non-private prompt "Reply with a short greeting." It may incur charges on a
-hosted endpoint. The example requires an existing env file and explicitly supplied endpoint/model
-settings; an empty file cannot silently select a hosted service through library defaults.
-No key is required for an endpoint that supports unauthenticated requests.
-
-To offer a demonstration function tool:
-
-```bash
-uv run python examples/model_call.py --env-file .env --tools
-```
-
-The example displays normalized text, requested tools, finish reason, refusal, and optional token
-usage as JSON. It never executes tools or sends a follow-up request. Offering a tool does not force
-the endpoint to call it. Successful exit means a structurally valid response was received; check
-`finish_reason` and `refusal` because truncation, filtering, or refusal are not ordinary completion.
-Missing usage/counts remain `null`, not fabricated zeroes.
-
-The Python entry point is `mertina_agent.agent.model_client.ModelClient`. It accepts existing
-`Settings`, supports `async with`, and exposes `await client.complete(messages, tools=...)`.
-Messages support text-only `system`, `developer`, `user`, `assistant`, and `tool` roles; tools use
-standard function definitions. An endpoint must support the roles and tool features you request.
-Unsupported input fields and malformed responses fail explicitly rather than being silently repaired.
-
-Current scope is one asynchronous, non-streaming Chat Completions request with SDK retries disabled.
-There is no conversation loop, streaming, tool execution, automatic backoff, or product-level stop
-and history recovery yet. `MERTINA_LLM_TIMEOUT_S` controls network-operation timeouts, not a total
-agent-turn deadline. `MERTINA_MAX_ITERATIONS` is reserved for the later agent loop and is not used here.
-SDK clients created by the wrapper are closed with it; injected clients remain caller-owned.
-Base URLs must not contain embedded credentials, query parameters, fragments, or control characters.
-Automatic HTTP redirects are disabled as well as retries. Injected SDKs with conflicting HTTP-level
-authentication, cookies, custom headers/query data, or automatic redirects are rejected before dispatch.
 
 ### Offline checks and real-provider acceptance
 
@@ -151,19 +188,23 @@ uv run pytest
 uv run pre-commit run --all-files
 ```
 
-These checks use offline fixtures or simulated HTTP and do not contact a model service. The example
-is not collected by pytest. Passing offline checks does not establish successful real-provider
-acceptance; that is recorded separately after explicitly running against a designated endpoint.
+These checks never contact a model service. `uv run pytest` also runs the integration test that
+searches DuckDuckGo; skip it offline with `uv run pytest -m "not integration"` (the pre-commit hook
+does). The examples are not collected by pytest. Passing offline checks does not establish
+real-provider acceptance; that is recorded separately after explicitly running the examples.
 
 See the [contributing guide](docs/en/development/contributing.md) for the development workflow and
-the [phase-two plan](docs/plans/v0.1-phase-2-model-transport.md) for acceptance criteria.
+the [agent-core phase plan](docs/plans/v0.1-phase-3-agent-loop.md) for acceptance criteria.
 
 ## Documentation
 
 - [Roadmap](ROADMAP.md): priorities and milestones
+- [Agent-core phase plan](docs/plans/v0.1-phase-3-agent-loop.md) and its
+  [development log](docs/plans/v0.1-phase-3-development-log.md): checkpoints and acceptance evidence
 - [Model-transport phase plan](docs/plans/v0.1-phase-2-model-transport.md): scope and acceptance criteria
-- [Hermes model-transport provenance](docs/sources/hermes-model-transport.md): fixed source version,
-  adaptations, and third-party license
+- Hermes provenance: [agent core](docs/sources/hermes-agent-core.md) and
+  [model transport](docs/sources/hermes-model-transport.md), with fixed source versions,
+  adaptations, and the third-party license
 - [Development guidelines](docs/en/development/README.md): branching, commits, pull requests,
   code review, coding style, testing, releases, security
 - [开发规范（中文）](docs/zh/development/README.md)
@@ -178,8 +219,9 @@ Contributions are welcome. Read the [contributing guide](CONTRIBUTING.md) and th
 
 Mertina Agent is built on ideas and code from [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 by [Nous Research](https://nousresearch.com), released under the MIT License. Where Mertina copies
-code from Hermes, the original copyright notice is kept, as the license requires. The model-transport
-source snapshot and deliberate changes are recorded in the [provenance document](docs/sources/hermes-model-transport.md).
+code from Hermes, the original copyright notice is kept, as the license requires. Source snapshots
+and deliberate changes are recorded in the provenance documents for the
+[agent core](docs/sources/hermes-agent-core.md) and the [model transport](docs/sources/hermes-model-transport.md).
 Its original license is included in [LICENSES/Hermes-Agent-MIT.txt](LICENSES/Hermes-Agent-MIT.txt).
 
 ## License
