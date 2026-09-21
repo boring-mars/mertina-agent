@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 _REGISTRY: dict[str, type] = {}
 _discovered: bool = False
-_TRANSPORT_MODULES = ("anthropic", "codex", "chat_completions", "bedrock")
+_TRANSPORT_MODULES = ("chat_completions",)
 
 
 def register_transport(api_mode: str, transport_cls: type) -> None:
@@ -47,18 +47,3 @@ def _discover_transports() -> None:
     for name in _TRANSPORT_MODULES:
         with contextlib.suppress(ImportError):
             importlib.import_module(f"mertina.agent.transports.{name}")
-
-
-def registered_api_modes() -> frozenset[str]:
-    """Every api_mode with a registered transport, in-tree and plugin-supplied.
-
-    ``register_transport`` is the public seam for a provider plugin that speaks
-    its own dialect, but the api_mode gates elsewhere are closed literals — a
-    plugin's mode was rejected there and rewritten to ``chat_completions``, with
-    the dialect translation dropped and no error raised. Callers that validate an
-    api_mode use this so a registered transport is accepted on every path.
-    Discovers first, so a cold registry never reports an empty set.
-    """
-    if not _discovered:
-        _discover_transports()
-    return frozenset(_REGISTRY)
