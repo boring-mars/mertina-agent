@@ -21,7 +21,7 @@ class ToolCall:
     ``id`` is the protocol's canonical identifier (``tool_call_id`` / ``tool_use_id``);
     may be ``None`` when the provider omits it — the agent fills it via
     ``_deterministic_call_id()`` before storing history.
-    ``provider_data``: Codex ``{"call_id", "response_item_id"}``, Gemini
+    ``provider_data``: Gemini
     ``{"extra_content": {"google": {"thought_signature": ...}}}``, else ``None``.
     """
 
@@ -38,8 +38,6 @@ class ToolCall:
     def _pd(self, key: str) -> Any:
         return (self.provider_data or {}).get(key)
 
-    call_id = property(lambda self: self._pd("call_id"))
-    response_item_id = property(lambda self: self._pd("response_item_id"))
     # Gemini thought_signature; must be replayed on later calls or the API returns HTTP 400.
     extra_content = property(lambda self: self._pd("extra_content"))
 
@@ -68,8 +66,7 @@ class Usage:
 class NormalizedResponse:
     """Normalized API response from any provider.
 
-    Response-level ``provider_data``: Anthropic ``{"reasoning_details": [...]}``,
-    Codex ``{"codex_reasoning_items": [...], "codex_message_items": [...]}``, else ``None``.
+    Response-level ``provider_data``: Anthropic ``{"reasoning_details": [...]}``, else ``None``.
     """
 
     content: str | None
@@ -86,14 +83,6 @@ class NormalizedResponse:
 
     reasoning_content = property(lambda self: self._pd("reasoning_content"))
     reasoning_details = property(lambda self: self._pd("reasoning_details"))
-    # Order-preserving Anthropic blocks, present only when a turn interleaves signed
-    # thinking with tool_use (replay order invalidates signatures otherwise).
-    anthropic_content_blocks = property(lambda self: self._pd("anthropic_content_blocks"))
-    bedrock_content_blocks = property(
-        lambda self: self._pd("bedrock_content_blocks")
-    )  # order-preserving Converse blocks
-    codex_reasoning_items = property(lambda self: self._pd("codex_reasoning_items"))
-    codex_message_items = property(lambda self: self._pd("codex_message_items"))
 
 
 def build_tool_call(
