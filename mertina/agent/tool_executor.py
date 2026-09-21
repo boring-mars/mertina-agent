@@ -79,7 +79,7 @@ class _ToolCallRef:
     trace: list[dict[str, Any]] | None
 
     def middleware_kwargs(self) -> dict[str, Any]:
-        """Keyword form ``_run_agent_tool_execution_middleware`` (and tests patching it) expect."""
+        """Keyword form ``_run_agent_tool_execution_middleware`` expects."""
         return {
             "function_name": self.name,
             "function_args": self.args,
@@ -381,8 +381,8 @@ class _ConcurrentBatch:
                 return False
 
             if agent._interrupt_requested:
-                # Tools without interrupt checks (web_search, read_file) run to
-                # completion; cancel unstarted futures so we don't block on them.
+                # A running tool is not interrupted mid-call and runs to completion;
+                # cancel unstarted futures so we don't block on them.
                 agent._vprint(
                     f"{agent.log_prefix}⚡ Interrupt: cancelling {len(not_done)} pending concurrent tool(s)",  # noqa: E501  # upstream's message
                     force=True,
@@ -391,7 +391,7 @@ class _ConcurrentBatch:
                 continue
             for f in not_done:
                 f.cancel()
-            # Give running tools a moment to notice the per-thread interrupt and exit gracefully.
+            # Give running tools a moment to finish before the pool is left behind.
             concurrent.futures.wait(not_done, timeout=3.0)
             return True
 
@@ -509,11 +509,9 @@ class _SequentialDispatch:
 
     execute: Callable[[dict[str, Any]], Any]
     middleware_trace_arg: list[dict[str, Any]] | None = (
-        None  # forwarded to the middleware runner (registry closure reads it)
+        None  # forwarded as the call's middleware trace
     )
-    error_result: Callable[[Exception], str] | None = (
-        None  # None → exceptions propagate (inline/delegate own failures)
-    )
+    error_result: Callable[[Exception], str] | None = None  # None → exceptions propagate
     error_log: str = ""
     handles_keyboard_interrupt: bool = False
 
