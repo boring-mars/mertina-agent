@@ -249,6 +249,8 @@ def main() -> int:
     parser.add_argument("--cut-from", metavar="REV", help="classify lines that are not in REV")
     parser.add_argument("paths", nargs="*", type=Path, help="files to check (default: all)")
     args = parser.parse_args()
+    # Ported lines may hold characters a legacy console code page cannot encode (GBK on Windows).
+    sys.stdout.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
 
     files = [p.resolve() for p in args.paths] or sorted(PACKAGE.rglob("*.py"))
     reports = [r for r in (check_file(p, args.upstream, args.cut_from) for p in files) if r]
