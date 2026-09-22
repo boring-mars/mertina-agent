@@ -106,6 +106,8 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 | `model_tools._compute_tool_definitions`：`tools_to_include = _select_tool_names(enabled_toolsets, disabled_toolsets, quiet_mode)`，按 toolset 选择 | `tools_to_include = set(registry.get_all_tool_names())` | **行为改变：** 不再按 toolset 启用或禁用，所有已注册工具都发给模型。toolset 选择依赖 `toolsets.py` 的静态表，v0.1 只有 `get_time` 一个工具 |
 | `tool_executor._run_agent_tool_execution_middleware`：`state.result, _relay_args = relay_tools.execute(function_name, function_args, _hermes_pipeline, ...)`，经 Relay 和工具中间件后派发 | `state.result = _authorized_dispatch(function_args)` | Relay 和工具中间件整层不在 v0.1 内，直接派发一次 |
 | `tool_executor.execute_tool_calls_sequential`：按终端审批分段，每段以 `SimpleNamespace(tool_calls=calls)` 调用 `_execute_tool_calls_sequential` | 传入 `assistant_message`，调用一次 | 终端审批批次不在 v0.1 内 |
+| `turn_api_call.perform_api_call`：`response = run_llm_execution_middleware(api_kwargs, _perform_api_call, ...)`，内层经流式调用或 `relay_llm.execute(..., agent._interruptible_api_call, ...)` 发出请求 | `response = agent._interruptible_api_call(api_kwargs)` | LLM 执行中间件和 Relay 整层不在 v0.1 内，流式输出在 v0.1.1；直接发一次非流式请求 |
+| `turn_context.build_api_messages`：`for idx, msg in enumerate(canonical_messages)`，遍历经 `canonicalize_replay_history` 规范化过的历史前缀 | `for msg in messages:` | 回放规范化服务于会话恢复和 prompt 缓存，v0.1 没有这两项；`idx` 只给已删除的空消息填充用 |
 
 ## 与上游对照
 

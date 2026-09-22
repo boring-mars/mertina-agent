@@ -252,6 +252,13 @@ Python version follows Hermes: `>=3.11`.
 | `mertina/agent/turn_response_intake.py` | L1 trimmed | Response normalization |
 | `mertina/agent/turn_tool_round.py` | L1 trimmed | One round of tool calls |
 | `mertina/agent/turn_finalizer.py` | L1 trimmed | Turn wrap-up |
+| `mertina/agent/turn_context.py` | L1 trimmed | Per-turn setup: append the user message, reset the iteration budget, build the system prompt; build the wire copy of the messages |
+| `mertina/agent/turn_iteration_prep.py` | L1 trimmed | Interrupt check and budget consumption at the start of each iteration |
+| `mertina/agent/turn_request_assembly.py` | L1 trimmed | Build `api_messages` |
+| `mertina/agent/turn_api_call.py` | L1 trimmed | Issue the model request |
+| `mertina/agent/turn_response_check.py` | L1 trimmed | Record latency, add up usage |
+| `mertina/agent/turn_final_response.py` | L1 trimmed | Take the final answer when there are no tool calls |
+| `mertina/agent/turn_loop_errors.py` | L1 trimmed | On a response-processing error, fill in tool results and end the turn |
 | `mertina/agent/tool_executor.py` | L1 trimmed | Parallel execution of independent tool calls; approval gate, middleware, checkpoints and heartbeats removed |
 | `mertina/tools/registry.py` | L1 trimmed | Keeps the `ToolEntry` shape and `register()`; plugin scoping, the discovery cache and the `check_fn` cache removed |
 | `mertina/tools/time_tools.py` | New | The `get_time` placeholder tool |

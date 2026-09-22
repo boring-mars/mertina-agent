@@ -245,6 +245,13 @@ Python 版本跟随 Hermes：`>=3.11`。
 | `mertina/agent/turn_response_intake.py` | L1 裁剪 | 响应归一化 |
 | `mertina/agent/turn_tool_round.py` | L1 裁剪 | 一轮工具调用 |
 | `mertina/agent/turn_finalizer.py` | L1 裁剪 | 收尾 |
+| `mertina/agent/turn_context.py` | L1 裁剪 | 每轮准备：追加用户消息、重置迭代预算、构建 system prompt；组装发送用的消息副本 |
+| `mertina/agent/turn_iteration_prep.py` | L1 裁剪 | 每次迭代开始时检查中断、消耗预算 |
+| `mertina/agent/turn_request_assembly.py` | L1 裁剪 | 组装 `api_messages` |
+| `mertina/agent/turn_api_call.py` | L1 裁剪 | 发出模型请求 |
+| `mertina/agent/turn_response_check.py` | L1 裁剪 | 记录耗时，累加 usage |
+| `mertina/agent/turn_final_response.py` | L1 裁剪 | 无工具调用时收下最终回答 |
+| `mertina/agent/turn_loop_errors.py` | L1 裁剪 | 响应处理出错时补齐工具结果并结束本轮 |
 | `mertina/agent/tool_executor.py` | L1 裁剪 | 并行执行独立工具调用，去掉审批网关/中间件/checkpoint/心跳 |
 | `mertina/tools/registry.py` | L1 裁剪 | 保留 `ToolEntry` 形状与 `register()`，去掉插件作用域、发现缓存、`check_fn` 缓存 |
 | `mertina/tools/time_tools.py` | 新写 | `get_time` 占位工具 |
