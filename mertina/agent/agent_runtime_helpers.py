@@ -10,10 +10,67 @@ Each function takes the parent ``AIAgent`` as ``agent`` except the stateless mes
 from __future__ import annotations
 
 import logging
+import re
 from types import ModuleType
 from typing import Any
 
+from mertina.agent.think_scrubber import THINK_TAG_NAMES
+
 logger = logging.getLogger(__name__)
+
+
+_TOOL_CALL_TAG_NAMES = ("tool_call", "tool_calls", "tool_result", "function_call", "function_calls")
+
+
+# Optional XML namespace prefix: some models serialize native tool calls as <ns:function_calls>.
+_NS_PREFIX = r"(?:[\w.-]+:)?"
+
+
+_REASONING_BLOCK_PATTERNS = tuple(
+    re.compile(rf"<{name}>.*?</{name}>", re.DOTALL | re.IGNORECASE) for name in THINK_TAG_NAMES
+)
+
+
+_TOOL_CALL_BLOCK_PATTERNS = tuple(
+    re.compile(rf"<{_NS_PREFIX}{name}\b[^>]*>.*?</{_NS_PREFIX}{name}>", re.DOTALL | re.IGNORECASE)
+    for name in _TOOL_CALL_TAG_NAMES
+)
+
+
+# Named <function name=...> blocks; boundary- and name-gated (see _THINK_STRIP_PATTERNS note).
+_NAMED_FUNCTION_BLOCK_PATTERN = re.compile(
+    r"(?:(?<=^)|(?<=[\n\r.!?:]))[ \t]*"
+    r"<function\b[^>]*\bname\s*=[^>]*>"
+    r"(?:(?:(?!</function>).)*)</function>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+_UNTERMINATED_REASONING_BLOCK_PATTERN = re.compile(
+    rf"(?:^|\n)[ \t]*<(?:{'|'.join(THINK_TAG_NAMES)})\b[^>]*>.*$", re.DOTALL | re.IGNORECASE
+)
+
+
+_ORPHAN_REASONING_TAG_PATTERN = re.compile(
+    rf"</?(?:{'|'.join(THINK_TAG_NAMES)})>\s*", re.IGNORECASE
+)
+
+
+_STRAY_TOOL_CALL_CLOSER_PATTERN = re.compile(
+    rf"</(?:{_NS_PREFIX}(?:{'|'.join(_TOOL_CALL_TAG_NAMES)}|function))>\s*", re.IGNORECASE
+)
+
+
+# A tool-call opener with no closer, or GLM-style argument markup
+# (<arg_key>/<arg_value>) outside any closed block, means the stream was
+# cut mid-serialization of a text-channel tool call (#101899). The call
+# can't be recovered; strip from the block-boundary opener (or the line
+# holding the first stray argument tag) to the end of the text.
+_UNTERMINATED_TOOL_CALL_PATTERN = re.compile(
+    rf"(?:^|\n)[ \t]*<{_NS_PREFIX}(?:{'|'.join(_TOOL_CALL_TAG_NAMES)})\b[^>]*>.*$"
+    r"|(?:^|\n)[^\n<]*</?arg_(?:key|value)\b.*$",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 def _ra() -> ModuleType:
@@ -21,6 +78,57 @@ def _ra() -> ModuleType:
     from mertina import run_agent
 
     return run_agent
+
+
+def _flatten_content_text(content: Any) -> str:
+    """Flatten list/dict content (e.g. Anthropic-via-OpenRouter block lists) to text: a raw list
+    hitting ``re.sub`` raises TypeError and the loop retries forever. Thinking/reasoning blocks
+    are dropped outright; their text key varies per provider."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part if isinstance(part, str) else part.get("text")
+            for part in content
+            if isinstance(part, str)
+            or (
+                isinstance(part, dict)
+                and str(part.get("type") or "").strip().lower()
+                not in {"thinking", "reasoning", "redacted_thinking"}
+                and isinstance(part.get("text"), str)
+                and part.get("text")
+            )
+        )
+    if isinstance(content, dict):
+        return str(content.get("text") or content.get("content") or "")
+    return str(content)
+
+
+# Order matters: closed pairs first (case-insensitive so mixed-case tags don't fall through to the
+# unterminated pass and eat trailing content), then tool-call XML blocks, the boundary+name-gated
+# <function> block, the unterminated reasoning block, stray orphan reasoning tags, and finally stray
+# tool-call CLOSERS only (bare/unterminated <function> is kept: a truncated streaming tail may still
+# be valuable, matching OpenClaw's asymmetry).
+_THINK_STRIP_PATTERNS = (
+    *_REASONING_BLOCK_PATTERNS,
+    *_TOOL_CALL_BLOCK_PATTERNS,
+    _NAMED_FUNCTION_BLOCK_PATTERN,
+    _UNTERMINATED_REASONING_BLOCK_PATTERN,
+    _ORPHAN_REASONING_TAG_PATTERN,
+    _STRAY_TOOL_CALL_CLOSER_PATTERN,
+    _UNTERMINATED_TOOL_CALL_PATTERN,
+)
+
+
+def strip_think_blocks(agent, content: str) -> str:
+    """Remove reasoning/thinking blocks from content, returning only visible text: closed tag
+    pairs, unterminated open tags at a block boundary (mirrors ``gateway/stream_consumer.py``),
+    stray orphan tags (all case-insensitive variants), and standalone tool-call XML blocks some
+    open models emit; ``<function>`` is boundary- and ``name=``-gated so prose mentions survive."""
+    content = _flatten_content_text(content) if content else ""
+    for pattern in _THINK_STRIP_PATTERNS if content else ():
+        content = pattern.sub("", content)
+    return content
 
 
 def create_openai_client(
@@ -82,3 +190,10 @@ def invoke_tool(
         )
 
     return _execute(function_args)  # type: ignore[no-any-return]  # upstream types _execute as Any
+
+
+def copy_reasoning_content_for_api(agent, source_msg: dict, api_msg: dict) -> None:
+    """Forward reasoning fields onto an API replay message; policy lives in ``agent.message_sanitization.apply_reasoning_content_policy``."""
+    from mertina.agent.message_sanitization import apply_reasoning_content_policy
+
+    apply_reasoning_content_policy(source_msg, api_msg, agent._needs_thinking_reasoning_pad())
