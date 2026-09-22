@@ -1,0 +1,212 @@
+# Hermes Agent 核心循环来源与删减记录
+
+核对日期：2026-09-21。适用范围：Mertina v0.1 第三阶段（Agent 循环、工具执行、提示词、流式、web_search）。
+实施顺序与验收以[开发计划书](../plans/v0.1-phase-3-agent-loop.md)为准；本文记录代码来源及有意改变的行为，
+不代表对应检查点已经完成。
+
+## 固定来源与许可
+
+- 上游：[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)。
+- 固定提交：`4cefeed7debc7091ed65240cbc7e2c36435c0b6b`（本地参考 clone 的 HEAD）。
+- 许可证：[该提交的 LICENSE](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/LICENSE)，MIT License，`Copyright (c) 2025 Nous Research`。
+  LICENSE 的 Git blob 为 `75410e73319c72cd3e991a501c5455eb78f38375`，与第二阶段保存的
+  [LICENSES/Hermes-Agent-MIT.txt](../../LICENSES/Hermes-Agent-MIT.txt) 一致，无需更新许可文本。
+
+本阶段所有引用都指向上述固定提交。实现过程中不混用其他 Hermes 版本；如需换基线，另开记录。
+
+### 与第二阶段固定提交的关系
+
+[第二阶段来源记录](hermes-model-transport.md)固定在 `9d24f9c91f3bf6b9faad5436cb12d20a8c7d46a1`，
+但该对象不在本地 clone 中（`git cat-file` 报 bad object），无法在本地复核。其引用的九处
+`agent/transports/chat_completions.py` 行号与 LICENSE blob 均与 `4cefeed7de` 完全一致。
+建议：在能访问上游时 `git fetch` 并核对该 SHA；若仍不可得，下次触及第二阶段文档时改钉到 `4cefeed7de`。
+本阶段不修改第二阶段文档。
+
+## 迁移原则
+
+- **保留结构**：沿用 Hermes 的模块名、phase 拆分和 verdict 返回模式
+  （`fallthrough` / `continue` / `break` / `return`），常量文本与关键算法尽量原样。
+- **只删分支**：删去 v0.1 不需要的分支；删去的每一类都在下文列出理由。
+- **两处结构性偏离**：
+  1. `AIAgent` 的 14 个 Mixin 合并为普通类 `Agent`；phase 函数接显式参数，不用 `_run_phase`
+     对 `_LoopState` 做反射传参。
+  2. **异步**：Hermes 循环是线程同步的；Mertina 第二阶段的 `ModelClient` 是异步的，因此循环整体改为
+     asyncio。机制改变、语义不变，对照见下文“异步改写”。
+- **历史契约服从第二阶段 transport**：历史中只保存 transport 接受的字段。Hermes 在 tool 消息中写入
+  `name`/`tool_name`、在 assistant 消息中写入 `finish_reason`/`reasoning`，发送前再删除；
+  Mertina 直接不写入，finish_reason 保存在每轮状态中。
+
+## 文件与符号对应
+
+目标路径均相对于 `src/mertina_agent/`，“检查点”一列对应计划书 §4。
+
+### Agent 与循环
+
+| 固定来源 | Mertina 目标 | 检查点 | 保留 | 删减 |
+|---|---|---|---|---|
+| [run_agent.py:229 `AIAgent`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/run_agent.py#L229)、[agent/turn_facade.py:19 `TurnFacadeMixin`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_facade.py#L19)、[agent/interrupt_control.py:109 `interrupt` / :215 `clear_interrupt`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/interrupt_control.py#L109) | `agent/core.py` `Agent` | CP2 / CP4 | `run_conversation`、`chat`、`interrupt`、`clear_interrupt`、`is_interrupted`、每实例 system prompt 缓存、`tools` / `valid_tool_names` | Mixin、上百个构造参数、turn lease、relay、accounting、steer/redirect、fallback、凭据池、SessionDB |
+| [agent/conversation_loop.py:1594 `run_conversation`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/conversation_loop.py#L1594)、[:1437 `_run_conversation_turn`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/conversation_loop.py#L1437)、[:1405 `_run_api_retry_loop`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/conversation_loop.py#L1405)、[:1289 `_LoopState`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/conversation_loop.py#L1289)、[:1642 `_close_durable_failed_turn`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/conversation_loop.py#L1642)、[:962 `_invalid_tool_name_error_content`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/conversation_loop.py#L962) | `agent/conversation_loop.py` | CP2 / CP4 | while 骨架、重试内循环、每轮状态、失败轮次补 assistant 边界、未知工具错误文本 | 压缩与 preflight、MoA、codex_app_server、prompt cache、billing 文案、plugin-compat、`_run_phase` |
+| [agent/turn_context.py:401 `TurnContext`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_context.py#L401)、[:879 `build_turn_context`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_context.py#L879)、[:1072 `build_api_messages`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_context.py#L1072) | `agent/turn_context.py` | CP2 | 复制调用方历史、追加 user、记录 `current_turn_user_idx`、首次构建 system prompt、每次请求 clone 并前置 system | api_content sidecar、memory prefetch、插件上下文、压缩、会话标题、stdio 保护、reasoning 回放 |
+| [agent/turn_iteration_prep.py:302 `begin_iteration`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_iteration_prep.py#L302)、[:387 `apply_retry_restarts`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_iteration_prep.py#L387) | `agent/turn_iteration_prep.py` | CP2 | 中断退出、调用计数、`iteration_budget.consume()`；restart 只留“已中断”与“全部重试无响应” | `prepare_iteration`、spinner、redirect/压缩/fallback/长度四种 restart、grace call、预算提醒 |
+| [agent/turn_api_call.py:68 `perform_api_call`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_api_call.py#L68)、[:171 `handle_api_interrupt`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_api_call.py#L171) | `agent/turn_api_call.py` | CP2 / CP4 / CP5 | 流式与非流式分派、请求中可中断、保留已流出的部分文本、`INTERRUPT_WAITING_FOR_MODEL_PREFIX` 文案 | Nous 限流守卫、middleware、relay、MoA 握手、redirect 交叉检查 |
+| [agent/turn_api_error.py:51 `handle_api_error`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_api_error.py#L51)、[:248 `settle_unrecovered_error`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_api_error.py#L248)、[agent/turn_recovery.py:1205 `abort_turn_on_interrupt`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_recovery.py#L1205)、[:1223 `interruptible_backoff_sleep`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_recovery.py#L1223)、[:1273 `compute_error_backoff`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_recovery.py#L1273)、[agent/turn_response_check.py:234 `retry_invalid_response`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_response_check.py#L234) | `agent/turn_api_error.py` | CP4 | 可重试判定、`retry_count` 上限、Retry-After 优先（封顶 600s，≤0 视为缺失）、否则 `jittered_backoff(n, 2, 60)`；无效响应 `jittered_backoff(n, 5, 120)`；退避中可中断 | 完整错误分类器、凭据刷新与轮换、fallback 链、auto-recovery、厂商特判、上下文溢出恢复、诊断缓冲 |
+| [agent/turn_response_check.py:92 `check_api_response`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_response_check.py#L92)、[agent/turn_response_intake.py:119 `normalize_model_response`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_response_intake.py#L119) | `agent/turn_response_intake.py` | CP2 | finish_reason 分流：`content_filter`、`length` 以 partial 结束，截断的工具调用不执行；refusal 独立；usage 汇总 | 长度续写、Codex incomplete、scratchpad 重试、`post_api_request` hook、provider projection |
+| [agent/turn_tool_validation.py:70 `validate_tool_calls`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_tool_validation.py#L70) | `agent/turn_tool_validation.py` | CP2 | 未知工具（混合批只报无效调用，全无效三次即 partial 退出）；非法 JSON 先不追加地重试请求 3 次，再注入错误结果；空参数写为 `"{}"`；截断参数 partial 退出 | 工具名模糊修复、tool_call ID 去重改写 |
+| [agent/turn_tool_round.py:45 `run_tool_round`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_tool_round.py#L45)、[:217 `stage_tool_call_message`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_tool_round.py#L217) | `agent/turn_tool_round.py` | CP2 | 校验 → 追加 assistant(tool_calls) → 混合批错误结果 → 执行 → continue | 执行前持久化、guardrail halt、execute_code 退款、housekeeping 静音、压缩、去重、delegate 截断 |
+| [agent/turn_final_response.py:46 `finish_text_response`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_final_response.py#L46) | `agent/turn_final_response.py` | CP2 | 追加最终 assistant，`turn_exit_reason = text_response(finish_reason=…)` | 空响应阶梯、stall/degenerate/ack 续写、dropped-tool-call 催促、stop gates、reasoning 提升 |
+| [agent/turn_loop_errors.py:35 `handle_outer_loop_error`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_loop_errors.py#L35) | `agent/turn_loop_errors.py` | CP4 | 计数、为未应答的 tool_call 补错误结果、达到 `min(8, max_iterations)` 后终止 | traceback 模块分类、解释器关闭特判 |
+| [agent/turn_finalizer.py:447 `finalize_turn`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_finalizer.py#L447)、[:122 `_resolve_budget_fallback`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_finalizer.py#L122)、[:226 `_close_transcript_tail`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/turn_finalizer.py#L226)、[agent/chat_completion_helpers.py:2255 `handle_max_iterations`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/chat_completion_helpers.py#L2255) | `agent/turn_finalizer.py` | CP2 / CP4 | 预算耗尽时追加 summary 请求并做一次无工具调用；中断时关闭 tool 结尾；“已交付 final_response 则历史必有 assistant 行”；组装结果；清除中断 | trajectory、持久化、micro-compaction、输出 hook、memory 同步、后台 review、kanban、文件变更脚注 |
+| [agent/message_sanitization.py:260 `close_interrupted_tool_sequence`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/message_sanitization.py#L260) | `agent/message_sanitization.py` | CP2 | 原样 | 该模块其余清洗函数 |
+| [agent/iteration_budget.py:25 `IterationBudget`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/iteration_budget.py#L25) | `agent/iteration_budget.py` | CP1 | 原样（非阻塞 `threading.Lock` 在异步下安全） | `normalize_budget_warning_ratio` |
+| [agent/retry_utils.py:30 `parse_retry_after_seconds`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/retry_utils.py#L30)、[:121 `jittered_backoff`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/retry_utils.py#L121) | `agent/retry_utils.py` | CP4 | 原算法；时钟与随机源改为参数注入（测试规范要求） | quota/reset 文本语法、Z.AI 自适应退避 |
+| [tools/interrupt.py:37 `set_interrupt` 等](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/tools/interrupt.py#L37) | `agent/interrupt.py` | CP1 | 工具侧 `is_interrupted()` 接口 | 线程 ident 集合改为 contextvar；yield、`acting_for_tid`、调试追踪 |
+| agent/turn_retry_state.py `TurnRetryState` | 不迁移 | — | — | 删减后无剩余字段（全是认证、格式恢复与 restart 标志） |
+
+### 工具层
+
+| 固定来源 | Mertina 目标 | 检查点 | 保留 | 删减 |
+|---|---|---|---|---|
+| [tools/registry.py:181 `ToolEntry`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/tools/registry.py#L181)、[:421 `ToolRegistry`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/tools/registry.py#L421)、[:649 `register`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/tools/registry.py#L649)、[:824 `get_definitions`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/tools/registry.py#L824)、[:874 `dispatch`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/tools/registry.py#L874)、[:999 `tool_error`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/tools/registry.py#L999) | `tools/registry.py` | CP1 | 注册时 schema 校验、check_fn 过滤、结果类型规范化、错误长度上限 2048、模块级默认 `registry` 与导入即注册；`Agent` 可注入独立 registry | 插件 overlay/scope/override、AST discovery 与磁盘缓存、check_fn TTL 缓存、toolset alias、MCP、动态 schema 覆盖 |
+| [model_tools.py:213 `get_tool_definitions`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/model_tools.py#L213)、[:867 `handle_function_call`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/model_tools.py#L867)、[:630 `_sanitize_tool_error`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/model_tools.py#L630) | `tools/model_tools.py` | CP1 | 按 toolset 选工具、调度 registry、错误去结构标记 | 定义缓存、Tool Search、schema 重写器、bridge/connector、hook 与 middleware、`_run_async` 桥 |
+| [agent/tool_executor.py:159 `_parse_tool_arguments`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_executor.py#L159)、[:310 `_append_skipped_tool_results`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_executor.py#L310)、[:1433 `_unfinished_tool_result`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_executor.py#L1433)、[:1761 `_execute_tool_calls_sequential`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_executor.py#L1761)、[:1491 `execute_tool_calls_concurrent`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_executor.py#L1491)、[:1818 `execute_tool_calls_segmented`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_executor.py#L1818) | `agent/tool_executor.py` | CP1 / CP3 / CP4 | 参数只解析不修复；按调用顺序写回；未开始调用补 skipped 结果；并行中被中断补 cancelled 结果 | 审批与授权门、middleware、start-order gate、spinner 与打印、结果落盘、checkpoint、guardrail 观测、DB flush、批次超时配置 |
+| [agent/tool_dispatch_helpers.py:31 `_PARALLEL_SAFE_TOOLS`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_dispatch_helpers.py#L31)、[:164 `_plan_tool_batch_segments`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_dispatch_helpers.py#L164)、[:400 `make_tool_result_message`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_dispatch_helpers.py#L400)、[:515 `_maybe_wrap_untrusted`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/tool_dispatch_helpers.py#L515) | `agent/tool_executor.py` | CP1 / CP3 | 并行段与串行段规划（安全集合只含 `web_search`）；web_search 结果包 untrusted 定界符 | 路径冲突检测、破坏性命令识别、MCP 并行、风险元数据、时间戳、上游截断提示 |
+
+### 搜索
+
+| 固定来源 | Mertina 目标 | 检查点 | 保留 | 删减 |
+|---|---|---|---|---|
+| [agent/web_search_provider.py:43 `WebSearchProvider`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/web_search_provider.py#L43)（含 `ProviderBase.name`） | `agent/web_search_provider.py` | CP3 | `name`、`is_available()`、`search(query, limit)`、结果 envelope 约定 | extract、keyless、setup schema、`get_provider_env` |
+| [tools/web_tools.py:268 `web_search_tool`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/tools/web_tools.py#L268)、[:454 `WEB_SEARCH_SCHEMA`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/tools/web_tools.py#L454) | `tools/web_tools.py` | CP3 | limit 夹紧 1–100、调用前检查中断、无 provider 错误、JSON 结果、schema 原文 | web_extract、结果缓存与 rescue、多后端选择、debug 文件 |
+| [plugins/web/_common.py:37 `search_ok` 等](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/plugins/web/_common.py#L37)、[plugins/web/ddgs/provider.py:130 `_run_ddgs_search_bounded`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/plugins/web/ddgs/provider.py#L130)、plugins/web/ddgs/_search_worker.py | `plugins/web/_common.py`、`plugins/web/ddgs/` | CP3 | 一次性子进程、30s 硬超时、terminate 后 kill 回收、stdout JSON envelope 校验 | 插件发现与注册、test hook 环境变量；子进程改用 `asyncio.create_subprocess_exec` |
+
+### 提示词与流式
+
+| 固定来源 | Mertina 目标 | 检查点 | 保留 | 删减 |
+|---|---|---|---|---|
+| [agent/prompt_builder.py:158 `DEFAULT_AGENT_IDENTITY`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/prompt_builder.py#L158)、[:345 `TOOL_USE_ENFORCEMENT_GUIDANCE`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/prompt_builder.py#L345)、[:380 `TASK_COMPLETION_GUIDANCE`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/prompt_builder.py#L380)、[:408 `PARALLEL_TOOL_CALL_GUIDANCE`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/prompt_builder.py#L408) | `agent/prompt_builder.py` | CP2 | guidance 原文；identity 只替换产品名与出品方 | context files、SOUL、memory/skills/kanban 指导、平台提示、环境探测、steer 说明 |
+| [agent/system_prompt.py:659 `build_system_prompt_parts`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/system_prompt.py#L659)、[:551 `_guidance_parts`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/system_prompt.py#L551)、[:487 `_timestamp_line`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/system_prompt.py#L487)、[:41 `_model_gate`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/system_prompt.py#L41) | `agent/system_prompt.py` | CP2 | stable/context/volatile 三层顺序；有工具才注入工具指导；日期级时间行与 Model 行；时钟注入 | skills 索引、memory 块、插件段、coding posture、静态前缀重建 |
+| [agent/chat_completion_helpers.py:2611 `_ToolCallAccumulator`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/chat_completion_helpers.py#L2611)、[:2964 `_call_chat_completions`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/chat_completion_helpers.py#L2964)、[:3133 `_assemble_tool_calls`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/chat_completion_helpers.py#L3133)、[:3159 `_finish_chat_stream`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/chat_completion_helpers.py#L3159) | `agent/transports/chat_completions.py`、`agent/model_client.py` | CP5 | 同 index 不同 id 分槽、name 赋值而非拼接、参数分片最后拼接、无 finish_reason 的结尾判定、截断参数不可执行、refusal 分片 | reasoning 与 reasoning_details、SSE echo 缓冲、router shim、relay、stale-stream watchdog、参数修复 |
+| [agent/stream_delivery.py:19 `StreamDeliveryMixin`](https://github.com/NousResearch/hermes-agent/blob/4cefeed7debc7091ed65240cbc7e2c36435c0b6b/agent/stream_delivery.py#L19) | `agent/events.py` | CP2 / CP5 | 文本增量、工具生成、工具开始与完成的投递语义，改为单一 `event_callback` + 类型化事件 | TUI/TTS、单写入器、interim 去重 |
+
+## 有意改变的行为
+
+这些变化是本项目契约要求，不是迁移遗漏。修改相关逻辑时应保留原因注释和回归测试。
+
+### CP1：工具层
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 跨 toolset 同名注册记 error 日志后静默返回 | 抛出 `ToolRegistrationError`，原注册保留 | 开发规范要求不静默吞掉错误；错误声明应在启动时暴露 |
+| 注册只校验 schema 是 dict、`parameters` 是 dict | 另外校验名称格式（1–64 位字母数字 `_` `-`）、schema 名称一致，并复用 transport 的 `convert_tools` 校验 | 与 Hermes 注释同一理由：坏声明会让整轮请求 400，注册时报错能指出是哪个工具 |
+| 依赖调用方正确设置 `is_async` | 协程函数未声明 `is_async=True` 时拒绝注册；同步 handler 返回协程时关闭并报结果契约错误 | 否则产生从未 await 的协程 |
+| `dispatch` 同步，异步 handler 经 `_run_async` 桥接 | `dispatch` 为 `async`；同步 handler 用 `asyncio.to_thread` | 异步循环，避免阻塞事件循环 |
+| `_sanitize_tool_error` 在 `model_tools.py`，registry 延迟导入 | 放在 `registry.py`（下层） | 去掉循环导入，行为不变 |
+| 未知 toolset 只打印警告 | `select_tool_names` 抛 `ConfigurationError` | 12-factor 配置要求启动即失败，避免 Agent 缺工具却照常运行 |
+| `handle_function_call` 不检查工具是否已向模型提供 | 可选 `enabled_tools`：已注册但未提供的工具返回错误结果 | 纵深防御，模型不能调用本轮未提供的工具 |
+| `json.loads` 接受 `NaN` / `Infinity` 参数 | 视为非法参数，不执行工具 | 它们不是 JSON，写回历史后无法再发送给 provider |
+| tool 结果消息带 `name`、`tool_name`、时间戳和风险元数据 | 只含 `role`、`content`、`tool_call_id` | 第二阶段 transport 拒绝未知字段 |
+| untrusted 包装覆盖 `web_extract`、`browser_*`、`mcp_*` | 只覆盖 `web_search` | v0.1 仅有该外部内容工具 |
+| 中断在每个工具前后各检查一次，第二次使用“User sent a new message”文案 | 只在每个工具前检查，统一使用取消文案 | Mertina 的中断只表示停止，没有 steer/redirect |
+
+### CP2：最小 ReAct 循环
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 混合批中未知工具的错误结果先于已执行工具的结果追加 | 所有结果按模型调用顺序写回 | 历史不变量：结果顺序与调用顺序一致 |
+| `_close_durable_failed_turn` 只关闭以 `user` 结尾的失败轮次 | 同时关闭以 `tool` 结尾的失败轮次（工具轮次后模型请求失败） | 任何返回的历史都不以 tool 结尾，可直接进入下一轮 |
+| 模型请求失败进入重试、凭据轮换与 fallback | CP2 直接以 `model_request_failed` 结束本轮；CP4 加入重试 | 检查点分步交付，失败语义与后续重试兼容 |
+| `length` 截断进入续写，最多 3 次 | 截断文本作为 partial 答复保留；截断的工具调用拒绝执行且不写入历史 | 续写属于 P1；截断参数绝不执行与 Hermes 一致 |
+| `content_filter` 先尝试 fallback provider，文案带 provider 名称 | 直接以 failed 结束，文案不带 provider 名称 | v0.1 只有一个端点，无 provider 概念 |
+| system prompt 从 agent 对象读取配置，含 Provider/Platform/Session 行，`system_message` 每轮传入但只在首轮生效 | 显式参数、时钟注入；只含 Model 行；`system_message` 为构造参数 | 语义相同（只构建一次）且更清楚；可测试 |
+| 空工具名有单独的简短错误文案 | 删除该分支 | 第二阶段 `ToolCall` 契约已拒绝空名称，属不可达代码 |
+| summary 调用不计入 `api_calls` | 计入 | 结果中如实反映实际请求数 |
+| 调用方历史只做列表浅拷贝 | 逐条结构化克隆 | 保证调用方历史及其字典绝不被修改 |
+| `_invalid_tool_retries` / `_invalid_json_retries` 挂在 agent 上跨轮存在 | 挂在每轮状态上 | 计数不应泄漏到下一轮 |
+| 同一 agent 实例的并发调用由网关层保证互斥 | `Agent` 拒绝重入并抛 `AgentBusyError` | 中断信号与缓存属于实例，并发会互相干扰 |
+| 结果 dict 在多个模块中拼装 | `ConversationResult` TypedDict 与构造函数集中在 `agent/turn_result.py` | 类型化；phase 模块无需导入循环模块 |
+
+### CP3：并行工具执行与 web_search
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 并行批次用守护线程池（上限 8），批次超时可配置 | asyncio 任务 + 信号量（上限 8）；同步 handler 由 registry 放入线程；批次超时不迁移 | 异步循环；超时配置属于 P1 |
+| 中断后等待 3 秒再合成取消结果 | 相同：轮询中断，宽限 3 秒后放弃未完成调用，逐个补取消结果 | 语义一致 |
+| 并行安全工具有十余个，另有按路径冲突的规划 | 仅 `web_search`；路径规划删除 | Mertina 只有这一个外部读取工具 |
+| ddgs 子进程以脚本运行并改写 `PYTHONPATH`；测试钩子由环境变量开启 | 以已安装包的 `python -m` 运行；测试注入整个 worker 命令 | 去掉路径变通与测试专用代码路径 |
+| 子进程环境经 `_sanitize_subprocess_env` 去除 Hermes 管理的密钥 | 去除 `MERTINA_*` 与 `OPENAI_*` 变量，保留代理等网络变量 | 同一目的：搜索子进程不应拿到模型凭据 |
+| 日志记录搜索 query 原文 | 只记录结果数量与上限 | 日志规范禁止记录可能含用户数据的内容 |
+| `is_available` 通过 `import ddgs` 判断 | `importlib.util.find_spec` | 不产生导入副作用，更轻 |
+| provider 捕获任意 `Exception` | 捕获 `RuntimeError` 与 `OSError`；子进程内在边界处捕获全部异常写入 envelope | 规范要求捕获具体异常；子进程是最外层边界 |
+| worker 返回的行直接信任 | 父进程校验并规范化每一行 | 结果会进入模型上下文 |
+| `web_search_tool` 每次调用读取配置选择 provider，带结果缓存与 rescue | 注册时绑定 provider；`configure_web_search(settings)` 重新绑定；无缓存 | 配置在启动时读取与校验一次（12-factor） |
+| 空 query 直接交给后端 | 返回模型可读的错误 | schema 要求 query；空搜索没有意义 |
+| provider `search` 为同步方法 | `async def search` | 异步循环；子进程由 asyncio 驱动 |
+| 通过 AST 扫描 `tools/` 发现内置工具 | `discover_builtin_tools()` 导入显式列表 | 启动可预测，内置工具一处可审阅 |
+| 合成的跳过/取消结果与搜索结果一样经过 untrusted 包装 | 相同（保留 Hermes 行为） | 包装无害；不对内容做"是否已包装"的特判 |
+
+### CP4：重试、停止与错误收尾
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 错误分类器按数十种原因决定重试、轮换、fallback、压缩 | 只保留可重试判定：timeout、connection、HTTP 408/429/5xx、无效响应可重试；其他 4xx 与 `closed` 不重试 | 与 Hermes 状态表一致；其余恢复手段属于 P1 |
+| 退避以 200ms 切片 sleep 并轮询中断标志 | `InterruptSignal.wait(timeout)` 直接等待 | 语义相同，停止即时生效 |
+| 请求在线程中执行并轮询中断，抛 `InterruptedError` 进入重试循环 | 请求任务与停止信号赛跑，结果以 `ApiCallVerdict` 返回 | 异步等价写法，沿用 Hermes 的 verdict 模式 |
+| 抖动种子取自墙钟与计数器 | `RetryPolicy` 注入随机源与 sleep 函数，默认 `SystemRandom` | 测试规范要求注入时钟与随机源 |
+| 中断时保留已流式输出的部分文本 | CP4 只给出等待时长文案；部分文本随 CP5 流式加入 | 检查点分步交付 |
+| 未被恢复的错误文案包含 `/model`、`hermes doctor` 等命令与 provider 名称 | 文案只描述失败与下一步，不引用不存在的命令 | Mertina 没有这些命令 |
+| 外层异常按 traceback 模块区分本地与 API 错误，API 错误可重试，本地错误保持 `failed=False` | 逃逸异常一律视为本地缺陷：补齐未应答工具结果并以 `failed=True` 结束 | 模型错误已由重试循环、工具错误已由 registry 处理；如实标记失败 |
+| `apply_retry_restarts` 处理四种 restart 标志 | 不需要：重试循环直接返回响应、终止结果或中断状态 | redirect/压缩/fallback/续写均未迁移 |
+| `RetryScheduled` 类事件在计划中属于 CP5 | 随重试一起在 CP4 加入 | 事件与产生它的机制同步交付 |
+| 未运行时调用 `interrupt()` 也会置位 | 无运行中的轮次时返回 `False` 且不置位 | 避免遗留的停止请求意外中断下一轮 |
+| 停止请求在工具开始前到达时，`web_search_tool` 返回 `Interrupted` | 相同（保留 Hermes 行为） | 工具入口检查中断 |
+
+### CP5：流式与事件
+
+| 上游行为 | Mertina 的选择 | 原因 |
+|---|---|---|
+| 流式由 `_call_chat_completions` 在请求线程中消费，并带 stale-stream 看门狗、单写入器、relay | `ModelClient.stream()` 异步消费 SDK 流；transport 的 `ChatCompletionsStreamAccumulator` 负责组装 | 与第二阶段分层一致：transport 只做转换与校验，客户端负责 I/O |
+| `_ToolCallAccumulator` 原样 | 复制：同 index 不同 id 分槽、name 赋值、参数分片最后拼接；去掉 Gemini `extra_content` | 语义一致 |
+| 流在无 finish_reason 时结束：返回部分流 stub，进入续写或重试 | 抛 `ModelResponseError`，由重试策略重新请求 | Mertina 没有续写；中断的回复绝不当作完整答案 |
+| 参数无法解析时尝试修复，失败才标记截断 | 不修复；无法解析即标记 `length`，循环拒绝执行 | 与第二阶段"绝不修复参数"一致 |
+| 首次 delta 后才判断 SSE 回显、router shim 等 | 删除 | 厂商特判 |
+| 端点拒绝 `stream_options` 时本会话不再发送 | 相同：`_rejects_stream_options` 原文复制，客户端生命周期内记住 | 语义一致 |
+| 流中错误事件、连接中断由多处辅助函数识别 | SDK 3.16.2 对错误事件抛通用 `APIError`、对中断抛 `APIConnectionError`（离线实验确认），分别映射为可重试的 `ModelRequestError` | 以实验证据为准 |
+| 回调：`stream_delta_callback`、`tool_gen_callback`、状态行等十余个 | 类型化事件：`TextDelta`、`ToolGenerationStarted`；每轮以 `RunCompleted` / `RunStopped` / `RunFailed` 之一结束 | 单一 `event_callback`，便于 v0.2 转为 SSE |
+| 工具调用开始后的文本只送往显示层做标签提取 | 不再作为 `TextDelta` 报告，但保留在最终内容中 | 与 Hermes"工具回合不流式前言"一致 |
+| 中断时保留已流式输出的文本（并对重复失控内容做隐藏） | 保留部分文本作为 assistant 消息与最终回复；重复检测删除 | 重复检测属于 P1 |
+| 默认总是流式 | `MERTINA_LLM_STREAM` 默认 true，可关闭 | 兼容不支持流式的端点 |
+
+## 异步改写
+
+| Hermes 机制 | Mertina 机制 | 保持的语义 |
+|---|---|---|
+| `_interrupt_requested` 布尔，其他线程调用 `interrupt()` | 布尔 + 每轮 `asyncio.Event`；跨线程经 `call_soon_threadsafe` | 迭代开始、请求中、退避中、工具启动前都能观察到停止 |
+| `_interruptible_api_call` 在线程中请求并轮询中断 | 请求 task 与中断事件 `asyncio.wait(FIRST_COMPLETED)`，中断则取消 | 停止后不等待模型返回 |
+| `interruptible_backoff_sleep` 以 200ms 切片 sleep | `asyncio.wait_for(event.wait(), timeout)` | 退避期间停止立即生效 |
+| `ThreadPoolExecutor` 并行执行工具 | `asyncio.gather`；同步 handler 用 `asyncio.to_thread` | 结果按调用顺序写回；未开始的调用补 skipped 结果 |
+| `tools/interrupt.py` 按线程 ident 记录中断 | contextvar 指向当前 run 的中断状态 | 工具侧 `is_interrupted()` 用法不变 |
+| `KeyboardInterrupt` / `InterruptedError` | `asyncio.CancelledError` 始终传播 | 取消不被伪装成模型错误 |
+
+## 明确不迁移的整类功能
+
+| 类别 | 理由 |
+|---|---|
+| SessionDB、持久化、会话恢复 | v0.2 的会话层；v0.1 由调用方持有历史 |
+| 上下文压缩、prompt cache、token 估算 | P1 健壮性 |
+| fallback、凭据池、各厂商错误特判 | P1；v0.1 只有一个 OpenAI 兼容端点 |
+| MoA、Codex、Anthropic、Bedrock 路径 | 只实现 Chat Completions |
+| hook、middleware、插件、MCP | P1 扩展性 |
+| steer / redirect、消息排队 | ROADMAP 明确排除（P1） |
+| tool guardrails、调用去重、工具名修复 | P1 tool-loop guardrails |
+| 长度续写、空响应阶梯、stop gates、stall 续写 | P1；v0.1 以明确的 finish_reason 结束 |
+| spinner、vprint、状态缓冲等显示层 | 由事件接口替代，渲染属于调用方 |
+| memory、skills、kanban、delegate、checkpoint | v0.4 及以后 |
+| turn lease、relay、accounting | 多进程网关特性，不在 P0 |
+
+## 测试来源
+
+只迁移测试意图，不引入依赖完整 Hermes 初始化的 fixture：
+`tests/agent/test_run_agent.py`、`test_iteration_budget_race.py`、`test_sequential_tool_interrupt.py`、
+`test_turn_api_call_interrupt.py`、`test_turn_finalizer_interrupt_alternation.py`、
+`test_turn_finalizer_iteration_limit_exit.py`、`test_streaming.py`、`test_streaming_tool_call_repair.py`、
+`tests/tools/test_registry.py`、`tests/tools/test_model_tools.py` 中与上表保留行为直接相关的场景。

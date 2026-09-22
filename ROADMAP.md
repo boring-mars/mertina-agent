@@ -28,7 +28,7 @@ scheduled once P0 is done.
 
 | Milestone | Theme | Status |
 |---|---|---|
-| [v0.1](#v01--agent-core) | Agent core: a tool-using agent loop you can run and test | Planned |
+| [v0.1](#v01--agent-core) | Agent core: a tool-using agent loop you can run and test | Done |
 | [v0.2](#v02--gateway-and-sessions) | Gateway and sessions: the agent as a long-running service with an HTTP API | Planned |
 | [v0.3](#v03--web-ui) | Web UI: chat with the agent in the browser | Planned |
 | [v0.4](#v04--memory-and-skills) | Memory and skills: the assistant remembers you and follows reusable procedures | Planned |
@@ -88,7 +88,7 @@ when it needs to, streams its answer, and can be stopped.
 
 | Mertina | Hermes |
 |---|---|
-| Agent loop | `run_agent.py` (`AIAgent`), `agent/conversation_loop.py` |
+| Agent loop | `run_agent.py` (`AIAgent`), `agent/conversation_loop.py`; since the Sep 2026 decomposition the turn phases live in `agent/turn_*.py` |
 | Transports | `agent/transports/base.py`, `agent/transports/chat_completions.py` |
 | Tool registry and execution | `tools/registry.py`, `model_tools.py`, `agent/tool_executor.py`, `agent/iteration_budget.py` |
 | Retry and interrupt | `agent/retry_utils.py`, `tools/interrupt.py` |
