@@ -1303,27 +1303,48 @@ class AIAgent(
         return toolguard_synthetic_result(decision)
 
     def _execute_tool_calls(self, assistant_message, messages: list, effective_task_id: str, api_call_count: int = 0) -> None:
-        """Execute the assistant's tool calls and append results to ``messages``.
+        #  """Execute the assistant's tool calls and append results to ``messages``.
+        #
+        #  The segment planner splits the batch into runs of parallel-safe calls (read-only, non-overlapping file
+        #  targets, opted-in MCP) separated by sequential barriers, run in emission order.
+        #  """
+        #  tool_calls = assistant_message.tool_calls
+        #  args = (assistant_message, messages, effective_task_id, api_call_count)
+        #  self._executing_tools = True  # allow _vprint during tool execution even with stream consumers
+        #  try:
+        #      if len(tool_calls) <= 1:
+        #          return self._execute_tool_calls_sequential(*args)
+        #
+        #      from agent.tool_dispatch_helpers import _plan_tool_batch_segments
+        #      active_env = get_active_env(effective_task_id)
+        #      exec_cwd = Path(active_env.cwd) if active_env is not None and active_env.cwd else None
+        #      segments = _plan_tool_batch_segments(tool_calls, execution_cwd=exec_cwd)
+        #      if len(segments) == 1:
+        #          run = self._execute_tool_calls_concurrent if segments[0][0] == "parallel" else self._execute_tool_calls_sequential
+        #          return run(*args)
+        #      from agent.tool_executor import execute_tool_calls_segmented
+        #      return execute_tool_calls_segmented(self, *args, segments=segments)
+        #  finally:
+        #      self._executing_tools = False
 
-        The segment planner splits the batch into runs of parallel-safe calls (read-only, non-overlapping file
-        targets, opted-in MCP) separated by sequential barriers, run in emission order.
-        """
-        tool_calls = assistant_message.tool_calls
+        # [改动] B：只保留最小串行入口和明确允许的独立工具并发入口。
+        """[改动] 执行 assistant 的工具调用并把结果追加到当前消息历史。"""
+        tool_calls = list(getattr(assistant_message, "tool_calls", []) or [])
         args = (assistant_message, messages, effective_task_id, api_call_count)
-        self._executing_tools = True  # allow _vprint during tool execution even with stream consumers
+        self._executing_tools = True
         try:
             if len(tool_calls) <= 1:
                 return self._execute_tool_calls_sequential(*args)
 
-            from agent.tool_dispatch_helpers import _plan_tool_batch_segments
-            active_env = get_active_env(effective_task_id)
-            exec_cwd = Path(active_env.cwd) if active_env is not None and active_env.cwd else None
-            segments = _plan_tool_batch_segments(tool_calls, execution_cwd=exec_cwd)
-            if len(segments) == 1:
-                run = self._execute_tool_calls_concurrent if segments[0][0] == "parallel" else self._execute_tool_calls_sequential
-                return run(*args)
-            from agent.tool_executor import execute_tool_calls_segmented
-            return execute_tool_calls_segmented(self, *args, segments=segments)
+            # [改动] B：当前 registry 没有并行安全元数据，默认只并发 v0.1 的 web_search。
+            parallel_names = set(getattr(self, "_parallel_tool_names", {"web_search"}) or ())
+            can_parallelize = all(
+                getattr(getattr(tool_call, "function", None), "name", "") in parallel_names
+                for tool_call in tool_calls
+            )
+            if can_parallelize:
+                return self._execute_tool_calls_concurrent(*args)
+            return self._execute_tool_calls_sequential(*args)
         finally:
             self._executing_tools = False
 
