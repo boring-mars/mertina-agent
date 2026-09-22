@@ -219,7 +219,7 @@ Scanning the files inside the v0.1 copy boundary for third-party imports (includ
 | Package | Where | v0.1 |
 |---|---|---|
 | `openai` | Client construction lives in L2's `agent_runtime_helpers.create_openai_client`, ported partially | **Needed in v0.1.0** |
-| `fire` | The CLI entry point in `run_agent.py` | Not needed; the standard library's `argparse` replaces it |
+| `fire` | `main()` in `run_agent.py`, imported only under `__main__` | **Needed in v0.1.0**, pinned to `0.7.1` as upstream (the entry point is kept verbatim, not rewritten to `argparse`) |
 | `httpx` | `tools/web_tools.py` | Ships with the openai SDK; not listed separately |
 | `ddgs` | `tools/web_tools.py` | v0.1.2 (keyless search provider) |
 | `pyyaml` | `hermes_cli/config.py` | v0.1.2 (config file) |

@@ -212,7 +212,7 @@ Mertina 自己写的、上游没有对应物的文件，按自身合适的方式
 | 包 | 出现位置 | v0.1 |
 |---|---|---|
 | `openai` | 客户端构造在 L2 的 `agent_runtime_helpers.create_openai_client`，按需部分搬运 | **v0.1.0 需要** |
-| `fire` | `run_agent.py` 的 CLI 入口 | 不需要，改用标准库 `argparse` |
+| `fire` | `run_agent.py` 的 `main()`，只在 `__main__` 里导入 | **v0.1.0 需要**，与上游同样锁 `0.7.1`（逐字保留入口，不改写成 `argparse`） |
 | `httpx` | `tools/web_tools.py` | openai SDK 自带，不单列 |
 | `ddgs` | `tools/web_tools.py` | v0.1.2（keyless search provider） |
 | `pyyaml` | `hermes_cli/config.py` | v0.1.2（配置文件） |
