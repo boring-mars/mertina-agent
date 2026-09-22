@@ -10,7 +10,34 @@ characters that would crash ``json.dumps`` in the OpenAI SDK or be rejected upst
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+# Lone surrogates are invalid UTF-8 and crash json.dumps in the OpenAI SDK; also used for
+# CLI paste scrubbing.
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
+def _sanitize_surrogates(text: str) -> str:
+    """Replace lone surrogate code points with U+FFFD; no-op when none present."""
+    return _SURROGATE_RE.sub("\ufffd", text)
+
+
+def close_interrupted_tool_sequence(messages: list, final_response: Any = None) -> bool:
+    """Append a synthetic assistant turn when an interrupted tail is a tool result: a transcript
+    ending on a raw ``tool`` message makes the next user message land as ``tool → user``, an
+    alternation violation strict providers (Gemini, Claude) answer by hallucinating a
+    continuation. Mutates in place; True if a closing turn was appended."""
+    last = messages[-1] if messages else None
+    if not isinstance(last, dict) or last.get("role") != "tool":
+        return False
+    text = final_response if isinstance(final_response, str) else ""
+    from mertina.agent.message_metadata import append_message
+
+    append_message(
+        messages, {"role": "assistant", "content": text.strip() or "Operation interrupted."}
+    )
+    return True
 
 
 def _tc_field(tc: Any, key: str) -> Any:
