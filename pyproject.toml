@@ -20,6 +20,8 @@ dependencies = [
     #
     # Pinned to the version the ported transport code was read against.
     "openai==2.24.0",
+    # run_agent.main(), imported only under __main__; Hermes pins the same version.
+    "fire==0.7.1",
 ]
 
 [dependency-groups]
