@@ -56,7 +56,7 @@ So the copy boundary can be cut. There is no "we must copy 568k lines".
 | `tools/web_tools.py` | 569 | 24 | 12 | 279 |
 | **Total** | **11,054** | | | **4,953 (45%)** |
 
-Three further reductions follow the first pass: cascading deletion (the surviving code calls plenty of removed functions), flattening the mixins, and slimming the prompt text. The expected v0.1 result is **2,000–3,000 lines**.
+Three further reductions follow the first pass: cascading deletion (the surviving code calls plenty of removed functions), dropping mixins whose methods are all cut, and slimming the prompt text. The expected v0.1 result is **2,000–3,000 lines**.
 
 ---
 
@@ -104,7 +104,7 @@ Move-out order; each step runs before the next begins:
 3. `tools/registry.py` + `model_tools.py`
 4. `agent/tool_executor.py` and tool dispatch
 5. `agent/conversation_loop.py` + `agent/turn_*.py`
-6. `run_agent.py` (mixins flattened)
+6. `run_agent.py` + the mixins it uses and `agent/agent_init.py` (mixin structure kept)
 
 `vendor/` is deleted entirely at the end.
 
@@ -263,7 +263,7 @@ Python version follows Hermes: `>=3.11`.
 | `mertina/tools/registry.py` | L1 trimmed | Keeps the `ToolEntry` shape and `register()`; plugin scoping, the discovery cache and the `check_fn` cache removed |
 | `mertina/tools/time_tools.py` | New | The `get_time` placeholder tool |
 | `mertina/model_tools.py` | L1 trimmed | Tool definition collection and dispatch; toolset selection, hooks and bridges removed |
-| `mertina/run_agent.py` | L1 trimmed | `AIAgent` with its 14 mixins flattened and `__init__` narrowed to this milestone's parameters; until step 7, only the module logger that `_ra()` uses |
+| `mertina/run_agent.py` | L1 trimmed | `AIAgent` keeps upstream's mixin structure: the mixins it uses and `agent/agent_init.py` are ported at their own paths, and a mixin whose methods are all cut leaves the base list and its file is deleted; `__init__` narrowed to this milestone's parameters. Until step 7, only the module logger that `_ra()` uses |
 
 ### 7.2 Data flow
 

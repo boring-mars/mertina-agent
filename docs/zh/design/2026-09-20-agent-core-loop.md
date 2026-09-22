@@ -56,7 +56,7 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 | `tools/web_tools.py` | 569 | 24 | 12 | 279 |
 | **合计** | **11,054** | | | **4,953（45%）** |
 
-第一刀之后还有级联删除（留下的代码大量调用已删函数）、摊平 mixin、瘦身提示词文本三笔要扣，预计 v0.1 最终产物 **2,000–3,000 行**。
+第一刀之后还有级联删除（留下的代码大量调用已删函数）、删掉方法全被删完的 mixin、瘦身提示词文本三笔要扣，预计 v0.1 最终产物 **2,000–3,000 行**。
 
 ---
 
@@ -104,7 +104,7 @@ mertina/              ← 裁剪后搬出的代码，始终可运行（agent/ to
 3. `tools/registry.py` + `model_tools.py`
 4. `agent/tool_executor.py` + 工具分发
 5. `agent/conversation_loop.py` + `agent/turn_*.py`
-6. `run_agent.py`（摊平 mixin）
+6. `run_agent.py` + 用到的 mixin 和 `agent/agent_init.py`（保留 mixin 结构）
 
 最后整个删除 `vendor/`。
 
@@ -256,7 +256,7 @@ Python 版本跟随 Hermes：`>=3.11`。
 | `mertina/tools/registry.py` | L1 裁剪 | 保留 `ToolEntry` 形状与 `register()`，去掉插件作用域、发现缓存、`check_fn` 缓存 |
 | `mertina/tools/time_tools.py` | 新写 | `get_time` 占位工具 |
 | `mertina/model_tools.py` | L1 裁剪 | 工具定义收集与分发，去掉 toolset 选择、hook、bridge |
-| `mertina/run_agent.py` | L1 裁剪 | `AIAgent` 摊平 14 个 mixin，`__init__` 参数收敛到本里程碑所需；步骤 7 之前只有模块 logger，供 `_ra()` 使用 |
+| `mertina/run_agent.py` | L1 裁剪 | `AIAgent` 保留上游的 mixin 结构：用到的 mixin 和 `agent/agent_init.py` 各自按同名路径搬，方法全被删掉的 mixin 从基类列表里去掉、文件删除；`__init__` 参数收敛到本里程碑所需。步骤 7 之前只有模块 logger，供 `_ra()` 使用 |
 
 ### 7.2 数据流
 
