@@ -32,7 +32,7 @@ def assemble_api_request(
     active_system_prompt: Any,
 ) -> AssembledRequest:
     """Assemble the request."""
-    api_messages, effective_system = build_api_messages(
+    api_messages, effective_system = build_api_messages(  # noqa: RUF059  # upstream unpacks both
         agent,
         messages,
         active_system_prompt=active_system_prompt,

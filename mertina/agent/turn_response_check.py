@@ -48,7 +48,7 @@ def check_api_response(
     if agent.verbose_logging:
         resp_model = getattr(response, "model", "N/A") if response else "N/A"
         logging.debug(
-            f"API Response received - Model: {resp_model}, Usage: {response.usage if hasattr(response, 'usage') else 'N/A'}"
+            f"API Response received - Model: {resp_model}, Usage: {response.usage if hasattr(response, 'usage') else 'N/A'}"  # noqa: E501  # upstream's message
         )
 
     # Fold provider usage into session counters (agent/turn_usage.py).

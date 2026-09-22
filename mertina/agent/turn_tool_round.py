@@ -64,6 +64,6 @@ def stage_tool_call_message(
     agent: Any, *, assistant_message: Any, finish_reason: Any, messages: Any
 ) -> dict[str, Any]:
     """Build the assistant tool-call row."""
-    assistant_msg = agent._build_assistant_message(assistant_message, finish_reason)
+    assistant_msg: dict[str, Any] = agent._build_assistant_message(assistant_message, finish_reason)
 
     return assistant_msg

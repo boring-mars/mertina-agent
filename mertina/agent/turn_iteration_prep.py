@@ -38,7 +38,7 @@ def announce_api_call(
     # Log request details if verbose
     if agent.verbose_logging:
         logging.debug(
-            f"API Request - Model: {agent.model}, Messages: {len(messages)}, Tools: {len(agent.tools) if agent.tools else 0}"
+            f"API Request - Model: {agent.model}, Messages: {len(messages)}, Tools: {len(agent.tools) if agent.tools else 0}"  # noqa: E501  # upstream's message
         )
         logging.debug(f"Last message role: {messages[-1]['role'] if messages else 'none'}")
     return ApiCallAnnouncement(action="fallthrough")
@@ -86,7 +86,7 @@ def begin_iteration(
         _turn_exit_reason = "budget_exhausted"
         if not agent.quiet_mode:
             agent._safe_print(
-                f"\n⚠️  Iteration budget exhausted ({agent.iteration_budget.used}/{agent.iteration_budget.max_total} iterations used)",
+                f"\n⚠️  Iteration budget exhausted ({agent.iteration_budget.used}/{agent.iteration_budget.max_total} iterations used)",  # noqa: E501  # upstream's message
                 diagnostic=True,
             )
         return _verdict("break")

@@ -7,6 +7,7 @@ Budget summary, transcript tail, diagnostics, result assembly. Synchronous, sing
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from mertina.agent.message_metadata import append_message
@@ -26,15 +27,15 @@ _SESSION_TOKEN_KEYS = (
 
 
 def _resolve_budget_fallback(
-    agent,
+    agent: Any,
     *,
-    final_response,
-    api_call_count,
-    interrupted,
-    failed,
-    messages,
-    _turn_exit_reason,
-    logger,
+    final_response: Any,
+    api_call_count: int,
+    interrupted: bool,
+    failed: bool,
+    messages: list[dict[str, Any]],
+    _turn_exit_reason: str,
+    logger: logging.Logger,
 ) -> tuple[Any, Any]:
     """Iteration-budget exhaustion. Returns ``(final_response, _turn_exit_reason)``."""
     budget_exhausted = (
@@ -59,7 +60,9 @@ def _resolve_budget_fallback(
     return final_response, _turn_exit_reason
 
 
-def _close_transcript_tail(agent, messages, final_response, interrupted) -> None:
+def _close_transcript_tail(
+    agent: Any, messages: list[dict[str, Any]], final_response: Any, interrupted: bool
+) -> None:
     """Shape the transcript tail."""
     # An interrupt can leave a tool result as the tail; close the sequence so strict
     # providers don't see ``tool → user`` (placeholder: final_response is usually empty).
@@ -77,7 +80,13 @@ def _close_transcript_tail(agent, messages, final_response, interrupted) -> None
 
 
 def _log_turn_exit(
-    agent, messages, final_response, api_call_count, _turn_exit_reason, interrupted, logger
+    agent: Any,
+    messages: list[dict[str, Any]],
+    final_response: Any,
+    api_call_count: int,
+    _turn_exit_reason: str,
+    interrupted: bool,
+    logger: logging.Logger,
 ) -> None:
     """Always INFO so agent.log captures WHY every turn ended; WARNING when the last
     message is a tool result (the "just stops" scenario)."""
@@ -125,7 +134,7 @@ def _log_turn_exit(
         logger.info(_diag_msg, *_diag_args)
 
 
-def _last_turn_reasoning(messages) -> Any | None:
+def _last_turn_reasoning(messages: list[dict[str, Any]]) -> Any | None:
     """Reasoning from the CURRENT turn only: stop at this turn's user message (#17055),
     but take the most recent non-empty reasoning since many providers emit it on the
     tool-call step and leave the final step with reasoning=None."""
@@ -138,15 +147,15 @@ def _last_turn_reasoning(messages) -> Any | None:
 
 
 def finalize_turn(
-    agent,
+    agent: Any,
     *,
-    final_response,
-    api_call_count,
-    interrupted,
-    failed,
-    messages,
-    _turn_exit_reason,
-):
+    final_response: Any,
+    api_call_count: int,
+    interrupted: bool,
+    failed: bool,
+    messages: list[dict[str, Any]],
+    _turn_exit_reason: str,
+) -> dict[str, Any]:
     """Run the post-loop finalization and return the turn ``result`` dict."""
     from mertina.agent.conversation_loop import logger
 

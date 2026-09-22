@@ -23,7 +23,9 @@ def _sanitize_surrogates(text: str) -> str:
     return _SURROGATE_RE.sub("\ufffd", text)
 
 
-def close_interrupted_tool_sequence(messages: list, final_response: Any = None) -> bool:
+def close_interrupted_tool_sequence(
+    messages: list[dict[str, Any]], final_response: Any = None
+) -> bool:
     """Append a synthetic assistant turn when an interrupted tail is a tool result: a transcript
     ending on a raw ``tool`` message makes the next user message land as ``tool → user``, an
     alternation violation strict providers (Gemini, Claude) answer by hallucinating a

@@ -10,7 +10,9 @@ from __future__ import annotations
 import inspect
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, fields
+from types import ModuleType
 from typing import Any
 
 from mertina.agent.message_sanitization import _sanitize_surrogates
@@ -37,14 +39,16 @@ from mertina.agent.turn_tool_round import run_tool_round
 logger = logging.getLogger(__name__)
 
 
-def _ra():
+def _ra() -> ModuleType:
     """Lazy ``run_agent`` reference so patches on ``run_agent.*`` reach this code path."""
     from mertina import run_agent
 
     return run_agent
 
 
-def _restore_or_build_system_prompt(agent, system_message, conversation_history):
+def _restore_or_build_system_prompt(
+    agent: Any, system_message: str | None, conversation_history: list[dict[str, Any]] | None
+) -> None:
     """Build the system prompt fresh.
 
     Mutates ``agent._cached_system_prompt``."""
@@ -52,7 +56,7 @@ def _restore_or_build_system_prompt(agent, system_message, conversation_history)
     agent._cached_system_prompt = agent._build_system_prompt(system_message)
 
 
-def _clone_message_for_send(msg):
+def _clone_message_for_send(msg: Any) -> Any:
     """Structural clone (dicts/lists recursively, immutable leaves shared) of a history
     message for the per-call API copy, so send-path rewrites never reach the persisted
     transcript (#80498). Cheaper than deepcopy: messages are JSON-shaped and acyclic."""
@@ -108,10 +112,10 @@ _CTX_FIELDS = frozenset(
     }
 )
 # Keyword names each phase helper takes (minus ``agent``), cached per function object.
-_PHASE_PARAMS: dict[Any, tuple] = {}
+_PHASE_PARAMS: dict[Any, tuple[str, ...]] = {}
 
 
-def _run_phase(fn, agent, state: _LoopState, **extra):
+def _run_phase(fn: Callable[..., Any], agent: Any, state: _LoopState, **extra: Any) -> Any:
     """Call phase helper ``fn`` with the loop locals it names, copy its verdict fields back.
 
     ``extra`` supplies non-state arguments (the caught exception). Returns the verdict so
@@ -130,7 +134,7 @@ def _run_phase(fn, agent, state: _LoopState, **extra):
     return verdict
 
 
-def _run_api_retry_loop(agent, s: _LoopState) -> dict[str, Any] | None:
+def _run_api_retry_loop(agent: Any, s: _LoopState) -> dict[str, Any] | None:
     """One API call (build → call → check).
 
     Returns None once the loop is left."""
@@ -144,11 +148,11 @@ def _run_api_retry_loop(agent, s: _LoopState) -> dict[str, Any] | None:
 
 
 def _run_conversation_turn(
-    agent,
+    agent: Any,
     user_message: Any,
-    system_message: str = None,
-    conversation_history: list[dict[str, Any]] = None,
-    task_id: str = None,
+    system_message: str | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
+    task_id: str | None = None,
 ) -> dict[str, Any]:
     """Run a complete conversation with tool calling until completion; returns the result dict."""
     # Per-turn setup: build_turn_context mutates ``agent`` and returns the locals the loop reads.
@@ -207,11 +211,11 @@ def _run_conversation_turn(
 
 
 def run_conversation(
-    agent,
+    agent: Any,
     user_message: Any,
-    system_message: str = None,
-    conversation_history: list[dict[str, Any]] = None,
-    task_id: str = None,
+    system_message: str | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
+    task_id: str | None = None,
 ) -> dict[str, Any]:
     """Run one turn (see ``_run_conversation_turn``)."""
     result = _run_conversation_turn(

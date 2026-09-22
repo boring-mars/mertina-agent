@@ -67,7 +67,7 @@ def record_response_usage(
 
     _cache_pct = ""
     if canonical_usage.cache_read_tokens and prompt_tokens:
-        _cache_pct = f" cache={canonical_usage.cache_read_tokens}/{prompt_tokens} ({100 * canonical_usage.cache_read_tokens / prompt_tokens:.0f}%)"
+        _cache_pct = f" cache={canonical_usage.cache_read_tokens}/{prompt_tokens} ({100 * canonical_usage.cache_read_tokens / prompt_tokens:.0f}%)"  # noqa: E501  # upstream's message
     # write= is the money (cache writes cost 50x a read); id= is what a provider needs to look the
     # request up; upstream= is who actually served it when the route reports that (OpenRouter's
     # `provider`). Diagnosing the 1,393-agent run's cache misses took a DB join and a live probe
@@ -94,7 +94,7 @@ def record_response_usage(
 
     if agent.verbose_logging:
         logging.debug(
-            f"Token usage: prompt={usage_dict['prompt_tokens']:,}, completion={usage_dict['completion_tokens']:,}, total={usage_dict['total_tokens']:,}"
+            f"Token usage: prompt={usage_dict['prompt_tokens']:,}, completion={usage_dict['completion_tokens']:,}, total={usage_dict['total_tokens']:,}"  # noqa: E501  # upstream's message
         )
 
     # Report cache stats for any provider that returns ``prompt_tokens_details.cached_tokens``,

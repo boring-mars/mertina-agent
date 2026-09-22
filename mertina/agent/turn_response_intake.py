@@ -71,7 +71,7 @@ def normalize_model_response(
             agent._vprint(f"{agent.log_prefix}🤖 Assistant: {content}")
         else:
             agent._vprint(
-                f"{agent.log_prefix}🤖 Assistant: {content[:100]}{'...' if len(content) > 100 else ''}"
+                f"{agent.log_prefix}🤖 Assistant: {content[:100]}{'...' if len(content) > 100 else ''}"  # noqa: E501  # upstream's message
             )
 
     return _verdict("fallthrough")

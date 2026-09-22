@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,14 +54,14 @@ def _stage_turn_user_message(
 
 
 def build_turn_context(
-    agent,
+    agent: Any,
     user_message: Any,
     system_message: str | None,
     conversation_history: list[dict[str, Any]] | None,
     task_id: str | None,
     *,
-    restore_or_build_system_prompt,
-    sanitize_surrogates,
+    restore_or_build_system_prompt: Callable[[Any, str | None, list[dict[str, Any]] | None], None],
+    sanitize_surrogates: Callable[[str], str],
 ) -> TurnContext:
     """Run the once-per-turn setup and return the loop's input context.
 
@@ -125,5 +126,5 @@ def build_api_messages(
     # Final system message = cached prompt.
     effective_system = active_system_prompt or ""
     if effective_system:
-        api_messages = [{"role": "system", "content": effective_system}] + api_messages
+        api_messages = [{"role": "system", "content": effective_system}] + api_messages  # noqa: RUF005  # upstream's expression
     return api_messages, effective_system
