@@ -108,6 +108,7 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 | `tool_executor.execute_tool_calls_sequential`：按终端审批分段，每段以 `SimpleNamespace(tool_calls=calls)` 调用 `_execute_tool_calls_sequential` | 传入 `assistant_message`，调用一次 | 终端审批批次不在 v0.1 内 |
 | `turn_api_call.perform_api_call`：`response = run_llm_execution_middleware(api_kwargs, _perform_api_call, ...)`，内层经流式调用或 `relay_llm.execute(..., agent._interruptible_api_call, ...)` 发出请求 | `response = agent._interruptible_api_call(api_kwargs)` | LLM 执行中间件和 Relay 整层不在 v0.1 内，流式输出在 v0.1.1；直接发一次非流式请求 |
 | `turn_context.build_api_messages`：`for idx, msg in enumerate(canonical_messages)`，遍历经 `canonicalize_replay_history` 规范化过的历史前缀 | `for msg in messages:` | 回放规范化服务于会话恢复和 prompt 缓存，v0.1 没有这两项；`idx` 只给已删除的空消息填充用 |
+| `chat_completion_helpers._chat_summary_attempt`：`response = _managed_summary_call(agent, api_request_id, summary_kwargs, lambda request: summary_client.chat.completions.create(...), ...)`，经 Relay 发出总结请求 | `response = summary_client.chat.completions.create(**summary_kwargs)` | Relay 整层不在 v0.1 内，与 `perform_api_call` 同理 |
 
 ## 与上游对照
 

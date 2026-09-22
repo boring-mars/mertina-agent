@@ -148,7 +148,6 @@ _PASSTHROUGH_PARAMS = (
     "quiet_mode",
     # Model response configuration (None = provider/model default)
     "max_tokens",
-    "reasoning_config",
 )
 
 
@@ -164,13 +163,11 @@ def init_agent(
     log_prefix: str = "",
     session_id: str = None,
     max_tokens: int = None,
-    reasoning_config: dict[str, Any] = None,
 ):
     """Initialize the AI Agent (body of :meth:`AIAgent.__init__`).
 
     Non-obvious parameters:
       max_iterations: default unlimited (sys.maxsize).
-      reasoning_config: None → the provider/model default.
     """
     _params = locals()
     for _name in _PASSTHROUGH_PARAMS:

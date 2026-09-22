@@ -121,6 +121,7 @@ Every rewrite in a cut commit (a line `port_check --cut-from` reports as `rewrit
 | `tool_executor.execute_tool_calls_sequential`: splits by terminal approval and calls `_execute_tool_calls_sequential` per run with `SimpleNamespace(tool_calls=calls)` | Passes `assistant_message` in one call | Terminal approval batches are outside v0.1 |
 | `turn_api_call.perform_api_call`: `response = run_llm_execution_middleware(api_kwargs, _perform_api_call, ...)`, whose inner call streams or goes through `relay_llm.execute(..., agent._interruptible_api_call, ...)` | `response = agent._interruptible_api_call(api_kwargs)` | The LLM execution middleware and Relay are outside v0.1 and streaming comes in v0.1.1; one non-streaming request is sent directly |
 | `turn_context.build_api_messages`: `for idx, msg in enumerate(canonical_messages)`, over the history prefix normalized by `canonicalize_replay_history` | `for msg in messages:` | Replay normalization serves session resume and prompt caching, neither of which is in v0.1; `idx` only fed the deleted empty-message fill |
+| `chat_completion_helpers._chat_summary_attempt`: `response = _managed_summary_call(agent, api_request_id, summary_kwargs, lambda request: summary_client.chat.completions.create(...), ...)` sends the summary through Relay | `response = summary_client.chat.completions.create(**summary_kwargs)` | Relay is outside v0.1, as for `perform_api_call` |
 
 ## Comparing against upstream
 

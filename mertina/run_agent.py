@@ -12,7 +12,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 import sys
-from typing import Any
 
 from mertina.agent.client_lifecycle import ClientLifecycleMixin
 from mertina.agent.interrupt_control import InterruptControlMixin
@@ -53,7 +52,6 @@ class AIAgent(
         log_prefix: str = "",
         session_id: str = None,
         max_tokens: int = None,
-        reasoning_config: dict[str, Any] = None,
     ):
         """Forwarder — see ``agent.agent_init.init_agent`` (same keyword parameters)."""
         init_kwargs = {k: v for k, v in locals().items() if k not in ("self",)}
@@ -61,7 +59,13 @@ class AIAgent(
 
         init_agent(self, **init_kwargs)
 
+    def _max_tokens_param(self, value: int) -> dict:
+        """``max_tokens`` for the request."""
+        return {"max_tokens": value}
+
     _strip_think_blocks = _forward("mertina.agent.agent_runtime_helpers", "strip_think_blocks")
+
+    _extract_reasoning = _forward("mertina.agent.agent_runtime_helpers", "extract_reasoning")
 
     _build_system_prompt = _forward("mertina.agent.system_prompt", "build_system_prompt")
 
