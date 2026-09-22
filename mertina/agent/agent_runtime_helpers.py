@@ -131,6 +131,50 @@ def strip_think_blocks(agent, content: str) -> str:
     return content
 
 
+_INLINE_REASONING_PATTERNS = tuple(
+    re.compile(rf"<{tag}>(.*?)</{tag}>", re.DOTALL | re.IGNORECASE) for tag in THINK_TAG_NAMES
+)
+
+
+def extract_reasoning(agent, assistant_message) -> str | None:
+    """Reasoning text from ``reasoning`` / ``reasoning_content`` / ``reasoning_details``
+    (OpenRouter unified), else inline thinking blocks in the content; None when absent."""
+    parts: list[str] = []
+
+    def _add(text) -> None:
+        from mertina.agent.message_content import flatten_message_text
+
+        text = flatten_message_text(text, sep="")
+        if text and text not in parts:
+            parts.append(text)
+
+    _add(getattr(assistant_message, "reasoning", None))
+    _add(getattr(assistant_message, "reasoning_content", None))
+    # reasoning_details: [{"type": "reasoning.summary", "summary": "...", ...}, ...]
+    for detail in getattr(assistant_message, "reasoning_details", None) or []:
+        if isinstance(detail, dict):
+            _add(
+                detail.get("summary")
+                or detail.get("thinking")
+                or detail.get("content")
+                or detail.get("text")
+            )
+    # Fall back to reasoning embedded in content only when no structured field was found.
+    content = getattr(assistant_message, "content", None)
+    if not parts and isinstance(content, list):
+        # DeepSeek V4 Pro returns typed content blocks ({"type": "thinking", ...}); dropping them
+        # makes the next turn fail with HTTP 400 "thinking must be passed back".
+        # Refs #21944.
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "thinking":
+                _add((block.get("thinking") or block.get("text") or "").strip())
+    if not parts and isinstance(content, str) and content:
+        for pattern in _INLINE_REASONING_PATTERNS:
+            for block in pattern.findall(content):
+                _add(block.strip())
+    return "\n\n".join(parts) if parts else None
+
+
 def create_openai_client(
     agent: Any, client_kwargs: dict[str, Any], *, reason: str, shared: bool
 ) -> Any:
