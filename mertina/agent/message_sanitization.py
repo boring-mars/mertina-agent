@@ -58,20 +58,24 @@ def coalesce_tool_call_id(tc: Any) -> str:
     return ""
 
 
-# --------------------------------------------------------------------------- reasoning_content policy —
-# single owner (audit F4) --------------------------------------------------------------------------- The
-# strip-vs-repad decision was previously forked across the wire files in separate incident commits
-# (2b3a4f0af8 strip for strict providers, b5495db701 re-pad for require-side, 94b3131be7/9a9f8a6d99 kimi
-# pad). The POLICY — which provider direction gets which treatment — lives here as one rule table + apply
-# functions; adapters keep only SYNTAX mapping (e.g. anthropic_adapter turning reasoning_content into a
-# thinking block). Direction table: require-side (echo-back enforced; replays 400 without the field): kimi
-# — provider kimi-coding/kimi-coding-cn, or host api.kimi.com / moonshot.ai / moonshot.cn. Host-driven on
-# purpose: aggregators re-exporting kimi models reject the echo. deepseek — provider "deepseek", model
-# contains "deepseek", or host api.deepseek.com (#15250; V4 rejects empty-string pads, hence the " "
-# single-space pad, #17341). mimo     — provider "xiaomi", model contains "mimo", or host *.xiaomimimo.com.
-# strict side (field rejected with 400/422 "Extra inputs are not permitted"): everyone else — Mistral,
-# Cerebras, Groq, SambaNova, … (#45655). Strip the key entirely, even a single-space pad.
-_REASONING_ECHO_RULES: tuple = (
+# --------------------------------------------------------------------------- reasoning_content
+# policy — single owner (audit F4)
+# --------------------------------------------------------------------------- The strip-vs-repad
+# decision was previously forked across the wire files in separate incident commits (2b3a4f0af8
+# strip for strict providers, b5495db701 re-pad for require-side, 94b3131be7/9a9f8a6d99 kimi pad).
+# The POLICY — which provider direction gets which treatment — lives here as one rule table + apply
+# functions; adapters keep only SYNTAX mapping (e.g. anthropic_adapter turning reasoning_content
+# into a thinking block). Direction table: require-side (echo-back enforced; replays 400 without the
+# field): kimi — provider kimi-coding/kimi-coding-cn, or host api.kimi.com / moonshot.ai /
+# moonshot.cn. Host-driven on purpose: aggregators re-exporting kimi models reject the echo.
+# deepseek — provider "deepseek", model contains "deepseek", or host api.deepseek.com (#15250; V4
+# rejects empty-string pads, hence the " " single-space pad, #17341). mimo — provider "xiaomi",
+# model contains "mimo", or host *.xiaomimimo.com. strict side (field rejected with 400/422 "Extra
+# inputs are not permitted"): everyone else — Mistral, Cerebras, Groq, SambaNova, … (#45655). Strip
+# the key entirely, even a single-space pad.
+_REASONING_ECHO_RULES: tuple[
+    tuple[str, frozenset[str], frozenset[str], tuple[str, ...], tuple[str, ...]], ...
+] = (
     # (family, exact providers (raw), exact providers (lowered), model substrings (lowered), hosts)
     (
         "kimi",
@@ -110,7 +114,7 @@ def matches_reasoning_echo_family(family: str, provider: Any, model: Any, base_u
 
 
 def apply_reasoning_content_policy(
-    source_msg: dict, api_msg: dict, needs_thinking_pad: bool
+    source_msg: dict[str, Any], api_msg: dict[str, Any], needs_thinking_pad: bool
 ) -> None:
     """Copy provider-facing reasoning fields onto an API replay message (mutates ``api_msg``).
     ``needs_thinking_pad`` is the require-side flag (``needs_reasoning_echo``)."""
@@ -124,14 +128,15 @@ def apply_reasoning_content_policy(
         return
     existing, reasoning = source_msg.get("reasoning_content"), source_msg.get("reasoning")
     # 1. Explicit reasoning_content already set. When the active provider enforces the thinking-mode
-    #   echo-back (DeepSeek / Kimi / MiMo), preserve it verbatim — that includes their own space-placeholder
-    #   written at creation time and any valid reasoning from the same provider. Sessions persisted BEFORE
-    #   #17341 have empty-string placeholders pinned at creation time; DeepSeek V4 Pro rejects those with
-    #   HTTP 400, so upgrade "" → " " on replay. When the active provider does NOT enforce echo-back, strip
-    #   the field entirely. Strict OpenAI-compatible providers (Mistral, Cerebras, Groq, SambaNova, …)
-    #   reject ANY reasoning_content key in input messages with HTTP 400/422 ("Extra inputs are not
-    #   permitted"), even an empty string or a single-space pad. Stripping here covers the rebuild path;
-    #   ``reapply_reasoning_echo`` covers the already-built api_messages path. Refs #45655.
+    # echo-back (DeepSeek / Kimi / MiMo), preserve it verbatim — that includes their own
+    # space-placeholder written at creation time and any valid reasoning from the same provider.
+    # Sessions persisted BEFORE #17341 have empty-string placeholders pinned at creation time;
+    # DeepSeek V4 Pro rejects those with HTTP 400, so upgrade "" → " " on replay. When the active
+    # provider does NOT enforce echo-back, strip the field entirely. Strict OpenAI-compatible
+    # providers (Mistral, Cerebras, Groq, SambaNova, …) reject ANY reasoning_content key in input
+    # messages with HTTP 400/422 ("Extra inputs are not permitted"), even an empty string or a
+    # single-space pad. Stripping here covers the rebuild path; ``reapply_reasoning_echo`` covers
+    # the already-built api_messages path. Refs #45655.
     if isinstance(existing, str):
         # Explicit value: preserve verbatim, upgrading legacy "" to " " (DeepSeek V4 400s on "").
         api_msg["reasoning_content"] = existing or " "

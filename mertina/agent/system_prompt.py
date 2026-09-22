@@ -10,10 +10,11 @@ timestamp layers come with ``prompt_builder`` in v0.1.1.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 
-def _join_tier(parts: list[str | None]) -> str:
+def _join_tier(parts: Sequence[str | None]) -> str:
     """Join non-empty parts; None/blank entries are dropped."""
     return "\n\n".join(p.strip() for p in parts if p and p.strip())
 

@@ -88,7 +88,7 @@ def _flatten_content_text(content: Any) -> str:
         return content
     if isinstance(content, list):
         return "".join(
-            part if isinstance(part, str) else part.get("text")
+            part if isinstance(part, str) else part.get("text")  # type: ignore[misc]  # the filter below keeps str texts only
             for part in content
             if isinstance(part, str)
             or (
@@ -120,7 +120,7 @@ _THINK_STRIP_PATTERNS = (
 )
 
 
-def strip_think_blocks(agent, content: str) -> str:
+def strip_think_blocks(agent: Any, content: str) -> str:
     """Remove reasoning/thinking blocks from content, returning only visible text: closed tag
     pairs, unterminated open tags at a block boundary (mirrors ``gateway/stream_consumer.py``),
     stray orphan tags (all case-insensitive variants), and standalone tool-call XML blocks some
@@ -136,12 +136,12 @@ _INLINE_REASONING_PATTERNS = tuple(
 )
 
 
-def extract_reasoning(agent, assistant_message) -> str | None:
+def extract_reasoning(agent: Any, assistant_message: Any) -> str | None:
     """Reasoning text from ``reasoning`` / ``reasoning_content`` / ``reasoning_details``
     (OpenRouter unified), else inline thinking blocks in the content; None when absent."""
     parts: list[str] = []
 
-    def _add(text) -> None:
+    def _add(text: Any) -> None:
         from mertina.agent.message_content import flatten_message_text
 
         text = flatten_message_text(text, sep="")
@@ -236,8 +236,11 @@ def invoke_tool(
     return _execute(function_args)  # type: ignore[no-any-return]  # upstream types _execute as Any
 
 
-def copy_reasoning_content_for_api(agent, source_msg: dict, api_msg: dict) -> None:
-    """Forward reasoning fields onto an API replay message; policy lives in ``agent.message_sanitization.apply_reasoning_content_policy``."""
+def copy_reasoning_content_for_api(
+    agent: Any, source_msg: dict[str, Any], api_msg: dict[str, Any]
+) -> None:
+    """Forward reasoning fields onto an API replay message; policy lives in
+    ``agent.message_sanitization.apply_reasoning_content_policy``."""
     from mertina.agent.message_sanitization import apply_reasoning_content_policy
 
     apply_reasoning_content_policy(source_msg, api_msg, agent._needs_thinking_reasoning_pad())

@@ -11,36 +11,42 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
+from typing import Any
 
 from mertina.agent.message_content import flatten_message_text
 from mertina.agent.message_metadata import append_message, stamp_message_timestamp
 from mertina.agent.message_sanitization import (
     _sanitize_surrogates,
 )
+from mertina.agent.transports.base import ProviderTransport
+from mertina.agent.transports.types import NormalizedResponse
 
 logger = logging.getLogger(__name__)
 
 
-def _dispatch_nonstreaming_api_request(agent, api_kwargs: dict):
+def _dispatch_nonstreaming_api_request(agent: Any, api_kwargs: dict[str, Any]) -> Any:
     """Run one non-streaming LLM request on the shared client and return it."""
     return agent.client.chat.completions.create(**api_kwargs)
 
 
-def direct_api_call(agent, api_kwargs: dict):
+def direct_api_call(agent: Any, api_kwargs: dict[str, Any]) -> Any:
     """Run a non-streaming LLM call inline on the conversation thread."""
     response = _dispatch_nonstreaming_api_request(agent, api_kwargs)
     return response
 
 
-def interruptible_api_call(agent, api_kwargs: dict):
+def interruptible_api_call(agent: Any, api_kwargs: dict[str, Any]) -> Any:
     """Run the API call inline (see ``direct_api_call``)."""
     return direct_api_call(agent, api_kwargs)
 
 
-def _build_chat_completions_kwargs(agent, api_messages, tools_for_api):
-    transport = agent._get_transport()
+def _build_chat_completions_kwargs(
+    agent: Any, api_messages: list[dict[str, Any]], tools_for_api: list[dict[str, Any]] | None
+) -> dict[str, Any]:
+    transport: ProviderTransport = agent._get_transport()
 
-    _common = dict(
+    _common: dict[str, Any] = dict(  # noqa: C408  # upstream's dict() call
         model=agent.model,
         messages=api_messages,
         tools=tools_for_api,
@@ -53,22 +59,28 @@ def _build_chat_completions_kwargs(agent, api_messages, tools_for_api):
     )
 
 
-def build_api_kwargs(agent, api_messages: list, tools_for_api: list | None = None) -> dict:
+def build_api_kwargs(
+    agent: Any,
+    api_messages: list[dict[str, Any]],
+    tools_for_api: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Build the keyword arguments dict for the chat-completions API."""
     kwargs = _build_api_kwargs_for_mode(agent, api_messages, tools_for_api)
     return kwargs
 
 
 def _build_api_kwargs_for_mode(
-    agent, api_messages: list, tools_for_api: list | None = None
-) -> dict:
+    agent: Any,
+    api_messages: list[dict[str, Any]],
+    tools_for_api: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if tools_for_api is None:
         tools_for_api = agent.tools
     builder = _build_chat_completions_kwargs
     return builder(agent, api_messages, tools_for_api)
 
 
-def _model_dump_safe(obj):
+def _model_dump_safe(obj: Any) -> Any:
     """``model_dump(warnings=False)`` (avoids pydantic serializer UserWarnings on
     generic-union SDK models), falling back for shims that reject the kwarg."""
     try:
@@ -77,13 +89,13 @@ def _model_dump_safe(obj):
         return obj.model_dump()
 
 
-def _dump_if_model(value):
+def _dump_if_model(value: Any) -> Any:
     return _model_dump_safe(value) if hasattr(value, "model_dump") else value
 
 
-def _assistant_reasoning_text(agent, assistant_message) -> str | None:
+def _assistant_reasoning_text(agent: Any, assistant_message: Any) -> str | None:
     """Structured reasoning, else inline ``<think>`` blocks embedded in content."""
-    reasoning_text = agent._extract_reasoning(assistant_message)
+    reasoning_text: str | None = agent._extract_reasoning(assistant_message)
     if not reasoning_text:
         content = flatten_message_text(getattr(assistant_message, "content", None))
         think_blocks = re.findall(r"<think>(.*?)</think>", content, flags=re.DOTALL)
@@ -94,7 +106,7 @@ def _assistant_reasoning_text(agent, assistant_message) -> str | None:
     return _sanitize_surrogates(reasoning_text) if reasoning_text else reasoning_text
 
 
-def _assistant_content_for_storage(agent, assistant_message):
+def _assistant_content_for_storage(agent: Any, assistant_message: Any) -> str:
     # Sanitize surrogates (Kimi/GLM via Ollama emit code points that crash json.dumps), then
     # strip inline <think> tags at the storage boundary (they leaked to platforms and
     # polluted titles).
@@ -106,17 +118,17 @@ def _assistant_content_for_storage(agent, assistant_message):
     return content
 
 
-def _assistant_tool_call_dict(agent, tool_call, index: int) -> dict:
+def _assistant_tool_call_dict(agent: Any, tool_call: Any, index: int) -> dict[str, Any]:
     raw_id = getattr(tool_call, "id", None)
     call_id = getattr(tool_call, "call_id", None)
     if not isinstance(call_id, str) or not call_id.strip():
         if isinstance(raw_id, str) and raw_id.strip():
             call_id = raw_id.strip()
-    call_id = call_id.strip()
+    call_id = call_id.strip()  # type: ignore[union-attr]  # chat-completions tool calls carry an id
 
     # Arguments are deliberately NOT redacted: this dict is replayed to the model every
     # turn, so a ``***`` mask would break credential-dependent commands (#43083).
-    tc_dict = {
+    tc_dict: dict[str, Any] = {
         "id": call_id,
         "type": tool_call.type,
         "function": {"name": tool_call.function.name, "arguments": tool_call.function.arguments},
@@ -129,13 +141,15 @@ def _assistant_tool_call_dict(agent, tool_call, index: int) -> dict:
     return tc_dict
 
 
-def build_assistant_message(agent, assistant_message, finish_reason: str) -> dict:
+def build_assistant_message(
+    agent: Any, assistant_message: Any, finish_reason: str
+) -> dict[str, Any]:
     """Build a normalized assistant message dict (reasoning, reasoning_details,
     optional tool_calls) shared by the tool-call and final-response paths.
     Textless turns are NOT padded here."""
     assistant_tool_calls = getattr(assistant_message, "tool_calls", None)
     reasoning_text = _assistant_reasoning_text(agent, assistant_message)
-    msg = stamp_message_timestamp(
+    msg: dict[str, Any] = stamp_message_timestamp(
         {
             "role": "assistant",
             "content": _assistant_content_for_storage(agent, assistant_message),
@@ -196,7 +210,9 @@ _SUMMARY_FOREIGN_MESSAGE_KEYS = (
 _EMPTY_SUMMARY_RESPONSE = "I reached the iteration limit and couldn't generate a summary."
 
 
-def _iteration_summary_api_messages(agent, messages: list) -> list:
+def _iteration_summary_api_messages(
+    agent: Any, messages: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Wire-ready messages for the summary call, mirroring the main loop's api_messages build
     (reasoning replay, schema-foreign key strip, underscore-key sweep)."""
     api_messages = []
@@ -214,7 +230,7 @@ def _iteration_summary_api_messages(agent, messages: list) -> list:
 
     effective_system = agent._cached_system_prompt or ""
     if effective_system:
-        api_messages = [{"role": "system", "content": effective_system}] + api_messages
+        api_messages = [{"role": "system", "content": effective_system}] + api_messages  # noqa: RUF005  # upstream's expression
 
     for api_msg in api_messages:  # underscore scaffolding: the transport's sweeper is bypassed here
         if isinstance(api_msg, dict):
@@ -223,8 +239,10 @@ def _iteration_summary_api_messages(agent, messages: list) -> list:
     return api_messages
 
 
-def _summary_text(agent, response, **normalize_kwargs) -> str:
-    normalized = agent._get_transport().normalize_response(response, **normalize_kwargs)
+def _summary_text(agent: Any, response: Any, **normalize_kwargs: Any) -> str:
+    normalized: NormalizedResponse = agent._get_transport().normalize_response(
+        response, **normalize_kwargs
+    )
     if normalized.tool_calls:
         # No summary path executes tool calls; log so a tool-only response that falls into the
         # empty-summary retry is diagnosable.
@@ -232,7 +250,7 @@ def _summary_text(agent, response, **normalize_kwargs) -> str:
     return (normalized.content or "").strip()
 
 
-def _chat_summary_attempt(agent, api_messages: list):
+def _chat_summary_attempt(agent: Any, api_messages: list[dict[str, Any]]) -> Callable[[int], str]:
     # Same kwargs builder as the main loop so the summary keeps the cached prefix. Do not omit
     # tools or force tool_choice="none" here: SGLang renders the prompt with tools=None in that
     # mode and the KV prefix diverges.
@@ -248,7 +266,7 @@ def _chat_summary_attempt(agent, api_messages: list):
     return _attempt
 
 
-def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
+def handle_max_iterations(agent: Any, messages: list[dict[str, Any]], api_call_count: int) -> str:
     """Request a summary when max iterations are reached. Returns the final response text."""
     warning = f"⚠️  Reached maximum iterations ({agent.max_iterations}). Requesting summary..."
     if getattr(agent, "suppress_status_output", False):
@@ -269,7 +287,8 @@ def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
         build_attempt = _chat_summary_attempt
         attempt = build_attempt(agent, api_messages)
 
-        # One retry on an empty summary; a summary empty once its <think> block is stripped is NOT retried.
+        # One retry on an empty summary; a summary empty once its <think> block is stripped is
+        # NOT retried.
         final_response = _EMPTY_SUMMARY_RESPONSE
         for retry_count in (0, 1):
             text = attempt(retry_count)

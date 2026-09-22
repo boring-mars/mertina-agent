@@ -14,9 +14,9 @@ class TurnFacadeMixin:
     def run_conversation(
         self,
         user_message: Any,
-        system_message: str = None,
-        conversation_history: list[dict[str, Any]] = None,
-        task_id: str = None,
+        system_message: str | None = None,
+        conversation_history: list[dict[str, Any]] | None = None,
+        task_id: str | None = None,
     ) -> dict[str, Any]:
         """Forwarder — see ``agent.conversation_loop.run_conversation``."""
         from mertina.agent.conversation_loop import run_conversation
@@ -34,4 +34,4 @@ class TurnFacadeMixin:
 
     def chat(self, message: str) -> str:
         """Final response string of one turn."""
-        return self.run_conversation(message)["final_response"]
+        return self.run_conversation(message)["final_response"]  # type: ignore[no-any-return]  # the result dict is untyped upstream

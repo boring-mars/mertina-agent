@@ -5,6 +5,8 @@
 Extracted from ``run_agent.py``; every method resolves through ``AIAgent``'s MRO unchanged.
 """
 
+from typing import Any
+
 from mertina.agent.lazy_forward import forward as _forward
 from mertina.agent.message_sanitization import matches_reasoning_echo_family
 
@@ -12,21 +14,25 @@ from mertina.agent.message_sanitization import matches_reasoning_echo_family
 class ReasoningParamsMixin:
     """Assistant-message building and reasoning echo-back (see module docstring)."""
 
+    # Set by AIAgent; declared here so the mixin type-checks on its own.
+    provider: str
+    model: str
+    base_url: str
+
     _build_assistant_message = _forward(
         "mertina.agent.chat_completion_helpers", "build_assistant_message"
     )
 
     def _needs_thinking_reasoning_pad(self) -> bool:
-        """True when the provider enforces ``reasoning_content`` echo-back on tool-call replays (DeepSeek, Kimi,
-        MiMo thinking all 400 without it). Cached per (provider, model, base_url), invalidated by
-        ``switch_model()`` / ``_try_activate_fallback()`` — called ~16× per turn.
+        """True when the provider enforces ``reasoning_content`` echo-back on tool-call replays
+        (DeepSeek, Kimi, MiMo thinking all 400 without it). Cached per (provider, model, base_url),
+        invalidated by ``switch_model()`` / ``_try_activate_fallback()`` — called ~16× per turn.
 
         DeepSeek v4 thinking and Kimi / Moonshot thinking both reject replays of assistant tool-call
-        messages that omit ``reasoning_content`` (refs 15250, #17400). Xiaomi MiMo thinking mode has the
-        same requirement.
-        """
+        messages that omit ``reasoning_content`` (refs 15250, #17400). Xiaomi MiMo thinking mode has
+        the same requirement."""  # noqa: RUF002  # upstream's multiplication sign
         key = (self.provider, self.model, getattr(self, "_base_url_lower", self.base_url))
-        cached = getattr(self, "_thinking_pad_cache", None)
+        cached: tuple[Any, bool] | None = getattr(self, "_thinking_pad_cache", None)
         if cached is not None and cached[0] == key:
             return cached[1]
         result = (
@@ -39,23 +45,25 @@ class ReasoningParamsMixin:
         return result
 
     def _reasoning_echo_opt_in(self) -> bool:
-        """``model.reasoning_echo`` opt-in for the *current* provider (covers gateways the host rules miss);
-        fallback activation swaps the flag and ``restore_primary_runtime()`` restores it."""
+        """``model.reasoning_echo`` opt-in for the *current* provider (covers gateways the host
+        rules miss); fallback activation swaps the flag and ``restore_primary_runtime()`` restores
+        it."""
         return bool(getattr(self, "_reasoning_echo_flag", False))
 
-    # Echo families are host/provider-driven, not model-name-driven: aggregators re-exporting Kimi reject the
-    # echo. Rule table: ``message_sanitization._REASONING_ECHO_RULES``. Kimi deliberately passes the raw
-    # provider and no model (its rule matches exact provider ids + hosts only).
+    # Echo families are host/provider-driven, not model-name-driven: aggregators re-exporting Kimi
+    # reject the echo. Rule table: ``message_sanitization._REASONING_ECHO_RULES``. Kimi deliberately
+    # passes the raw provider and no model (its rule matches exact provider ids + hosts only).
     def _needs_kimi_tool_reasoning(self) -> bool:
         """True when the current provider is Kimi / Moonshot thinking mode."""
         return matches_reasoning_echo_family("kimi", self.provider, None, self.base_url)
 
     def _needs_deepseek_tool_reasoning(self) -> bool:
-        """True when the current provider is DeepSeek thinking mode (omitting the echo is an HTTP 400).
+        """True when the current provider is DeepSeek thinking mode (omitting the echo is an HTTP
+        400).
 
-        DeepSeek V4 thinking mode requires ``reasoning_content`` on every assistant tool-call turn; omitting
-        it causes HTTP 400 when the message is replayed in a subsequent API request (#15250).
-        """
+        DeepSeek V4 thinking mode requires ``reasoning_content`` on every assistant tool-call turn;
+        omitting it causes HTTP 400 when the message is replayed in a subsequent API request
+        (#15250)."""
         return matches_reasoning_echo_family(
             "deepseek", (self.provider or "").lower(), self.model, self.base_url
         )

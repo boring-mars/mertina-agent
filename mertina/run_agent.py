@@ -11,15 +11,16 @@ response = agent.run_conversation("Tell me about the latest Python updates")
 import logging
 
 logger = logging.getLogger(__name__)
-import sys
+import sys  # noqa: E402  # upstream order
+from typing import Any  # noqa: E402  # upstream order
 
-from mertina.agent.client_lifecycle import ClientLifecycleMixin
-from mertina.agent.interrupt_control import InterruptControlMixin
-from mertina.agent.lazy_forward import forward as _forward
-from mertina.agent.reasoning_params import ReasoningParamsMixin
-from mertina.agent.status_output import StatusOutputMixin
-from mertina.agent.turn_facade import TurnFacadeMixin
-from mertina.agent.vision_message_prep import VisionMessagePrepMixin
+from mertina.agent.client_lifecycle import ClientLifecycleMixin  # noqa: E402  # upstream order
+from mertina.agent.interrupt_control import InterruptControlMixin  # noqa: E402  # upstream order
+from mertina.agent.lazy_forward import forward as _forward  # noqa: E402  # upstream order
+from mertina.agent.reasoning_params import ReasoningParamsMixin  # noqa: E402  # upstream order
+from mertina.agent.status_output import StatusOutputMixin  # noqa: E402  # upstream order
+from mertina.agent.turn_facade import TurnFacadeMixin  # noqa: E402  # upstream order
+from mertina.agent.vision_message_prep import VisionMessagePrepMixin  # noqa: E402  # upstream order
 
 
 class AIAgent(
@@ -42,24 +43,24 @@ class AIAgent(
 
     def __init__(
         self,
-        base_url: str = None,
-        api_key: str = None,
-        provider: str = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        provider: str | None = None,
         model: str = "",
         max_iterations: int = sys.maxsize,  # unlimited tool-calling iterations by default
         verbose_logging: bool = False,
         quiet_mode: bool = False,
         log_prefix: str = "",
-        session_id: str = None,
-        max_tokens: int = None,
-    ):
+        session_id: str | None = None,
+        max_tokens: int | None = None,
+    ) -> None:
         """Forwarder — see ``agent.agent_init.init_agent`` (same keyword parameters)."""
         init_kwargs = {k: v for k, v in locals().items() if k not in ("self",)}
         from mertina.agent.agent_init import init_agent
 
         init_agent(self, **init_kwargs)
 
-    def _max_tokens_param(self, value: int) -> dict:
+    def _max_tokens_param(self, value: int) -> dict[str, int]:
         """``max_tokens`` for the request."""
         return {"max_tokens": value}
 
@@ -70,8 +71,9 @@ class AIAgent(
     _build_system_prompt = _forward("mertina.agent.system_prompt", "build_system_prompt")
 
     @staticmethod
-    def _get_tool_call_name_static(tc) -> str:
-        """Function name of a tool_call entry (dict or object); Gemini requires it on every ``role: tool`` message."""
+    def _get_tool_call_name_static(tc: Any) -> str:
+        """Function name of a tool_call entry (dict or object); Gemini requires it on every ``role:
+        tool`` message."""
         if isinstance(tc, dict):
             fn = tc.get("function")
             return (fn.get("name", "") or "") if isinstance(fn, dict) else ""
@@ -83,7 +85,11 @@ class AIAgent(
     _build_api_kwargs = _forward("mertina.agent.chat_completion_helpers", "build_api_kwargs")
 
     def _execute_tool_calls(
-        self, assistant_message, messages: list, effective_task_id: str, api_call_count: int = 0
+        self,
+        assistant_message: Any,
+        messages: list[dict[str, Any]],
+        effective_task_id: str,
+        api_call_count: int = 0,
     ) -> None:
         """Execute the assistant's tool calls and append results to ``messages``.
 
@@ -111,13 +117,13 @@ class AIAgent(
 
 
 def main(
-    query: str = None,
+    query: str | None = None,
     model: str = "",
-    api_key: str = None,
+    api_key: str | None = None,
     base_url: str = "",
     max_turns: int = 10,
     verbose: bool = False,
-):
+) -> None:
     """
     Main function for running the agent directly.
 
@@ -159,7 +165,7 @@ def main(
 
     print("\n" + "=" * 50 + "\n📋 CONVERSATION SUMMARY\n" + "=" * 50)
     print(
-        f"✅ Completed: {result['completed']}\n📞 API Calls: {result['api_calls']}\n💬 Messages: {len(result['messages'])}"
+        f"✅ Completed: {result['completed']}\n📞 API Calls: {result['api_calls']}\n💬 Messages: {len(result['messages'])}"  # noqa: E501  # upstream's message
     )
     if result["final_response"]:
         print("\n🎯 FINAL RESPONSE:\n" + "-" * 30 + "\n" + result["final_response"])
@@ -167,6 +173,6 @@ def main(
 
 
 if __name__ == "__main__":
-    import fire
+    import fire  # type: ignore[import-untyped]  # fire ships no type information
 
     fire.Fire(main)

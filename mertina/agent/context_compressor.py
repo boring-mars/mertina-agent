@@ -6,6 +6,6 @@ v0.1 does not port)."""
 
 # Content string is the authoritative marker: SessionDB drops ``_``-metadata.
 MAX_ITERATIONS_SUMMARY_REQUEST = (
-    "You've reached the maximum number of tool-calling iterations allowed. Please provide a final response "
+    "You've reached the maximum number of tool-calling iterations allowed. Please provide a final response "  # noqa: E501  # upstream's message
     "summarizing what you've found and accomplished so far, without calling any more tools."
 )

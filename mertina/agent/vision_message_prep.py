@@ -6,14 +6,21 @@ image-part handling, which v0.1 does not port).
 
 from typing import Any
 
+from mertina.agent.transports.base import ProviderTransport
+
 
 class VisionMessagePrepMixin:
     """Transport lookup and tool-result content for outgoing messages (see module docstring)."""
 
-    def _get_transport(self, api_mode: str = None):
-        """Return the cached transport for the given (or current) api_mode (lazy; None if unregistered)."""
+    # Set by AIAgent; declared here so the mixin type-checks on its own.
+    api_mode: str
+    _transport_cache: dict[str, ProviderTransport | None]
+
+    def _get_transport(self, api_mode: str | None = None) -> ProviderTransport | None:
+        """Return the cached transport for the given (or current) api_mode (lazy; None if
+        unregistered)."""
         mode = api_mode or self.api_mode
-        cache = getattr(self, "_transport_cache", None)
+        cache: dict[str, ProviderTransport | None] | None = getattr(self, "_transport_cache", None)
         if cache is None:
             cache = self._transport_cache = {}
         if cache.get(mode) is None:

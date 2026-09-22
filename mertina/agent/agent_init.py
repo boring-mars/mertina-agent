@@ -23,18 +23,18 @@ def _cfg_dict(cfg: dict[str, Any], key: str) -> dict[str, Any]:
     return section if isinstance(section, dict) else {}
 
 
-def _resolve_api_mode(agent):
+def _resolve_api_mode(agent: Any) -> None:
     """Set ``agent.api_mode``."""
     agent.api_mode = "chat_completions"
 
 
-def _finalize_routing(agent):
+def _finalize_routing(agent: Any) -> None:
     # Warm the transport cache so import errors surface at init (non-fatal: some modes lack one).
     with suppress(Exception):
         agent._get_transport()
 
 
-def _set_defaults(agent, table: dict[str, Any]) -> None:
+def _set_defaults(agent: Any, table: dict[str, Any]) -> None:
     """Assign each ``name -> value`` on ``agent``; callables are factories (fresh per agent)."""
     for name, value in table.items():
         setattr(agent, name, value() if callable(value) else value)
@@ -53,19 +53,19 @@ _SESSION_STATE: dict[str, Any] = {
 }
 
 
-def _explicit_client_kwargs(agent, api_key, base_url) -> dict[str, Any]:
+def _explicit_client_kwargs(agent: Any, api_key: str | None, base_url: str) -> dict[str, Any]:
     """OpenAI-client kwargs from explicit credentials."""
     _parsed_url = urlparse(base_url)
-    client_kwargs = {"api_key": api_key, "base_url": base_url}
+    client_kwargs: dict[str, Any] = {"api_key": api_key, "base_url": base_url}
     if _parsed_url.query:
         client_kwargs["base_url"] = urlunparse(_parsed_url._replace(query=""))
         client_kwargs["default_query"] = {k: v[0] for k, v in parse_qs(_parsed_url.query).items()}
     return client_kwargs
 
 
-def _init_openai_client(agent, api_key, base_url):
+def _init_openai_client(agent: Any, api_key: str | None, base_url: str | None) -> None:
     """OpenAI-wire client: resolve kwargs, construct."""
-    client_kwargs = _explicit_client_kwargs(agent, api_key, base_url)
+    client_kwargs = _explicit_client_kwargs(agent, api_key, base_url)  # type: ignore[arg-type]  # upstream's explicit path always has a base_url
 
     agent._client_kwargs = client_kwargs  # stored for rebuilding after interrupt
     agent.api_key = client_kwargs.get("api_key", "")
@@ -77,15 +77,15 @@ def _init_openai_client(agent, api_key, base_url):
             if base_url:
                 print(f"🔗 Using custom base URL: {base_url}")
     except Exception as e:
-        raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
+        raise RuntimeError(f"Failed to initialize OpenAI client: {e}")  # noqa: B904  # upstream's raise
 
 
-def _build_client(agent, api_key, base_url):
+def _build_client(agent: Any, api_key: str | None, base_url: str | None) -> None:
     # LLM client for the chat-completions wire.
     _init_openai_client(agent, api_key, base_url)
 
 
-def _load_tools(agent):
+def _load_tools(agent: Any) -> None:
     from mertina import model_tools
 
     agent.tools = model_tools.get_tool_definitions(
@@ -104,14 +104,14 @@ def _load_tools(agent):
 
 
 def _init_session_state(
-    agent,
-    session_id,
-):
+    agent: Any,
+    session_id: str | None,
+) -> None:
     agent.session_id = session_id
     _set_defaults(agent, _SESSION_STATE)
 
 
-def _apply_agent_section(agent, _agent_cfg):
+def _apply_agent_section(agent: Any, _agent_cfg: dict[str, Any]) -> None:
     _agent_section = _cfg_dict(_agent_cfg, "agent")
 
     # App-level API retry count (wraps each model API call). Default 3; 1 = single attempt.
@@ -122,7 +122,7 @@ def _apply_agent_section(agent, _agent_cfg):
     agent._api_max_retries = _api_retries
 
 
-def _init_usage_state(agent):
+def _init_usage_state(agent: Any) -> None:
     _set_defaults(agent, _USAGE_STATE)
 
 
@@ -152,18 +152,18 @@ _PASSTHROUGH_PARAMS = (
 
 
 def init_agent(
-    agent,
-    base_url: str = None,
-    api_key: str = None,
-    provider: str = None,
+    agent: Any,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    provider: str | None = None,
     model: str = "",
     max_iterations: int = sys.maxsize,
     verbose_logging: bool = False,
     quiet_mode: bool = False,
     log_prefix: str = "",
-    session_id: str = None,
-    max_tokens: int = None,
-):
+    session_id: str | None = None,
+    max_tokens: int | None = None,
+) -> None:
     """Initialize the AI Agent (body of :meth:`AIAgent.__init__`).
 
     Non-obvious parameters:
@@ -198,7 +198,7 @@ def init_agent(
     )
 
     # Config is not ported yet (v0.1.2): every section takes its default.
-    _agent_cfg = {}
+    _agent_cfg: dict[str, Any] = {}
 
     _apply_agent_section(agent, _agent_cfg)
     _init_usage_state(agent)

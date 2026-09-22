@@ -5,7 +5,7 @@
 
 import json
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 
 def safe_json_loads(text: str, default: Any = None) -> Any:
@@ -16,13 +16,13 @@ def safe_json_loads(text: str, default: Any = None) -> Any:
         return default
 
 
-def _parse_base_url(base_url: str):
+def _parse_base_url(base_url: str) -> ParseResult | None:
     """``urlparse`` that tolerates a bare ``host[:port][/path]`` (no scheme)."""
     raw = (base_url or "").strip()
     return urlparse(raw if "://" in raw else f"//{raw}") if raw else None
 
 
-def _hostname_of(parsed) -> str:
+def _hostname_of(parsed: ParseResult | None) -> str:
     return (parsed.hostname or "").lower().rstrip(".") if parsed else ""
 
 

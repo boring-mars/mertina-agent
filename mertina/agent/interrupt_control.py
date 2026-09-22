@@ -17,11 +17,15 @@ _REASON_USER_INTERRUPT = "user interrupt"
 class InterruptControlMixin:
     """interrupt()/clear_interrupt() (see module docstring)."""
 
+    # Set by AIAgent; declared here so the mixin type-checks on its own.
+    quiet_mode: bool
+
     def interrupt(
         self,
         message: str | None = None,
     ) -> bool:
-        """Request the agent to interrupt its current tool-calling loop (call from another thread)."""
+        """Request the agent to interrupt its current tool-calling loop (call from another
+        thread)."""
         tool_interrupt_reason = _REASON_NEW_MESSAGE if message else _REASON_USER_INTERRUPT
 
         def _publish_interrupt_state() -> None:
