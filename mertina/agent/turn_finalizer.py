@@ -199,7 +199,7 @@ def finalize_turn(
         "completed": completed,
         "turn_exit_reason": _turn_exit_reason,
         "failed": failed,
-        "partial": False,  # True only when stopped due to invalid tool calls
+        "partial": False,  # no v0.1 exit stops a turn part-way
         "interrupted": interrupted,
         "model": agent.model,
         "provider": agent.provider,

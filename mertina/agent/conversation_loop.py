@@ -119,7 +119,7 @@ def _run_phase(fn: Callable[..., Any], agent: Any, state: _LoopState, **extra: A
     """Call phase helper ``fn`` with the loop locals it names, copy its verdict fields back.
 
     ``extra`` supplies non-state arguments (the caught exception). Returns the verdict so
-    the caller can act on ``.action`` / ``.result``."""
+    the caller can act on ``.action``."""
     params = _PHASE_PARAMS.get(fn)
     if params is None:
         params = _PHASE_PARAMS[fn] = tuple(
