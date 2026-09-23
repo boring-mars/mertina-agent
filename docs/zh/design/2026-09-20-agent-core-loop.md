@@ -70,7 +70,7 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 | D4 | 扁平布局（不用 `src/`），顶层只有一个具名包 `mertina`，其内部严格镜像 Hermes | 见 §5 |
 | D5 | 不发布 wheel，作为独立产品从 checkout / Docker 运行（`[tool.uv] package = false`） | 项目定位是应用不是库；也是不用 `src/` 布局的理由 |
 | D6 | v0.1 拆成 0.1.0 / 0.1.1 / 0.1.2 三刀，本分支只做 v0.1.0 | 见 §8 |
-| D7 | v0.1.0 用 `get_time` 占位工具跑通工具路径，`web_search` 推迟到 v0.1.2 | 让 v0.1.0 的测试完全不依赖网络 |
+| D7 | v0.1.0 不带内置工具：工具路径由验收脚本和测试自己注册的工具跑通，第一个内置工具是 v0.1.2 从上游搬的 `web_search` | 让 v0.1.0 的测试完全不依赖网络，同时不在仓库里放一个上游没有对应物的工具 |
 
 ---
 
@@ -254,7 +254,6 @@ Python 版本跟随 Hermes：`>=3.11`。
 | `mertina/agent/turn_loop_errors.py` | L1 裁剪 | 响应处理出错时补齐工具结果并结束本轮 |
 | `mertina/agent/tool_executor.py` | L1 裁剪 | 并行执行独立工具调用，去掉审批网关/中间件/checkpoint/心跳 |
 | `mertina/tools/registry.py` | L1 裁剪 | 保留 `ToolEntry` 形状与 `register()`，去掉插件作用域、发现缓存、`check_fn` 缓存 |
-| `mertina/tools/time_tools.py` | 新写 | `get_time` 占位工具 |
 | `mertina/model_tools.py` | L1 裁剪 | 工具定义收集与分发，去掉 toolset 选择、hook、bridge |
 | `mertina/run_agent.py` | L1 裁剪 | `AIAgent` 保留上游的 mixin 结构：用到的 mixin 和 `agent/agent_init.py` 各自按同名路径搬，方法全被删掉的 mixin 从基类列表里去掉、文件删除；`__init__` 参数收敛到本里程碑所需。步骤 7 之前只有模块 logger，供 `_ra()` 使用 |
 
@@ -262,7 +261,7 @@ Python 版本跟随 Hermes：`>=3.11`。
 
 ```
 user_message
-  → 组装 messages（system prompt：identity + tools + time）
+  → 组装 messages（system prompt：v0.1.0 只有调用方的 system_message；identity、工具说明、时间随 prompt_builder 在 v0.1.1）
   → transport.build_kwargs()      → OpenAI 兼容 endpoint
   → transport.normalize_response() → NormalizedResponse
   → finish_reason == "tool_calls" ?
@@ -291,7 +290,7 @@ v0.1.0 只做预算和基本的 stop flag；重试与流式中断在 v0.1.1。
 - 迭代预算耗尽时的收尾
 - turn 中途 stop，且停止后对话可继续（history 合法）
 
-`get_time` 工具本身不依赖网络，工具路径可完整覆盖。
+工具由验收脚本和测试自己注册，不依赖网络，走的仍是真实的 registry 和执行器，工具路径可完整覆盖。
 
 ### 7.5 验收标准
 
@@ -306,7 +305,7 @@ v0.1.0 只做预算和基本的 stop flag；重试与流式中断在 v0.1.1。
 
 | | 内容 | 产出 |
 |---|---|---|
-| **v0.1.0**（本分支） | L0 叶子 + transports + registry + loop + `get_time` | fake client 下跑通完整循环 |
+| **v0.1.0**（本分支） | L0 叶子 + transports + registry + loop + `AIAgent` | fake client 下跑通完整循环 |
 | v0.1.1 | 流式输出 + 重试 + 中断（`tools/interrupt.py`、`agent/prompt_builder.py`、`agent/system_prompt.py`） | Roadmap 的 stop 语义达标 |
 | v0.1.2 | `web_search` + `WebSearchProvider` 接口 + 配置层（`mertina/cli/config.py`） | 真实 endpoint 跑通 Roadmap 验收场景 |
 

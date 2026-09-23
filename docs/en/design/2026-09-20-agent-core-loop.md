@@ -70,7 +70,7 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 | D4 | Flat layout (no `src/`) with exactly one top-level package, `mertina`, mirroring Hermes inside it | See §5 |
 | D5 | No wheel is published; the project ships as a standalone product run from a checkout or Docker (`[tool.uv] package = false`) | It is an application, not a library; this is also why there is no `src/` layout |
 | D6 | v0.1 is split into 0.1.0 / 0.1.1 / 0.1.2; this branch delivers v0.1.0 only | See §8 |
-| D7 | v0.1.0 exercises the tool path with a placeholder `get_time` tool; `web_search` waits for v0.1.2 | Keeps v0.1.0's tests free of any network dependency |
+| D7 | v0.1.0 ships no built-in tool: the acceptance script and the tests register their own, and the first built-in tool is `web_search`, ported in v0.1.2 | Keeps v0.1.0's tests free of any network dependency without adding a tool that has no upstream counterpart |
 
 ---
 
@@ -261,7 +261,6 @@ Python version follows Hermes: `>=3.11`.
 | `mertina/agent/turn_loop_errors.py` | L1 trimmed | On a response-processing error, fill in tool results and end the turn |
 | `mertina/agent/tool_executor.py` | L1 trimmed | Parallel execution of independent tool calls; approval gate, middleware, checkpoints and heartbeats removed |
 | `mertina/tools/registry.py` | L1 trimmed | Keeps the `ToolEntry` shape and `register()`; plugin scoping, the discovery cache and the `check_fn` cache removed |
-| `mertina/tools/time_tools.py` | New | The `get_time` placeholder tool |
 | `mertina/model_tools.py` | L1 trimmed | Tool definition collection and dispatch; toolset selection, hooks and bridges removed |
 | `mertina/run_agent.py` | L1 trimmed | `AIAgent` keeps upstream's mixin structure: the mixins it uses and `agent/agent_init.py` are ported at their own paths, and a mixin whose methods are all cut leaves the base list and its file is deleted; `__init__` narrowed to this milestone's parameters. Until step 7, only the module logger that `_ra()` uses |
 
@@ -269,7 +268,7 @@ Python version follows Hermes: `>=3.11`.
 
 ```
 user_message
-  -> assemble messages (system prompt: identity + tools + time)
+  -> assemble messages (system prompt: the caller's system_message in v0.1.0; identity, tool guidance and time come with prompt_builder in v0.1.1)
   -> transport.build_kwargs()       -> OpenAI-compatible endpoint
   -> transport.normalize_response() -> NormalizedResponse
   -> finish_reason == "tool_calls"?
@@ -298,7 +297,7 @@ All tests use a fake model client and make no network calls:
 - The wrap-up when the iteration budget is exhausted
 - A stop in the middle of a turn, after which the conversation can continue (valid history)
 
-The `get_time` tool needs no network, so the tool path is covered end to end.
+The tools are registered by the acceptance script and the tests, so no network is involved; they still run through the real registry and executor, and the tool path is covered end to end.
 
 ### 7.5 Acceptance
 
@@ -313,7 +312,7 @@ The `get_time` tool needs no network, so the tool path is covered end to end.
 
 | | Contents | Result |
 |---|---|---|
-| **v0.1.0** (this branch) | L0 leaves + transports + registry + loop + `get_time` | The full loop runs against a fake client |
+| **v0.1.0** (this branch) | L0 leaves + transports + registry + loop + `AIAgent` | The full loop runs against a fake client |
 | v0.1.1 | Streaming + retry + interruption (`tools/interrupt.py`, `agent/prompt_builder.py`, `agent/system_prompt.py`) | The Roadmap's stop semantics are met |
 | v0.1.2 | `web_search` + the `WebSearchProvider` interface + the config layer (`mertina/cli/config.py`) | The Roadmap's acceptance scenario runs against a real endpoint |
 

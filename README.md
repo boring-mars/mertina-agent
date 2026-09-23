@@ -73,26 +73,35 @@ Key decisions:
 | Storage | Hermes's SessionDB on SQLite |
 | Users | Single user in P0. Multiple users come later |
 
-## Planned repository layout
+## Repository layout
 
 ```
 mertina-agent/
-├── mertina/          # the one import package
-│   ├── agent/        # agent loop, transports, prompt builder
-│   ├── tools/        # tool registry and built-in tools
-│   ├── gateway/      # gateway process, API server, cron ticker
-│   └── state/        # SessionDB (SQLite)
-├── web/              # React + Vite frontend
+├── mertina/            # the one import package; paths mirror Hermes (see the porting guide)
+│   ├── agent/          # conversation loop, turn phases, transports, AIAgent's mixins
+│   ├── tools/          # tool registry (built-in tools arrive with web_search in v0.1.2)
+│   ├── run_agent.py    # AIAgent
+│   └── model_tools.py  # tool definitions and dispatch
+├── scripts/            # port check, fake-model acceptance run
 ├── tests/
 ├── docs/
 └── ROADMAP.md
 ```
 
+The gateway, SessionDB and web frontend arrive in later milestones (see the [roadmap](ROADMAP.md)).
+
 ## Getting started
 
-There is nothing to run yet. Setup instructions will be added here with the first release.
-Until then, the [contributing guide](docs/en/development/contributing.md) describes the development
-environment and the workflow.
+v0.1.0 runs the agent loop against a fake model. One full turn, with a tool call and its result
+sent back to the model:
+
+```bash
+uv run python -m scripts.fake_loop
+```
+
+Real endpoints are wired up in v0.1.2. Until then, the
+[contributing guide](docs/en/development/contributing.md) describes the development environment
+and the workflow.
 
 ## Documentation
 
