@@ -1,4 +1,4 @@
-"""AIAgent end to end: a real agent with a scripted chat-completions client in place of the network."""
+"""AIAgent end to end: a real agent on a scripted chat-completions client instead of the network."""
 
 import json
 import threading
