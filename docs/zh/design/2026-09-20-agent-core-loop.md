@@ -234,10 +234,11 @@ Python 版本跟随 Hermes：`>=3.11`。
 | `mertina/agent/transports/__init__.py` | L1 裁剪 | transport 注册表，只注册 `chat_completions` |
 | `mertina/agent/transports/chat_completions.py` | L1 裁剪 | 保留 sanitize → build_kwargs → normalize_response 三步，去掉各家特判 |
 | `mertina/agent/client_lifecycle.py` | L1 裁剪 | 共享客户端的加锁、关闭检测、关闭，以及关闭后重建；构造经 `_forward` 转发给 `agent_runtime_helpers.create_openai_client`，与上游相同 |
-| `mertina/agent/agent_runtime_helpers.py` | L2 部分搬运 | 只有 `_ra()` 和 `create_openai_client`：复制 kwargs、`max_retries=0`、经延迟代理构造 |
+| `mertina/agent/agent_runtime_helpers.py` | L2 部分搬运 | `create_openai_client`（复制 kwargs、`max_retries=0`、经延迟代理构造）、`_ra()`、`invoke_tool`，以及步骤 7 加入的 `strip_think_blocks` / `extract_reasoning` / `copy_reasoning_content_for_api` |
 | `mertina/agent/process_bootstrap.py` | L2 部分搬运 | 只有延迟加载的 `OpenAI` 代理 |
 | `mertina/agent/lazy_forward.py` | 边界外，整文件 | `_forward` 转发器：mixin 借它把方法委托给模块级函数 |
 | `mertina/agent/__init__.py`、`mertina/agent/jiter_preload.py` | 边界外，整文件 | 包导入时预加载 OpenAI SDK 的原生 JSON 解析器（部分 Windows 环境下在流式线程里首次加载会失败） |
+| `mertina/__init__.py` | 我们自己写的 | 上游唯一没有对应物的文件：包的 docstring 和 `__version__` |
 | `mertina/tools/__init__.py` | 边界外，逐字 + 删减 | 只剩说明「导入 tools 包不能有副作用」的 docstring |
 | `mertina/agent/iteration_budget.py` | L0 语义逐字抄 + 删减 | 去掉 `normalize_budget_warning_ratio` |
 | `mertina/agent/conversation_loop.py` | L1 裁剪 | `run_conversation()` 入口与 turn 调度 |
@@ -252,10 +253,31 @@ Python 版本跟随 Hermes：`>=3.11`。
 | `mertina/agent/turn_response_check.py` | L1 裁剪 | 记录耗时，累加 usage |
 | `mertina/agent/turn_final_response.py` | L1 裁剪 | 无工具调用时收下最终回答 |
 | `mertina/agent/turn_loop_errors.py` | L1 裁剪 | 响应处理出错时补齐工具结果并结束本轮 |
+| `mertina/agent/message_metadata.py` | L2 部分搬运 | 只有 `append_message` 和 `stamp_message_timestamp`：给进入历史的消息盖时间戳 |
+| `mertina/agent/turn_truncation.py` | L2 部分搬运 | 只有 `normalize_response_for_agent`；上游的截断恢复（`finish_reason == "length"`）不在 v0.1 内 |
+| `mertina/agent/turn_usage.py` | L2 部分搬运 | 只有 `record_response_usage`：把 `response.usage` 累加进会话计数器并写一行日志 |
+| `mertina/agent/usage_pricing.py` | L2 部分搬运 | 只有 `normalize_usage` 和 `CanonicalUsage`：把各家 usage 字段归一到 prompt / completion / total，不含计价 |
+| `mertina/agent/message_sanitization.py` | L2 部分搬运 | `_sanitize_surrogates` 与 `close_interrupted_tool_sequence`（中断后补齐工具结果），步骤 7 又加入 `reasoning_content` 回传规则表 |
 | `mertina/agent/tool_executor.py` | L1 裁剪 | 并行执行独立工具调用，去掉审批网关/中间件/checkpoint/心跳 |
+| `mertina/agent/tool_dispatch_helpers.py` | L2 部分搬运 | 只有 `make_tool_result_message` 及其不可信工具输出包装：构造 `role: tool` 结果消息 |
+| `mertina/agent/display.py` | L2 部分搬运 | 只有 `_detect_tool_failure`：从工具结果里识别失败；上游其余的终端渲染不在 v0.1 内 |
+| `mertina/tools/daemon_pool.py` | 边界外，整文件 | `DaemonThreadPoolExecutor`：并行工具执行用的守护线程池，卡住的工具不阻塞解释器退出 |
 | `mertina/tools/registry.py` | L1 裁剪 | 保留 `ToolEntry` 形状与 `register()`，去掉插件作用域、发现缓存、`check_fn` 缓存 |
 | `mertina/model_tools.py` | L1 裁剪 | 工具定义收集与分发，去掉 toolset 选择、hook、bridge |
 | `mertina/run_agent.py` | L1 裁剪 | `AIAgent` 保留上游的 mixin 结构：用到的 mixin 和 `agent/agent_init.py` 各自按同名路径搬，方法全被删掉的 mixin 从基类列表里去掉、文件删除；`__init__` 参数收敛到本里程碑所需。步骤 7 之前只有模块 logger，供 `_ra()` 使用 |
+| `mertina/agent/agent_init.py` | L1 裁剪 | `init_agent()`：路由 → 客户端 → 工具 → 会话 → 配置段的分阶段初始化，去掉配置文件、memory、压缩、子代理等段 |
+| `mertina/agent/turn_facade.py` | L1 裁剪（mixin） | 两个入口 `run_conversation()` 和 `chat()` |
+| `mertina/agent/status_output.py` | L1 裁剪（mixin） | `_safe_print` / `_vprint`：受 quiet 模式约束的状态输出 |
+| `mertina/agent/interrupt_control.py` | L1 裁剪（mixin） | `interrupt()` / `clear_interrupt()`：软中断标志 |
+| `mertina/agent/vision_message_prep.py` | L1 裁剪（mixin） | `_get_transport()` 与工具结果内容；上游的图片分片处理不在 v0.1 内 |
+| `mertina/agent/reasoning_params.py` | L1 裁剪（mixin） | 组装 assistant 消息，以及 DeepSeek / Kimi / MiMo 的 `reasoning_content` 回传判定 |
+| `mertina/agent/chat_completion_helpers.py` | L2 部分搬运 | 发出请求（`interruptible_api_call` → `direct_api_call`）、`build_api_kwargs`、`build_assistant_message`，以及预算耗尽时的 `handle_max_iterations` |
+| `mertina/agent/system_prompt.py` | L2 部分搬运 | 只有 `build_system_prompt`，v0.1.0 只取调用方的 `system_message`（见 §7.2） |
+| `mertina/agent/message_content.py` | L2 部分搬运 | 只有 `flatten_message_text`：从多段内容里取出文本 |
+| `mertina/agent/think_scrubber.py` | L2 部分搬运 | 只有 `THINK_TAG_NAMES`；上游的流式 think 清洗随流式输出在 v0.1.1 |
+| `mertina/agent/context_compressor.py` | L2 部分搬运 | 只有 `MAX_ITERATIONS_SUMMARY_REQUEST` 这段请求文本；自动上下文压缩不在 v0.1 内 |
+| `mertina/agent/turn_failure_copy.py` | L2 部分搬运 | 只有 `site_copy()` 和预算耗尽且总结失败时的那条文案 |
+| `mertina/utils.py` | L2 部分搬运 | 只有 `safe_json_loads`，以及步骤 7 加入的 `base_url_hostname` / `base_url_host_matches` |
 
 ### 7.2 数据流
 

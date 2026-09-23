@@ -241,10 +241,11 @@ Python version follows Hermes: `>=3.11`.
 | `mertina/agent/transports/__init__.py` | L1 trimmed | Transport registry, registering `chat_completions` only |
 | `mertina/agent/transports/chat_completions.py` | L1 trimmed | Keeps sanitize → build_kwargs → normalize_response; vendor-specific special cases removed |
 | `mertina/agent/client_lifecycle.py` | L1 trimmed | Locking, the closed check, closing, and recreating the shared client once closed; construction is forwarded through `_forward` to `agent_runtime_helpers.create_openai_client`, as upstream does |
-| `mertina/agent/agent_runtime_helpers.py` | L2, partial | Only `_ra()` and `create_openai_client`: copy the kwargs, `max_retries=0`, construct through the lazy proxy |
+| `mertina/agent/agent_runtime_helpers.py` | L2, partial | `create_openai_client` (copy the kwargs, `max_retries=0`, construct through the lazy proxy), `_ra()`, `invoke_tool`, and, from step 7, `strip_think_blocks` / `extract_reasoning` / `copy_reasoning_content_for_api` |
 | `mertina/agent/process_bootstrap.py` | L2, partial | Only the lazy `OpenAI` proxy |
 | `mertina/agent/lazy_forward.py` | Outside the boundary, whole | The `_forward` forwarder that lets a mixin delegate a method to a module-level function |
 | `mertina/agent/__init__.py`, `mertina/agent/jiter_preload.py` | Outside the boundary, whole | Preloads the OpenAI SDK's native JSON parser at package import (on some Windows installs a first import in the streaming thread fails) |
+| `mertina/__init__.py` | Ours | The one file with no upstream counterpart: the package docstring and `__version__` |
 | `mertina/tools/__init__.py` | Outside the boundary, verbatim then cut | Only the docstring saying that importing the tools package must have no side effects |
 | `mertina/agent/iteration_budget.py` | L0 verbatim in substance, then cut | `normalize_budget_warning_ratio` dropped |
 | `mertina/agent/conversation_loop.py` | L1 trimmed | The `run_conversation()` entry point and turn scheduling |
@@ -259,10 +260,31 @@ Python version follows Hermes: `>=3.11`.
 | `mertina/agent/turn_response_check.py` | L1 trimmed | Record latency, add up usage |
 | `mertina/agent/turn_final_response.py` | L1 trimmed | Take the final answer when there are no tool calls |
 | `mertina/agent/turn_loop_errors.py` | L1 trimmed | On a response-processing error, fill in tool results and end the turn |
+| `mertina/agent/message_metadata.py` | L2, partial | Only `append_message` and `stamp_message_timestamp`: timestamp a message as it enters the history |
+| `mertina/agent/turn_truncation.py` | L2, partial | Only `normalize_response_for_agent`; upstream's truncation recovery (`finish_reason == "length"`) is out of scope for v0.1 |
+| `mertina/agent/turn_usage.py` | L2, partial | Only `record_response_usage`: fold `response.usage` into the session counters and write one log line |
+| `mertina/agent/usage_pricing.py` | L2, partial | Only `normalize_usage` and `CanonicalUsage`: map each provider's usage fields onto prompt / completion / total, without the pricing |
+| `mertina/agent/message_sanitization.py` | L2, partial | `_sanitize_surrogates` and `close_interrupted_tool_sequence` (fill in tool results after an interrupt); step 7 added the `reasoning_content` echo-back rule table |
 | `mertina/agent/tool_executor.py` | L1 trimmed | Parallel execution of independent tool calls; approval gate, middleware, checkpoints and heartbeats removed |
+| `mertina/agent/tool_dispatch_helpers.py` | L2, partial | Only `make_tool_result_message` and its untrusted-output wrapping: build the `role: tool` result message |
+| `mertina/agent/display.py` | L2, partial | Only `_detect_tool_failure`: spot a failure in a tool result; the rest of upstream's terminal rendering is out of scope for v0.1 |
+| `mertina/tools/daemon_pool.py` | Outside the boundary, whole | `DaemonThreadPoolExecutor`: the daemon thread pool the parallel tool execution runs on, so a wedged tool cannot block interpreter exit |
 | `mertina/tools/registry.py` | L1 trimmed | Keeps the `ToolEntry` shape and `register()`; plugin scoping, the discovery cache and the `check_fn` cache removed |
 | `mertina/model_tools.py` | L1 trimmed | Tool definition collection and dispatch; toolset selection, hooks and bridges removed |
 | `mertina/run_agent.py` | L1 trimmed | `AIAgent` keeps upstream's mixin structure: the mixins it uses and `agent/agent_init.py` are ported at their own paths, and a mixin whose methods are all cut leaves the base list and its file is deleted; `__init__` narrowed to this milestone's parameters. Until step 7, only the module logger that `_ra()` uses |
+| `mertina/agent/agent_init.py` | L1 trimmed | `init_agent()`: the phased routing → client → tools → session → config-section setup, minus the config file, memory, compression and subagent sections |
+| `mertina/agent/turn_facade.py` | L1 trimmed (mixin) | The two entry points, `run_conversation()` and `chat()` |
+| `mertina/agent/status_output.py` | L1 trimmed (mixin) | `_safe_print` / `_vprint`: status output under quiet mode |
+| `mertina/agent/interrupt_control.py` | L1 trimmed (mixin) | `interrupt()` / `clear_interrupt()`: the soft interrupt flag |
+| `mertina/agent/vision_message_prep.py` | L1 trimmed (mixin) | `_get_transport()` and the tool-result content; upstream's image-part handling is out of scope for v0.1 |
+| `mertina/agent/reasoning_params.py` | L1 trimmed (mixin) | Builds the assistant message, and decides DeepSeek / Kimi / MiMo `reasoning_content` echo-back |
+| `mertina/agent/chat_completion_helpers.py` | L2, partial | Issuing the request (`interruptible_api_call` → `direct_api_call`), `build_api_kwargs`, `build_assistant_message`, and `handle_max_iterations` for an exhausted budget |
+| `mertina/agent/system_prompt.py` | L2, partial | Only `build_system_prompt`, which in v0.1.0 is the caller's `system_message` (see §7.2) |
+| `mertina/agent/message_content.py` | L2, partial | Only `flatten_message_text`: the text out of multi-part content |
+| `mertina/agent/think_scrubber.py` | L2, partial | Only `THINK_TAG_NAMES`; upstream's streaming think scrubber comes with streaming in v0.1.1 |
+| `mertina/agent/context_compressor.py` | L2, partial | Only the `MAX_ITERATIONS_SUMMARY_REQUEST` text; automatic context compression is out of scope for v0.1 |
+| `mertina/agent/turn_failure_copy.py` | L2, partial | Only `site_copy()` and the one line used when the budget runs out and the summary fails |
+| `mertina/utils.py` | L2, partial | Only `safe_json_loads`, plus `base_url_hostname` / `base_url_host_matches` from step 7 |
 
 ### 7.2 Data flow
 
