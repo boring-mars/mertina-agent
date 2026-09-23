@@ -1,9 +1,8 @@
-"""Tool-call execution: sequential and concurrent dispatch, extracted from AIAgent.
+"""执行一轮模型工具调用：解析参数、串行或并发分发、补齐并追加配对结果。
 
-Functions take the parent ``AIAgent`` first; ``run_agent`` keeps thin wrappers and is
-reached lazily via ``_ra()`` so ``run_agent._set_interrupt`` patches still work. Every
-call's identity travels as a ``_ToolCallRef``; both executors end in the same
-observe → commit → project pipeline so the tool-result wire shape is produced once.
+溯源基线是本仓库提交 59221bf 的 agent/tool_executor.py，并非已核实的上游
+Hermes 提交。当前只有串行和并发入口生效；下方保留的旧实现注释不参与执行。
+旧版导入的外部 helper 若不在本仓库，只能据旧调用点记录职责，不能推断其内部实现。
 """
 
 from __future__ import annotations
@@ -59,13 +58,16 @@ logger = logging.getLogger(__name__)
 
 
 #  _pairing_tool_call_id = coalesce_tool_call_id  # canonical id used by the persisted assistant message
-# [改动] B：当前最小 executor 直接读取 assistant message 的原始调用 ID，不再依赖 Hermes sanitizer。
+# 溯源：59221bf 中同名变量是 agent.message_sanitization.coalesce_tool_call_id 的别名。
+# 当前仅读取对象形式的原始 ID，且活跃路径改用 _tool_call_id；恢复时须统一结果配对策略。
 def _pairing_tool_call_id(tool_call: Any) -> str:
-    """[改动] 取得与 assistant tool call 一致的结果配对 ID。"""
+    """读取对象形式工具调用的原始 ID；当前执行路径不调用本函数。"""
     return str(getattr(tool_call, "id", None) or getattr(tool_call, "tool_call_id", "") or "")
 
 
+# 溯源：59221bf 中的同名函数；当前跳过调用的路径改用支持字典的 _tool_call_name。
 def _tc_name(tool_call: Any) -> str:
+    """读取对象形式的工具名，缺失时返回 tool；当前执行路径不调用本函数。"""
     return getattr(getattr(tool_call, "function", None), "name", "") or "tool"
 
 
@@ -163,8 +165,9 @@ _AUTHORIZATION_GATE_LOCK_TIMEOUT_S = 360.0
 #     so ``except Exception`` handlers in the middleware chain can't swallow it."""
 
 
+# 溯源：沿用 59221bf 中的同名函数；非法参数仍不得进入工具分发。
 def _parse_tool_arguments(raw_arguments: Any) -> tuple[dict, Optional[str]]:
-    """Parse model-emitted arguments without repairing or coercing them."""
+    """只接受 JSON 对象参数；解析失败或值非对象时返回工具错误文本。"""
     try:
         arguments = json.loads(raw_arguments)
     except (json.JSONDecodeError, TypeError):
@@ -189,9 +192,10 @@ def _parse_tool_arguments(raw_arguments: Any) -> tuple[dict, Optional[str]]:
 #      )
 
 
-# [改动] A：并发批次只保留固定超时，不再读取 Hermes 动态配置。
+# 溯源：59221bf 中的同名函数通过 agent.deadline.resolve_timeout 读取动态配置。
+# 当前固定返回默认批次超时；恢复配置时应保持调用方使用的超时单位为秒。
 def _resolve_concurrent_tool_timeout() -> float | None:
-    """Mertina v0.1 的并发批次使用固定超时；复杂配置兼容留待后续阶段。"""
+    """返回当前并发批次使用的固定超时秒数。"""
     return _DEFAULT_CONCURRENT_TOOL_TIMEOUT_S
 
 
@@ -250,9 +254,10 @@ def _resolve_concurrent_tool_timeout() -> float | None:
 #      return min(len(runnable_calls), max_workers)
 
 
-# [改动] A：worker 数量只按可执行调用数量计算，不再应用图片工具特例。
+# 溯源：59221bf 中的同名函数还会应用 _image_generate_parallel_limit。
+# 当前只限制总线程数；若恢复图片工具，需重新核对其独立的并发上限。
 def _max_workers_for_tool_batch(runnable_calls) -> int:
-    """返回独立工具批次的 worker 上限。"""
+    """返回不超过可执行调用数和 _MAX_TOOL_WORKERS 的线程数。"""
     if not runnable_calls:
         return 0
     return min(len(runnable_calls), _MAX_TOOL_WORKERS)
@@ -1083,9 +1088,10 @@ def _max_workers_for_tool_batch(runnable_calls) -> int:
 # ── Concurrent batch machinery ──────────────────────────────────────────────
 
 
+# 溯源：沿用 59221bf 中的 _ToolOutcome 字段；当前提交结果主要使用 ref 和 result。
 @dataclass
 class _ToolOutcome:
-    """One finished worker slot of a concurrent batch (``ref`` holds the final name/args/trace)."""
+    """保存调用结果；当前提交忽略 duration、blocked，is_error 传入后也被忽略。"""
 
     ref: _ToolCallRef
     result: Any
@@ -1708,17 +1714,19 @@ __all__ = [
 ]
 
 
-# [改动] B：兼容 provider 返回的对象和字典形式 tool call，避免重新引入 message_sanitization 依赖。
+# 溯源：59221bf 中的 _tc_name 和 _parse_tool_call 直接访问对象属性。
+# 本函数新增字典形式输入的兼容读取；它不负责旧版的调用 ID 规范化。
 def _tool_call_field(tool_call: Any, field_name: str, default: Any = None) -> Any:
-    """[改动] 从对象或字典形式的工具调用中读取字段。"""
+    """从对象属性或字典键读取一个工具调用字段。"""
     if isinstance(tool_call, dict):
         return tool_call.get(field_name, default)
     return getattr(tool_call, field_name, default)
 
 
-# [改动] B：直接读取原始调用 ID，保证 tool 结果与 assistant call 配对。
+# 溯源：59221bf 的 _pairing_tool_call_id 委托 coalesce_tool_call_id。
+# 当前直接读取原始字段，可能得到空字符串；恢复时须与 assistant 消息的 ID 策略一致。
 def _tool_call_id(tool_call: Any) -> str:
-    """[改动] 取得 assistant 发出的 tool_call_id。"""
+    """读取对象或字典形式调用的原始配对 ID。"""
     return str(
         _tool_call_field(tool_call, "id", None)
         or _tool_call_field(tool_call, "tool_call_id", "")
@@ -1726,16 +1734,19 @@ def _tool_call_id(tool_call: Any) -> str:
     )
 
 
-# [改动] B：统一取得对象/字典 tool call 的名称，停止时也使用同一取值规则。
+# 溯源：59221bf 的 _tc_name 只读取对象属性。
+# 当前增加字典形式支持，供未执行调用的结果补全使用；旧函数仍在文件中但不被调用。
 def _tool_call_name(tool_call: Any) -> str:
-    """[改动] 取得模型请求的工具名称。"""
+    """读取模型请求的工具名，缺失时以 tool 填充结果消息。"""
     function = _tool_call_field(tool_call, "function", {}) or {}
     return str(_tool_call_field(function, "name", "") or "tool")
 
 
-# [改动] B：B 阶段只保留结果消息构造，不再做 Hermes 落盘、风险和 UI 投影。
+# 溯源：59221bf 从 agent.tool_dispatch_helpers 导入 make_tool_result_message，
+# 并在 _commit_tool_result 中先处理结果落盘和面向模型的内容转换。
+# 当前只构造内存消息；旧 helper 的内部实现不在本仓库，恢复时需核对消息字段契约。
 def _make_tool_result_message(ref: _ToolCallRef, result: Any) -> dict:
-    """[改动] 构造一条和原始 tool_call_id 配对的内存结果消息。"""
+    """把工具返回值转为与 ref.call_id 配对的内存 tool 消息。"""
     if isinstance(result, str):
         content = result
     elif isinstance(result, dict) and result.get("_multimodal") is True:
@@ -1750,10 +1761,11 @@ def _make_tool_result_message(ref: _ToolCallRef, result: Any) -> dict:
     }
 
 
-# [改动] B：工具身份只保留最小结果配对字段；旧 middleware 方法已在原位置注释保留。
+# 溯源：59221bf 的同名类还携带 middleware_trace 和终态 hook 方法。
+# 当前只保留执行与结果配对需要的身份；task_id 尚未传入实际 registry 分发。
 @dataclass
 class _ToolCallRef:
-    """[改动] 保存工具名称、参数、任务 ID 和结果配对 ID。"""
+    """保存一次调用的工具名、参数、任务 ID 与结果配对 ID。"""
 
     name: str
     args: dict
@@ -1761,10 +1773,11 @@ class _ToolCallRef:
     call_id: str
 
 
-# [改动] B：去掉动态 tool-search、scope 和 middleware trace，只保留解析结果。
+# 溯源：59221bf 的同名类还保存 middleware_trace 与 scope_block。
+# 当前只保存解析后的字段；不能据此认为旧版的 tool-search 范围检查仍然生效。
 @dataclass
 class _ParsedCall:
-    """[改动] 保存一个已经完成 JSON 参数解析的工具调用。"""
+    """保存 provider 调用字段及 JSON 参数解析结果。"""
 
     tool_call: Any
     name: str
@@ -1772,23 +1785,27 @@ class _ParsedCall:
     call_id: str
     parse_error: Optional[str]
 
+    # 溯源：59221bf 的同名方法在此处调用 _pairing_tool_call_id，并附带 middleware_trace。
     def ref(self, task_id: str) -> _ToolCallRef:
-        """[改动] 将解析结果转换为执行和结果提交共用的调用身份。"""
+        """生成执行与提交共用的身份；当前 ID 来自 _tool_call_id 的原始读取。"""
         return _ToolCallRef(self.name, self.args, task_id, self.call_id)
 
 
-# [改动] B：直接解析 provider 工具名，不再调用旧名称兼容和 tool-search bridge。
+# 溯源：59221bf 的同名函数先规范化旧工具名，再展开 tool-search bridge 并检查 scope。
+# 当前只取 provider 原始名称和 JSON 参数；恢复旧路由时应先完成范围校验。
 def _parse_tool_call(tool_call: Any) -> _ParsedCall:
-    """[改动] 解析一个工具调用；工具存在性留给 registry dispatcher 判断。"""
+    """解析工具名称、参数和配对 ID；非法 JSON 留给调用方生成错误结果。"""
     function = _tool_call_field(tool_call, "function", {}) or {}
     name = str(_tool_call_field(function, "name", "") or "")
     args, parse_error = _parse_tool_arguments(_tool_call_field(function, "arguments", "{}"))
     return _ParsedCall(tool_call, name, args, _tool_call_id(tool_call), parse_error)
 
 
-# [改动] B：只使用允许工具集合和 registry.dispatch 作为实际执行边界。
+# 溯源：59221bf 的 _dispatch_authorized_once 经 scope、插件前置 hook、guardrail
+# 与审批检查后，最终通过 agent._invoke_tool 执行。当前直接走 registry.dispatch。
+# valid_tool_names 为 None 时此处不会拦截；恢复旧策略时必须维持每次调用只分发一次。
 def _dispatch_registered_tool(agent, ref: _ToolCallRef) -> Any:
-    """[改动] 校验允许工具后调用 registry，并把边界异常转换成工具错误。"""
+    """按当前可选允许名单分发工具，并把分发异常转成工具结果。"""
     configured_names = getattr(agent, "valid_tool_names", None)
     if configured_names is not None and ref.name not in {str(name) for name in configured_names}:
         return json.dumps(
@@ -1804,9 +1821,10 @@ def _dispatch_registered_tool(agent, ref: _ToolCallRef) -> Any:
         return f"Error executing tool '{ref.name}': {type(exc).__name__}: {exc}"
 
 
-# [改动] B：识别 registry 返回的常见错误，不再依赖 Hermes display 检测器。
+# 溯源：59221bf 从 agent.display 导入 _detect_tool_failure，并使用其错误判定。
+# 当前只识别 JSON error 字段或固定文本前缀；判定值暂被 _commit_tool_result 忽略。
 def _result_is_error(result: Any) -> bool:
-    """[改动] 判断工具结果是否表示执行失败。"""
+    """以当前简化规则判断字符串结果是否表示工具失败。"""
     if not isinstance(result, str):
         return False
     try:
@@ -1816,9 +1834,10 @@ def _result_is_error(result: Any) -> bool:
     return isinstance(payload, dict) and bool(payload.get("error"))
 
 
-# [改动] B：只保留当前工具状态字段，移除 UI、审批和检查点副作用。
+# 溯源：59221bf 的同名函数还发送 tool.started、tool_start_callback，
+# 并在文件修改或危险 terminal 调用前建立检查点。当前只维护活动状态。
 def _begin_tool_execution(agent, ref: _ToolCallRef, display_index: int | None = None) -> None:
-    """[改动] 尽力记录当前工具，不让缺失的宿主活动接口阻断执行。"""
+    """尽力记录当前执行工具及活动时间；状态接口异常不阻断分发。"""
     del display_index
     try:
         agent._current_tool = ref.name
@@ -1832,9 +1851,10 @@ def _begin_tool_execution(agent, ref: _ToolCallRef, display_index: int | None = 
             logger.debug("tool activity update failed", exc_info=True)
 
 
-# [改动] B：执行完成后只清理当前工具状态，不再触发 UI callback。
+# 溯源：59221bf 的 _commit_tool_result 在结果提交阶段清理当前工具并更新时间。
+# 当前在工具返回的 finally 中先清理，早于结果消息追加；完成回调不在此处触发。
 def _end_tool_execution(agent, ref: _ToolCallRef, duration: float) -> None:
-    """[改动] 清理当前工具状态并尽力更新时间。"""
+    """工具返回后清理当前工具并记录耗时，不发送结果完成事件。"""
     try:
         agent._current_tool = None
     except Exception:
@@ -1847,7 +1867,8 @@ def _end_tool_execution(agent, ref: _ToolCallRef, duration: float) -> None:
             logger.debug("tool activity update failed", exc_info=True)
 
 
-# [改动] B：统一提交函数只负责把结果追加到内存消息历史。
+# 溯源：59221bf 的同名函数还负责 guardrail、结果预算与落盘、SQLite flush
+# 及 tool.completed 投影。当前只追加消息，is_error 和旧参数均不改变提交行为。
 def _commit_tool_result(
     agent,
     messages: list,
@@ -1857,7 +1878,7 @@ def _commit_tool_result(
     is_error: bool = False,
     **_legacy_options,
 ) -> bool:
-    """[改动] 追加一个工具结果；旧预算、持久化和风险参数仅为兼容而忽略。"""
+    """追加一个配对工具结果；返回值只表示内存追加完成。"""
     del is_error, _legacy_options
     messages.append(_make_tool_result_message(ref, function_result))
     try:
@@ -1867,9 +1888,10 @@ def _commit_tool_result(
     return True
 
 
-# [改动] B：未完成调用仍需生成结果消息，避免下一轮模型收到断裂的 tool call 序列。
+# 溯源：59221bf 的同名函数还发出终态 post_tool_call hook 并返回耗时等元数据。
+# 当前只返回可见文本；保留每个 assistant tool call 都有配对结果的历史约束。
 def _unfinished_tool_result(agent, ref: _ToolCallRef, *, timed_out: bool, timeout_s: float | None) -> Any:
-    """[改动] 合成超时、停止或线程未返回时的可见结果。"""
+    """为超时、停止或线程缺失的调用合成一条结果文本。"""
     if timed_out:
         suffix = f"{timeout_s:.1f}s" if timeout_s is not None else "the configured timeout"
         return f"Error executing tool '{ref.name}': timed out after {suffix}"
@@ -1878,11 +1900,14 @@ def _unfinished_tool_result(agent, ref: _ToolCallRef, *, timed_out: bool, timeou
     return f"Error executing tool '{ref.name}': thread did not return a result"
 
 
-# [改动] B：并发只保留提交、等待、停止/超时和结果槽位，不再使用旧 gate/middleware。
+# 溯源：59221bf 的同名类还管理启动顺序、授权 gate 与 worker 线程登记。
+# 当前只管理结果槽位及批次超时；停止或超时后的结果不代表已运行线程被强制终止。
 class _ConcurrentBatch:
-    """[改动] 管理一批独立工具的并发执行和按序结果。"""
+    """管理一批工具的并发执行，并为每个原始调用保留一个结果槽位。"""
 
+    # 溯源：59221bf 的同名构造方法还初始化 start-order 和 authorization gate。
     def __init__(self, agent, effective_task_id: str, parsed_calls: list[_ParsedCall], timeout_s: float | None) -> None:
+        """预留结果槽，并将参数错误直接填入对应槽位。"""
         self.agent = agent
         self.effective_task_id = effective_task_id
         self.parsed_calls = parsed_calls
@@ -1895,8 +1920,10 @@ class _ConcurrentBatch:
                     parsed_call.ref(effective_task_id), parsed_call.parse_error, 0.0, True, True,
                 )
 
+    # 溯源：合并了 59221bf 的 _ConcurrentBatch._dispatch_worker 与 run_worker 的主要职责。
+    # 当前不登记 worker 线程，也不传播旧版的 ContextVars、middleware 或启动顺序 gate。
     def _run_one(self, index: int) -> _ToolOutcome:
-        """[改动] 在线程中执行一个已经通过参数解析的工具。"""
+        """在一个 worker 中执行已通过参数解析的调用，并返回结果槽。"""
         parsed_call = self.parsed_calls[index]
         ref = parsed_call.ref(self.effective_task_id)
         if getattr(self.agent, "_interrupt_requested", False):
@@ -1916,8 +1943,10 @@ class _ConcurrentBatch:
         duration = time.monotonic() - started
         return _ToolOutcome(ref, result, duration, _result_is_error(result), False)
 
+    # 溯源：59221bf 的 run 经 submit_all、await_completion 和 daemon pool 管理批次。
+    # 当前使用标准线程池；取消 future 只能取消未开始的调用，运行中的 handler 可能继续执行。
     def run(self) -> None:
-        """[改动] 提交可执行调用并响应 stop/超时，不让线程结果直接写入消息。"""
+        """提交可执行调用并轮询停止与超时；剩余空槽由提交阶段补齐。"""
         runnable = [index for index, call in enumerate(self.parsed_calls) if call.parse_error is None]
         if not runnable:
             return
@@ -1981,9 +2010,10 @@ class _ConcurrentBatch:
             executor.shutdown(wait=not abandon_executor, cancel_futures=abandon_executor)
 
 
-# [改动] B：按 assistant 原始调用顺序追加并发结果。
+# 溯源：59221bf 的同名函数在按序提交时还处理预算、持久化和完成事件。
+# 当前只保证原始顺序与一调用一结果；放弃批次后晚到的真实结果不会覆盖占位结果。
 def _append_batch_results(agent, messages: list, effective_task_id: str, batch: _ConcurrentBatch) -> None:
-    """[改动] 保证一调用一结果，并维持原始调用顺序。"""
+    """按 assistant 原始调用顺序向内存历史追加整批结果。"""
     for index, parsed_call in enumerate(batch.parsed_calls):
         outcome = batch.results[index]
         if outcome is None:
@@ -1995,7 +2025,8 @@ def _append_batch_results(agent, messages: list, effective_task_id: str, batch: 
         _commit_tool_result(agent, messages, outcome.ref, outcome.result, is_error=outcome.is_error)
 
 
-# [改动] B：保留原公开签名，移除动态预算和 segmented 收尾。
+# 溯源：59221bf 的同名公开入口还计算结果预算并参与 segmented 收尾。
+# 当前保留 api_call_count 与 finalize 形参但忽略两者；调用方须先判断整批可并发。
 def execute_tool_calls_concurrent(
     agent,
     assistant_message,
@@ -2005,7 +2036,7 @@ def execute_tool_calls_concurrent(
     *,
     finalize: bool = True,
 ) -> None:
-    """[改动] 并发执行调用者确认独立的一批工具，并按顺序追加结果。"""
+    """并发执行调用者已确认可并发的一批工具，并按原调用顺序追加结果。"""
     del api_call_count, finalize
     tool_calls = list(getattr(assistant_message, "tool_calls", []) or [])
     if getattr(agent, "_interrupt_requested", False):
@@ -2022,7 +2053,8 @@ def execute_tool_calls_concurrent(
     _append_batch_results(agent, messages, effective_task_id, batch)
 
 
-# [改动] B：停止和参数错误只追加消息，不触发旧 hook 或数据库写入。
+# 溯源：59221bf 的同名函数还可发取消 hook 并逐条 flush 会话数据库。
+# 当前只补齐未启动调用的内存消息，避免下一轮模型收到不完整的调用序列。
 def _append_skipped_tool_results(
     agent,
     messages: list,
@@ -2031,23 +2063,25 @@ def _append_skipped_tool_results(
     *,
     content: str,
 ) -> None:
-    """[改动] 为每个未启动调用追加一条配对结果。"""
+    """为每个未启动的 assistant 工具调用追加一条配对结果。"""
     del agent
     for tool_call in tool_calls:
         ref = _ToolCallRef(_tool_call_name(tool_call), {}, effective_task_id, _tool_call_id(tool_call))
         messages.append(_make_tool_result_message(ref, content.format(name=ref.name)))
 
 
-# [改动] B：参数解析失败时不执行工具，只追加错误消息。
+# 溯源：59221bf 的同名函数还发出 invalid_tool_arguments 终态 hook，
+# 并经旧 _commit_tool_result 完成持久化；当前只追加内存错误消息。
 def _append_invalid_arguments_result(agent, messages: list, ref: _ToolCallRef, parse_error: str) -> None:
-    """[改动] 追加非法参数结果。"""
+    """不执行参数非法的调用，直接追加其配对错误结果。"""
     del agent
     messages.append(_make_tool_result_message(ref, parse_error))
 
 
-# [改动] B：串行调用直接走 registry，统一把异常转成结果。
+# 溯源：59221bf 的同名函数经 _run_sequential_tool_execution_middleware
+# 在线程中轮询停止及单工具超时。当前在调用线程直接分发，运行期间不再轮询。
 def _run_sequential_call(agent, ref: _ToolCallRef) -> _ToolOutcome:
-    """[改动] 执行一个串行工具并返回统一结果槽。"""
+    """同步执行一个工具，将异常或正常返回值封装为结果槽。"""
     if getattr(agent, "_interrupt_requested", False):
         result = f"[Tool execution cancelled — {ref.name} was skipped due to user interrupt]"
         return _ToolOutcome(ref, result, 0.0, False, False)
@@ -2065,13 +2099,15 @@ def _run_sequential_call(agent, ref: _ToolCallRef) -> _ToolOutcome:
     return _ToolOutcome(ref, result, duration, _result_is_error(result), False)
 
 
-# [改动] B：串行发布只调用最小提交函数。
+# 溯源：59221bf 的同名函数还投影完成事件并展示结果，
+# 旧 _commit_tool_result 负责预算与数据库 flush；当前只追加内存消息。
 def _publish_sequential_result(agent, messages: list, outcome: _ToolOutcome) -> bool:
-    """[改动] 追加一个串行工具的结果消息。"""
+    """把一个串行结果交给当前最小提交函数。"""
     return _commit_tool_result(agent, messages, outcome.ref, outcome.result, is_error=outcome.is_error)
 
 
-# [改动] B：内部串行循环保留停止、解析、执行、结果补全四个核心阶段。
+# 溯源：59221bf 的同名循环还检查增量持久化失败，并在结束时执行预算和 steer 收尾。
+# 当前只在调用前后检查停止，并补齐剩余调用的结果；finalize 形参被忽略。
 def _execute_tool_calls_sequential(
     agent,
     assistant_message,
@@ -2081,7 +2117,7 @@ def _execute_tool_calls_sequential(
     *,
     finalize: bool = True,
 ) -> None:
-    """[改动] 以最小状态机顺序处理一轮工具调用。"""
+    """顺序解析和执行一轮工具调用，为每个调用追加结果或跳过说明。"""
     del api_call_count, finalize
     tool_calls = list(getattr(assistant_message, "tool_calls", []) or [])
     for index, tool_call in enumerate(tool_calls):
@@ -2108,7 +2144,8 @@ def _execute_tool_calls_sequential(
             return
 
 
-# [改动] B：公开串行入口保留原签名，去掉 terminal 审批批次和 /steer 收尾。
+# 溯源：59221bf 的同名公开入口通过 terminal_approval_batch 分组，
+# 并在 finalize 时统一执行预算与 steer 收尾；当前仅转发到内部串行循环。
 def execute_tool_calls_sequential(
     agent,
     assistant_message,
@@ -2118,7 +2155,7 @@ def execute_tool_calls_sequential(
     *,
     finalize: bool = True,
 ) -> None:
-    """[改动] 顺序执行一轮工具调用并保持历史消息完整。"""
+    """顺序执行一轮工具调用；保留旧签名以供 run_agent 调用。"""
     _execute_tool_calls_sequential(
         agent, assistant_message, messages, effective_task_id, api_call_count, finalize=finalize,
     )
