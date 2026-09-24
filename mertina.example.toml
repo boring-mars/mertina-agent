@@ -1,0 +1,12 @@
+# [改动][溯源] ROADMAP.md:84-85：复制为 mertina.toml 后填入模型连接信息。
+# 模型密钥通过 OPENAI_API_KEY 提供；可选的 Brave 搜索密钥通过 BRAVE_SEARCH_API_KEY 提供。
+# 未设置搜索密钥时不会向模型开放 web_search。
+[model]
+base_url = "https://your-openai-compatible-endpoint/v1"
+name = "your-model"
+max_iterations = 10
+max_retries = 2
+
+[search]
+provider = "brave"
+# 也可设为 "none"，显式关闭搜索工具。

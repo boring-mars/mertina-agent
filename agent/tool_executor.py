@@ -1,3 +1,33 @@
+# 版本 V0.1 变更说明
+# 当前有效代码共 363 行（不含空行、注释和文档字符串），用于参数校验、串行/并发执行和结果配对。
+# 注释代码用于保留原始实现、记录功能边界；下面按“行号范围 + 功能”标出具体位置。
+#
+# 已注释的主要功能（范围对应当前文件中的注释代码）：
+#
+# - [104–155、232–286、1071–1099] 工具结果落盘、文件检查点、结果预算、会话数据库增量持久化和多模态结果文本落盘；
+# - [167–196、513–586、1133–1460] 人工审批 gate、并发授权、启动顺序 gate 及旧版并发批次控制；
+# - [296–512] 旧入口兼容、解释器关闭时的线程池处理、动态 tool-search/scope 和旧工具名规范化；
+# - [587–1069] worker 注册/心跳、插件前置 hook、guardrail、Relay/middleware、future 轮询和 UI/Bridge 回调包装；
+# - [1100–1120、1461–1493] 工具进度、CLI 输出、spinner/emoji 等展示功能；
+# - [1494–1746] inline/delegate/context/memory 路由、旧式串行流程和 segmented 调度。
+#
+# 源代码改动点：
+# - [199–230、289–294] 参数 JSON 校验、固定并发批次超时和线程数上限；
+# - [1749–1832] 读取对象或字典形式的调用字段，解析调用名、参数和原始调用 ID；
+# - [1837–1930] 经 registry.dispatch 执行工具、维护当前工具状态，并提交配对结果消息；
+# - [1935–2084] 使用 ThreadPoolExecutor 并发执行、处理中断/超时并按原始顺序提交；
+# - [2088–2191] 保留串行执行入口，解析参数、分发调用，并在中断后补齐剩余调用结果。
+#
+# 新增代码：
+# - 没有新增可执行代码；本次仅将文件头整理为与其他 V0.1 文件一致的变更说明。
+#
+# 当前保留函数和功能：
+# - [157、160、199–230、289–294] `_MAX_TOOL_WORKERS`、`_DEFAULT_CONCURRENT_TOOL_TIMEOUT_S`、参数解析和并发上限计算；
+# - [1123–1131、1749–1930] `_ToolOutcome`、调用字段读取、registry 分发、执行状态和结果消息构造；
+# - [1935–2084] `_ConcurrentBatch` 与 `execute_tool_calls_concurrent`：并发执行并依调用顺序补齐结果；
+# - [2088–2191] `_execute_tool_calls_sequential` 与 `execute_tool_calls_sequential`：串行执行并维护调用结果配对。
+#
+
 """执行一轮模型工具调用：解析参数、串行或并发分发、补齐并追加配对结果。
 
 溯源基线是本仓库提交 59221bf 的 agent/tool_executor.py，并非已核实的上游
@@ -1756,7 +1786,9 @@ def _make_tool_result_message(ref: _ToolCallRef, result: Any) -> dict:
     return {
         "role": "tool",
         "tool_call_id": ref.call_id,
-        "name": ref.name,
+        # [改动][溯源] ROADMAP.md:70-71；本地 openai.types.chat.ChatCompletionToolMessageParam
+        # 只定义 role/content/tool_call_id，旧扩展字段保留为注释。
+        # "name": ref.name,
         "content": content,
     }
 
@@ -1815,7 +1847,10 @@ def _dispatch_registered_tool(agent, ref: _ToolCallRef) -> Any:
     try:
         from tools.registry import registry
 
-        return registry.dispatch(ref.name, ref.args)
+        # [改动][溯源] tools/web_tools.py:web_search 需要当前 Agent 的 provider；
+        # ROADMAP.md:82 要求搜索实现可替换，注册表仍保持进程内单例。
+        # return registry.dispatch(ref.name, ref.args)
+        return registry.dispatch(ref.name, ref.args, agent=agent)
     except Exception as exc:
         logger.exception("Minimal registry dispatch failed for %s", ref.name)
         return f"Error executing tool '{ref.name}': {type(exc).__name__}: {exc}"
@@ -1836,9 +1871,22 @@ def _result_is_error(result: Any) -> bool:
 
 # 溯源：59221bf 的同名函数还发送 tool.started、tool_start_callback，
 # 并在文件修改或危险 terminal 调用前建立检查点。当前只维护活动状态。
+def _emit_tool_progress(agent, event: str, ref: _ToolCallRef, *, is_error: bool = False) -> None:
+    """[改动][溯源] ROADMAP.md:72：按单个调用发送开始或完成事件；回调错误不影响结果配对。"""
+    callback = getattr(agent, "tool_progress_callback", None)
+    if not callable(callback):
+        return
+    try:
+        callback({"event": event, "tool_name": ref.name, "tool_call_id": ref.call_id,
+                  "is_error": is_error})
+    except Exception:
+        logger.exception("tool progress callback failed for %s", ref.name)
+
+
 def _begin_tool_execution(agent, ref: _ToolCallRef, display_index: int | None = None) -> None:
     """尽力记录当前执行工具及活动时间；状态接口异常不阻断分发。"""
     del display_index
+    _emit_tool_progress(agent, "tool.started", ref)
     try:
         agent._current_tool = ref.name
     except Exception:
@@ -1879,8 +1927,11 @@ def _commit_tool_result(
     **_legacy_options,
 ) -> bool:
     """追加一个配对工具结果；返回值只表示内存追加完成。"""
-    del is_error, _legacy_options
+    # [改动][溯源] ROADMAP.md:72 要求工具完成事件；旧版在此丢弃 is_error。
+    # del is_error, _legacy_options
+    del _legacy_options
     messages.append(_make_tool_result_message(ref, function_result))
+    _emit_tool_progress(agent, "tool.completed", ref, is_error=is_error)
     try:
         agent._current_tool = None
     except Exception:
@@ -2064,18 +2115,22 @@ def _append_skipped_tool_results(
     content: str,
 ) -> None:
     """为每个未启动的 assistant 工具调用追加一条配对结果。"""
-    del agent
+    # [改动][溯源] ROADMAP.md:72,77-79：被跳过的调用也发送完成事件。
+    # del agent
     for tool_call in tool_calls:
         ref = _ToolCallRef(_tool_call_name(tool_call), {}, effective_task_id, _tool_call_id(tool_call))
         messages.append(_make_tool_result_message(ref, content.format(name=ref.name)))
+        _emit_tool_progress(agent, "tool.completed", ref, is_error=True)
 
 
 # 溯源：59221bf 的同名函数还发出 invalid_tool_arguments 终态 hook，
 # 并经旧 _commit_tool_result 完成持久化；当前只追加内存错误消息。
 def _append_invalid_arguments_result(agent, messages: list, ref: _ToolCallRef, parse_error: str) -> None:
     """不执行参数非法的调用，直接追加其配对错误结果。"""
-    del agent
+    # [改动][溯源] ROADMAP.md:72：无效参数的调用也发送完成事件。
+    # del agent
     messages.append(_make_tool_result_message(ref, parse_error))
+    _emit_tool_progress(agent, "tool.completed", ref, is_error=True)
 
 
 # 溯源：59221bf 的同名函数经 _run_sequential_tool_execution_middleware
