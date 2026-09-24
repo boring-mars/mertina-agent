@@ -314,7 +314,10 @@ class AIAgent:
         if enable_web_search is True and not has_search:
             raise ValueError('web_search requires BRAVE_SEARCH_API_KEY or a search_provider')
         use_search = has_search if enable_web_search is None else enable_web_search
-        self.valid_tool_names = frozenset({'web_search'}) if use_search else frozenset()
+        # 文件四件套由精简后的 tools/file_tools.py 提供；下方 Hermes 原版仅保留注释。
+        from tools.file_tools import FILE_TOOL_NAMES
+
+        self.valid_tool_names = FILE_TOOL_NAMES | (frozenset({'web_search'}) if use_search else frozenset())
 
     # [改动][溯源] 原 TurnFacadeMixin 导入位于基线 run_agent.py:137，
     # 对话核心保留在 agent/conversation_loop.py:1653；ROADMAP.md:66-69 要求两个入口。
@@ -393,7 +396,10 @@ class AIAgent:
         # ]
         parts = [DEFAULT_AGENT_IDENTITY]
         if self.valid_tool_names:
-            parts.extend((TOOL_USE_ENFORCEMENT_GUIDANCE, PARALLEL_TOOL_CALL_GUIDANCE))
+            parts.append(TOOL_USE_ENFORCEMENT_GUIDANCE)
+        # 当前仅多次 web_search 可并发；文件调用按顺序执行。
+        if 'web_search' in self.valid_tool_names:
+            parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
         parts.extend((TASK_COMPLETION_GUIDANCE,
                       'Current local time: ' + datetime.now().astimezone().isoformat(timespec='seconds')))
         if system_message:

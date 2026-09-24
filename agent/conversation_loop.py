@@ -1736,6 +1736,7 @@ from uuid import uuid4
 
 from agent.iteration_budget import IterationBudget
 from agent.transports.chat_completions import ChatCompletionsTransport
+from tools.file_tools import register_file_tools
 from tools.registry import registry
 from tools.web_tools import register_web_search
 
@@ -1854,6 +1855,8 @@ def run_conversation(
     budget = IterationBudget(agent.max_iterations)
     # [改动][溯源] ROADMAP.md:82；没有搜索凭据时避免向模型展示不可调用工具。
     # register_web_search()
+    # 在构造模型 schema 前登记文件四件套；允许名单仍由当前 Agent 控制。
+    register_file_tools()
     if "web_search" in agent.valid_tool_names:
         register_web_search()
     tools = registry.get_definitions(set(agent.valid_tool_names))

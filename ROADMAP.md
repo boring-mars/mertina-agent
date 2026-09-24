@@ -79,8 +79,8 @@ when it needs to, streams its answer, and can be stopped.
   interrupt handling during retries and its `/steer` integration are left out.
 - **System prompt.** The layered prompt builder, with only the layers this milestone needs
   (identity, tool guidance, time). Memory and skills layers arrive in v0.4.
-- **One tool.** `web_search`, behind the search provider interface, with one provider implemented.
-  It exists to exercise the tool path end to end.
+- **Basic tools.** Four UTF-8 text-file tools (`read_file`, `write_file`, `patch`, `search_files`)
+  exercise local file work. `web_search` remains optional behind the search provider interface.
 - **Configuration.** A config file plus environment variables for the model endpoint, API key,
   model name, and search provider.
 

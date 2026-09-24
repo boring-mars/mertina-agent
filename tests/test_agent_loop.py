@@ -3,8 +3,10 @@
 import io
 import json
 import os
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -82,7 +84,7 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result["final_response"], "你好")
         self.assertEqual(deltas, ["你", "好"])
         self.assertEqual(result["usage"]["total_tokens"], 5)
-        self.assertEqual(model.requests[0]["tools"][0]["function"]["name"], "web_search")
+        self.assertIn("web_search", {tool["function"]["name"] for tool in model.requests[0]["tools"]})
 
     def test_no_search_key_hides_tool(self):
         """没有搜索凭据时，模型请求及系统提示词都不宣称可用 web_search。"""
@@ -92,8 +94,74 @@ class AgentLoopTests(unittest.TestCase):
                 agent, model = fake_agent([[chunk({"content": "hello"}, "stop")]])
                 result = agent.run_conversation("hello")
                 self.assertTrue(result["completed"])
-                self.assertNotIn("tools", model.requests[0])
+                self.assertEqual(
+                    {tool["function"]["name"] for tool in model.requests[0]["tools"]},
+                    {"read_file", "write_file", "patch", "search_files"},
+                )
                 self.assertNotIn("web_search", model.requests[0]["messages"][0]["content"])
+                self.assertNotIn("# Parallel tool calls", model.requests[0]["messages"][0]["content"])
+
+    def test_file_tools_run_through_agent_loop(self):
+        """模型发出的文件四件套依次执行，结果按调用 ID 返回且不会暴露终端。"""
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "notes.txt"
+            target.write_text("starting\n", encoding="utf-8")
+            calls = [
+                {"index": index, "id": f"file_{index}", "function": {
+                    "name": name, "arguments": json.dumps(arguments)}}
+                for index, (name, arguments) in enumerate([
+                    ("read_file", {"path": str(target)}),
+                    ("write_file", {"path": str(target), "content": "alpha\n"}),
+                    ("patch", {"path": str(target), "old_string": "alpha", "new_string": "beta"}),
+                    ("search_files", {"path": directory, "pattern": "beta"}),
+                ])
+            ]
+            agent, model = fake_agent([
+                [chunk({"tool_calls": calls}, "tool_calls")],
+                [chunk({"content": "done"}, "stop")],
+            ])
+            result = agent.run_conversation("更新文件")
+
+            self.assertTrue(result["completed"], result.get("error"))
+            self.assertEqual(target.read_text(encoding="utf-8"), "beta\n")
+            names = {tool["function"]["name"] for tool in model.requests[0]["tools"]}
+            self.assertEqual(names, {"read_file", "write_file", "patch", "search_files"})
+            tool_results = [message for message in model.requests[1]["messages"] if message["role"] == "tool"]
+            self.assertEqual([message["tool_call_id"] for message in tool_results],
+                             [f"file_{index}" for index in range(4)])
+            self.assertTrue(all(json.loads(message["content"])["success"] for message in tool_results))
+            self.assertIn("1|starting", json.loads(tool_results[0]["content"])["content"])
+            self.assertEqual(json.loads(tool_results[3]["content"])["matches"][0]["line"], 1)
+
+    def test_write_file_refuses_unread_existing_file(self):
+        """整文件覆盖前缺少当前版本的完整读取时，文件保持原样。"""
+        from tools.file_tools import register_file_tools
+        from tools.registry import registry
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "existing.txt"
+            target.write_text("original", encoding="utf-8")
+            register_file_tools()
+            result = json.loads(registry.dispatch("write_file", {
+                "path": str(target), "content": "replacement",
+            }))
+            self.assertIn("error", result)
+            self.assertEqual(target.read_text(encoding="utf-8"), "original")
+
+    def test_patch_rejects_ambiguous_match_without_writing(self):
+        """精确替换出现多处匹配时保留原文件，避免模型误改。"""
+        from tools.file_tools import register_file_tools
+        from tools.registry import registry
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "repeated.txt"
+            target.write_text("same same", encoding="utf-8")
+            register_file_tools()
+            result = json.loads(registry.dispatch("patch", {
+                "path": str(target), "old_string": "same", "new_string": "changed",
+            }))
+            self.assertIn("error", result)
+            self.assertEqual(target.read_text(encoding="utf-8"), "same same")
 
     def test_tool_fragments_pair_with_result(self):
         """分块工具参数合并后执行搜索，模型收到匹配的工具结果。"""

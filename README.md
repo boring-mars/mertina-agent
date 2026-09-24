@@ -32,7 +32,7 @@ core small and readable is a goal in its own right.
 
 - An agent loop that calls any OpenAI-compatible model, runs tools in parallel, streams its output,
   retries on transient errors, and can be stopped
-- One tool, `web_search`, behind a pluggable search provider interface
+- Four text-file tools (`read_file`, `write_file`, `patch`, `search_files`), plus optional `web_search`
 - A gateway process with an HTTP API for sessions and runs, with run events streamed over SSE
 - Conversations stored in SQLite and resumable
 - A web UI for chatting and browsing past sessions
@@ -105,6 +105,13 @@ describes the broader development workflow.
 `web_search` is offered to the model only when `BRAVE_SEARCH_API_KEY` is set or a search provider
 is injected into `AIAgent`. Without one, ordinary model conversations still work. Set
 `MERTINA_SEARCH_PROVIDER=none` to disable search explicitly.
+
+The four file tools are always available. They work with UTF-8 text and paths relative to the
+process working directory (or absolute paths). `write_file` replaces an existing file only after
+the agent has read its complete current contents. `tools/file_tools.py` holds the active minimal
+implementation and retains the Hermes original as commented reference code. The copied terminal
+source files remain under `tools/` for later work.
+`terminal` and `process_manage` are not exposed to the model yet.
 
 ## Documentation
 
