@@ -2,7 +2,7 @@
 
 **A personal AI assistant that lives in the cloud and extends to your devices.**
 
-> **Status: pre-alpha.** The project is being built from scratch. Nothing is runnable yet.
+> **Status: pre-alpha.** The v0.1 Python agent loop can run locally; the gateway and web UI are still planned.
 > See the [Roadmap](ROADMAP.md) for what is being built and in what order.
 
 Mertina Agent is a general-purpose personal assistant. It runs as an always-on cloud service
@@ -90,9 +90,21 @@ mertina-agent/
 
 ## Getting started
 
-There is nothing to run yet. Setup instructions will be added here with the first release.
-Until then, the [contributing guide](docs/en/development/contributing.md) describes the development
-environment and the workflow.
+The v0.1 loop needs Python 3.11+, the `openai` package, and an OpenAI-compatible model endpoint.
+Copy `mertina.example.toml` to `mertina.toml`, set `OPENAI_API_KEY` in your environment, then run:
+
+```sh
+python -m pip install openai
+python run_agent.py "Say hello" --config mertina.toml
+```
+
+You can also set `MERTINA_BASE_URL` and `MERTINA_MODEL` instead of using a config file.
+CLI flags override the environment and config values. The [contributing guide](docs/en/development/contributing.md)
+describes the broader development workflow.
+
+`web_search` is offered to the model only when `BRAVE_SEARCH_API_KEY` is set or a search provider
+is injected into `AIAgent`. Without one, ordinary model conversations still work. Set
+`MERTINA_SEARCH_PROVIDER=none` to disable search explicitly.
 
 ## Documentation
 
