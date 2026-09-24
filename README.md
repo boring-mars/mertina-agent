@@ -96,7 +96,14 @@ Copy `mertina.example.toml` to `mertina.toml`, set `OPENAI_API_KEY` in your envi
 ```sh
 python -m pip install openai
 python run_agent.py "Say hello" --config mertina.toml
+python run_agent.py --config mertina.toml
 ```
+
+The command with a question runs one turn. Without a question, the CLI stays open for
+multiple turns and passes the full conversation, including tool calls and results, to
+each new turn. Enter `q`, `/quit`, or `/exit` to leave. The history exists only in the
+running process; exiting the CLI clears it. If a turn fails, its returned messages remain
+in that process's history for the next turn.
 
 You can also set `MERTINA_BASE_URL` and `MERTINA_MODEL` instead of using a config file.
 CLI flags override the environment and config values. The [contributing guide](docs/en/development/contributing.md)

@@ -1,7 +1,7 @@
 # 版本 V0.1 变更说明
 #
-# 当前有效代码共 144 行（不含空行、注释和文档字符串），用于模型配置、对话转发、停止标志、最小提示词、工具轮次选择和 CLI。
-# 注释代码按原顺序保留本仓库 f698db2380fabddeb58c2715f79ab60186261610 的实现；新改动见各处“改动/溯源”注释。
+# 当前有效代码共 182 行（不含空行、注释和文档字符串），用于模型配置、对话转发、停止标志、最小提示词、工具轮次选择和 CLI。
+# 注释代码按原顺序保留本仓库 f698db2380fabddeb58c2715f79ab60186261610 的实现；新改动见各处“改动/溯源”与“移植溯源”注释。
 #
 # 已注释的主要功能：
 #
@@ -13,16 +13,16 @@
 # 源代码改动点：
 # - AIAgent 保留 chat/run_conversation 入口，新增有限重试次数、可注入搜索 provider 和无凭据时的搜索关闭；
 # - 系统提示词只组合身份、工具指导和时间，工具轮次只允许 web_search 并发；
-# - 中断、客户端关闭和命令行入口缩为 v0.1 所需状态与参数。
+# - 中断、客户端关闭和命令行入口缩为 v0.1 所需状态与参数；CLI 支持内存中的连续对话。
 #
 # 新增代码：
-# - 最小构造器、对话转发、停止标志、提示词组装、工具选择和 TOML/env/CLI 配置；
-# - 改动依据为 ROADMAP.md:59-85；对应原函数的提交与行号见各处中文“改动/溯源”注释。
+# - 最小构造器、对话转发、停止标志、提示词组装、工具选择、TOML/env/CLI 配置及连续对话；
+# - v0.1 核心改动依据为 ROADMAP.md:59-85；交互入口的 Hermes 原函数见下方“移植溯源”注释。
 #
 # 当前保留函数和功能：
 # - AIAgent.__init__、run_conversation、chat：保存配置并转发对话，返回结果或最终文本；
 # - interrupt、is_interrupted、_build_system_prompt：停止标志及最小系统提示词；
-# - _tool_call_name、_execute_tool_calls、close、main：工具选择、资源清理和 CLI。
+# - _tool_call_name、_execute_tool_calls、close、_run_interactive_chat、main：工具选择、资源清理和 CLI。
 #
 # 完整模型循环在 agent/conversation_loop.py，协议适配在 agent/transports/。
 
@@ -1625,14 +1625,60 @@ class AIAgent:
 
 
 # [改动][溯源] 原 CLI 位于基线 run_agent.py:1408-1562；
-# ROADMAP.md:84-85 只要求模型端点、密钥和模型名的基本配置。
+# [移植溯源] Hermes 0469740ab33fd02a4f55a6ea11d81df04ea646a5：
+# cli.py:_tui_process_loop/_tui_process_one_input 负责连续输入与分发；
+# hermes_cli/cli_chat_turn_mixin.py:_chat_stage_user_message/_chat_run_agent/_chat_settle_turn
+# 负责暂存用户消息、传递此前历史、采用本轮消息；此处去掉 TUI 与磁盘会话状态。
+def _run_interactive_chat(agent: AIAgent) -> None:
+    """按 Hermes 的暂存、调用、采纳结果顺序运行内存中的连续对话。"""
+    conversation_history: list[dict[str, Any]] = []
+    print('Mertina interactive chat. Enter q, /quit, or /exit to leave.')
+    # [移植溯源] Hermes cli.py:_tui_process_loop 循环取输入；无 TUI 时同步读取终端。
+    while True:
+        try:
+            user_input = input('You> ').strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not user_input:
+            continue
+        # [移植溯源] Hermes hermes_cli/commands.py:quit/exit 与
+        # cli.py:_tui_run_slash_input；q 是当前简易 CLI 的退出简写。
+        if user_input.lower() in {'q', '/quit', '/exit'}:
+            return
+        # [移植溯源] Hermes hermes_cli/cli_chat_turn_mixin.py:_chat_stage_user_message。
+        conversation_history.append({'role': 'user', 'content': user_input})
+        try:
+            # [移植溯源] 同文件 _chat_run_agent：已暂存当前用户消息，故传历史切片。
+            turn_result = agent.run_conversation(
+                user_message=user_input,
+                conversation_history=conversation_history[:-1],
+            )
+        except KeyboardInterrupt:
+            print('\nInterrupted.')
+            return
+        except Exception as error:
+            # [移植溯源] Hermes hermes_cli/cli_chat_turn_mixin.py:chat 捕获轮次异常并返回输入界面。
+            print(f'Mertina> Turn did not complete: {type(error).__name__}: {error}')
+            continue
+        # [移植溯源] 同文件 _chat_settle_turn：每轮有结果时采用其完整消息历史。
+        if turn_result:
+            conversation_history = turn_result.get('messages', conversation_history)
+        if turn_result.get('completed'):
+            print(f"Mertina> {turn_result.get('final_response') or ''}")
+        else:
+            reason = turn_result.get('error') or turn_result.get('turn_exit_reason') or 'unknown error'
+            print(f'Mertina> Turn did not complete: {reason}')
+
+
+# [改动][溯源] ROADMAP.md:84-85 要求模型端点、密钥和模型名的基本配置。
 def main() -> None:
-    """读取 CLI、环境变量与 TOML 配置，运行一次查询并输出最终文本。"""
+    """读取配置；有问题参数时运行一次，否则进入内存中的交互对话。"""
     # [改动][溯源] ROADMAP.md:84-85；agent/config.py 的配置优先级由 CLI 覆盖环境变量。
     from agent.config import load_settings
 
     parser = argparse.ArgumentParser(description='Run the Mertina v0.1 agent')
-    parser.add_argument('query')
+    parser.add_argument('query', nargs='?')
     # --base-url、--model、--max-iterations 的旧写法见上方注释；现在可从配置读取。
     # parser.add_argument('--base-url', required=True)
     # parser.add_argument('--model', required=True)
@@ -1659,7 +1705,11 @@ def main() -> None:
         enable_web_search=False if settings.search_provider == 'none' else None,
     )
     try:
-        print(agent.chat(args.query))
+        # [移植溯源] Hermes cli.py:main：有 query 运行单轮，否则进入 CLI.run。
+        if args.query is None:
+            _run_interactive_chat(agent)
+        else:
+            print(agent.chat(args.query))
     finally:
         agent.close()
 
