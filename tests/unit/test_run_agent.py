@@ -116,6 +116,10 @@ def test_construction_records_the_settings_the_loop_reads(reg: ToolRegistry) -> 
     assert agent.iteration_budget.max_total == 7
     assert agent._api_max_retries == 3
     assert agent.session_api_calls == 0
+    assert agent.platform is None
+    assert agent.pass_session_id is False
+    assert agent._tool_use_enforcement == agent._execution_guidance == "auto"
+    assert agent.session_start is not None
 
 
 # --- one turn -------------------------------------------------------------------------------------
@@ -128,7 +132,10 @@ def test_chat_returns_the_final_text_and_sends_one_request(reg: ToolRegistry) ->
 
     (request,) = completions.requests
     assert request["model"] == "fake-model"
-    assert request["messages"] == [{"role": "user", "content": "hi"}]
+    system, *rest = request["messages"]
+    assert system["role"] == "system"
+    assert system["content"].startswith("You are Mertina Agent.")
+    assert rest == [{"role": "user", "content": "hi"}]
     assert request["max_tokens"] == 50
     assert "tools" not in request
 
@@ -138,7 +145,13 @@ def test_system_message_becomes_the_system_prompt(reg: ToolRegistry) -> None:
 
     agent.run_conversation("q", system_message="Be brief.")
 
-    assert completions.requests[0]["messages"][0] == {"role": "system", "content": "Be brief."}
+    system = completions.requests[0]["messages"][0]
+    assert system["role"] == "system"
+    identity, context, timestamp = system["content"].split("\n\n")
+    assert identity.startswith("You are Mertina Agent.")
+    assert context == "Be brief."
+    assert timestamp.startswith("Conversation started: ")
+    assert timestamp.endswith("\nModel: fake-model")
 
 
 def test_tool_round_trip_with_parallel_calls(reg: ToolRegistry) -> None:

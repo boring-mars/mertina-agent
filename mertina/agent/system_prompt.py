@@ -10,6 +10,7 @@ guidance), ``context`` (caller ``system_message``) and ``volatile`` (timestamp l
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from mertina.agent.prompt_builder import (
@@ -28,7 +29,7 @@ _GATE_WORDS = {
 }
 
 
-def _model_gate(setting: Any, model: str | None, default_models) -> bool:
+def _model_gate(setting: Any, model: str | None, default_models: Sequence[str]) -> bool:
     """Resolve a config gate: True/"true"-ish -> on, False/"false"-ish -> off,
     list -> case-insensitive model-substring match, anything else ("auto") ->
     match against *default_models*."""
@@ -183,7 +184,7 @@ def _guidance_parts(agent: Any) -> list[str]:
     return parts
 
 
-def _join_tier(parts: list[str | None]) -> str:
+def _join_tier(parts: Sequence[str | None]) -> str:
     """Join non-empty parts; None/blank entries are dropped."""
     return "\n\n".join(p.strip() for p in parts if p and p.strip())
 

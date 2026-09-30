@@ -1,4 +1,4 @@
-"""Helpers AIAgent reaches: think stripping, reasoning extraction, echo-back rules, prompt, copy."""
+"""Helpers AIAgent reaches: think stripping, reasoning extraction, echo-back rules, copy."""
 
 from types import SimpleNamespace
 from typing import Any
@@ -11,7 +11,6 @@ from mertina.agent.message_sanitization import (
     apply_reasoning_content_policy,
     matches_reasoning_echo_family,
 )
-from mertina.agent.system_prompt import build_system_prompt
 from mertina.agent.turn_failure_copy import site_copy
 from mertina.utils import base_url_host_matches, base_url_hostname
 
@@ -94,12 +93,7 @@ def test_base_url_host_matches_the_domain_and_its_subdomains_only() -> None:
     assert base_url_hostname("HTTPS://API.Example.COM:8080/x") == "api.example.com"
 
 
-# --- prompt and copy ------------------------------------------------------------------------------
-
-
-def test_build_system_prompt_is_the_callers_system_message() -> None:
-    assert build_system_prompt(None, "Be brief.") == "Be brief."
-    assert build_system_prompt(None) == ""
+# --- copy -----------------------------------------------------------------------------------------
 
 
 def test_site_copy_fills_the_fields_it_is_given() -> None:
