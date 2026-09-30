@@ -39,7 +39,8 @@ git tag 加上 `v` 前缀：`v1.0.0rc1`。
 ## 版本号记录在哪里
 
 - **git tag 是唯一的版本来源。** 每次发布都在 `main` 上打一个附注标签 `vX.Y.Z`
-- `pyproject.toml` 中的版本号由发布工具维护，不要在功能 PR 中手动修改
+- `pyproject.toml` 和 `mertina/__init__.py` 中的版本号由发布工具维护，不要在功能 PR 中手动修改。
+  release-please 搭好之前，由维护者在一个 `chore(release): X.Y.Z` commit 里手动修改这两处（并运行 `uv lock`）
 - tag 推送后永远不移动、不删除。如果某个版本有问题，就发布一个新版本
 
 ## 变更日志
@@ -67,20 +68,17 @@ release-please 创建或更新一个 "Release PR"
 自动创建 tag vX.Y.Z 和 GitHub Release
       │
       ▼
-CI 用 `uv build` 构建并发布到 PyPI
-（同时构建并推送容器镜像）
+tag 和对应的 GitHub Release 就是这次发布
+（不发布包，见第 4 步）
 ```
 
 1. 随着 PR 不断合并，release-please 会持续更新 Release PR，并根据 commit 类型计算下一个版本号
 2. 维护者决定发布时，检查 Release PR：版本号是否正确、变更日志是否通顺、
    破坏性变更是否有迁移说明。需要的话直接在 Release PR 里修改变更日志
 3. 合并 Release PR 后，自动创建 tag 和 GitHub Release
-4. tag 触发发布工作流：
-   - `uv build` 生成 sdist 和 wheel
-   - 通过 [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) 发布到 PyPI，
-     仓库中不需要保存任何 API token
-   - 构建并推送容器镜像，镜像使用版本号作为标签
-5. 维护者确认包可以正常安装（`uvx mertina-agent --version`），镜像可以正常运行
+4. 不发布到 PyPI：Mertina 是从 checkout 或 Docker 镜像运行的应用，不是库（`[tool.uv] package = false`）。
+   P1 加入 Docker 镜像之后，tag 还会构建并推送以版本号为标签的镜像
+5. 维护者确认打 tag 的 checkout 可以正常运行（`uv run python -m scripts.fake_loop`）
 
 只有维护者可以合并 Release PR。
 

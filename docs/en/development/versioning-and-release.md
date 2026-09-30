@@ -39,7 +39,8 @@ Git tags add the `v` prefix: `v1.0.0rc1`.
 ## Where the version lives
 
 - **Git tags are the single source of truth.** Every release is an annotated tag `vX.Y.Z` on `main`
-- The version in `pyproject.toml` is maintained by the release tooling, not edited by hand in feature PRs
+- The version in `pyproject.toml` and `mertina/__init__.py` is maintained by the release tooling, not edited by hand in feature PRs.
+  Until release-please is set up, the maintainer bumps both (and runs `uv lock`) in a `chore(release): X.Y.Z` commit
 - Tags are never moved or deleted after they are pushed. If a release is broken, release a new version
 
 ## Changelog
@@ -67,20 +68,18 @@ release-please opens / updates a "Release PR"
 tag vX.Y.Z + GitHub Release are created
       │
       ▼
-CI builds with `uv build` and publishes to PyPI
-(and builds and pushes the container image)
+the tag and its GitHub Release are the release
+(no package is published; see step 4)
 ```
 
 1. As PRs are merged, release-please keeps a Release PR up to date, computing the next version from the commit types
 2. When the maintainer decides to release, they check the Release PR: the version is right, the changelog reads well,
    breaking changes have migration notes. They edit the changelog in the Release PR if needed
 3. Merging the Release PR creates the tag and the GitHub Release
-4. The tag triggers the publish workflow:
-   - `uv build` produces the sdist and wheel
-   - The package is published to PyPI with [Trusted Publishing](https://docs.pypi.org/trusted-publishers/),
-     so no API token is stored in the repository
-   - The container image is built and pushed, tagged with the version
-5. The maintainer checks that the package installs (`uvx mertina-agent --version`) and that the image runs
+4. Nothing is published to PyPI: Mertina is an application run from a checkout or a Docker image,
+   not a library (`[tool.uv] package = false`). Once the Docker image lands in P1, the tag will also
+   build and push an image tagged with the version
+5. The maintainer checks that the tagged checkout runs (`uv run python -m scripts.fake_loop`)
 
 Only the maintainer merges Release PRs.
 
