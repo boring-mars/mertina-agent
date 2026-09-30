@@ -117,11 +117,11 @@ def _timestamp_line(agent: Any) -> str:
     """Date-only so the prompt is byte-stable for the day; zone + offset so
     tools needn't guess EST vs EDT. Long-lived sessions get an "as of" line on
     rebuild days (the cache prefix is already invalidated at that boundary)."""
-    from mertina.time import get_timezone as _hermes_tz
-    from mertina.time import now as _hermes_now
+    from mertina.time import get_timezone as _mertina_tz
+    from mertina.time import now as _mertina_now
 
-    now = _hermes_now()
-    _bits = _zone_bits(now, _hermes_tz())
+    now = _mertina_now()
+    _bits = _zone_bits(now, _mertina_tz())
     _zone_suffix = f" ({', '.join(_bits)})" if _bits else ""
     _start = _session_start_like(agent, now)
     timestamp_line = f"Conversation started: {_start.strftime('%A, %B %d, %Y')}{_zone_suffix}"

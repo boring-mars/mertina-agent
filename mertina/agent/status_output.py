@@ -27,7 +27,7 @@ class StatusOutputMixin:
         self, *args: Any, force: bool = False, diagnostic: bool = False, **kwargs: Any
     ) -> None:
         """Verbose print — suppressed after the main response; ``force=True`` bypasses it.
-        ``suppress_status_output`` (``hermes chat -q``) wins."""
+        ``suppress_status_output`` (``mertina chat -q``) wins."""
         if getattr(self, "suppress_status_output", False):
             return
         if force or not getattr(self, "_mute_post_response", False):

@@ -1,9 +1,9 @@
 # Ported from hermes-agent hermes_time.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
 # Partial: only the parts ported so far. Upstream order is kept.
-"""Timezone-aware clock for Hermes.
+"""Timezone-aware clock for Mertina.
 
-``now()`` returns a tz-aware datetime in the IANA timezone named by the ``HERMES_TIMEZONE`` env
+``now()`` returns a tz-aware datetime in the IANA timezone named by the ``MERTINA_TIMEZONE`` env
 var, else server-local time. Invalid timezone values log a warning and fall back — never crash.
 """
 
@@ -23,8 +23,8 @@ _tz_cache: dict[tuple[str, str], tuple[str, ZoneInfo | None]] = {}
 
 
 def _env_timezone() -> str:
-    """``HERMES_TIMEZONE``, stripped."""
-    return os.getenv("HERMES_TIMEZONE", "").strip()
+    """``MERTINA_TIMEZONE``, stripped."""
+    return os.getenv("MERTINA_TIMEZONE", "").strip()
 
 
 def _timezone_cache_identity() -> tuple[str, str]:

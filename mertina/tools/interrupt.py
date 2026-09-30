@@ -13,8 +13,8 @@ from mertina.utils import env_var_enabled
 
 logger = logging.getLogger(__name__)
 
-# Opt-in debug tracing — pairs with HERMES_DEBUG_INTERRUPT in tools/environments/base.py.
-_DEBUG_INTERRUPT = env_var_enabled("HERMES_DEBUG_INTERRUPT")
+# Opt-in debug tracing — pairs with MERTINA_DEBUG_INTERRUPT in tools/environments/base.py.
+_DEBUG_INTERRUPT = env_var_enabled("MERTINA_DEBUG_INTERRUPT")
 if _DEBUG_INTERRUPT:
     # AIAgent's quiet_mode forces the `tools` logger to ERROR on CLI startup;
     # force ours back to INFO so the trace is visible in agent.log.
@@ -28,7 +28,7 @@ _lock = threading.Lock()
 # ``contextvars.copy_context()``, so a guard chain moved onto that worker still honours
 # ``/stop`` aimed at the tool thread that spawned it (``is_interrupted`` checks both).
 acting_for_tid: contextvars.ContextVar[int | None] = contextvars.ContextVar(
-    "hermes_interrupt_acting_for_tid",
+    "mertina_interrupt_acting_for_tid",
     default=None,
 )
 

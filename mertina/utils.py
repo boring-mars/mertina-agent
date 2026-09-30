@@ -1,7 +1,7 @@
 # Ported from hermes-agent utils.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
 # Partial: only the parts ported so far. Upstream order is kept.
-"""Shared utility functions for hermes-agent."""
+"""Shared utility functions for mertina-agent."""
 
 import json
 import os

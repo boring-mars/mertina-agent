@@ -182,7 +182,7 @@ def _run_agent_tool_execution_middleware(
     def _authorized_dispatch(final_args: dict[str, Any]) -> Any:
         with dispatch_lock:
             if state.dispatched:
-                raise RuntimeError("Hermes tool execution callback invoked more than once")
+                raise RuntimeError("Mertina tool execution callback invoked more than once")
             state.dispatched = True
             state.blocked = False
             state.args = final_args

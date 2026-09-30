@@ -2,7 +2,8 @@
 
 Every file under ``mertina/`` that opens with a ``# Ported from hermes-agent <path> @ <sha>`` header
 is compared with that upstream file at that commit, after putting the upstream copy through the
-mechanical changes that porting rule 2 allows (import roots, ``ruff --fix``, ``ruff format``).
+mechanical changes that porting rule 2 allows (import roots, the product name, ``ruff --fix``,
+``ruff format``).
 
 Reported, for a person to read:
   * lines that are not in upstream: each one needs a reason from porting rule 2
@@ -42,6 +43,8 @@ ROOTS = {
     *("batch_runner", "mcp_serve", "mini_swe_runner", "model_tools", "registration_lifecycle"),
     *("run_agent", "toolset_distributions", "toolsets", "trajectory_compressor", "utils"),
 }
+# Upstream's product name and ours, in each case it is written (porting rule 2, kind 5).
+PRODUCT_NAMES = {"HERMES": "MERTINA", "Hermes": "Mertina", "hermes": "mertina"}
 # Calls that take a module name as a string: lazy imports and logger names.
 MODULE_NAME_CALLS = {"forward", "forward_static", "lazy_attr", "import_module", "getLogger"}
 # How far past the last kept line an inline cut may reach for the rest of its words.
@@ -119,11 +122,15 @@ def rewrite_roots(source: str) -> str:
     return "".join(lines)
 
 
+def rename_product(source: str) -> str:
+    return re.sub("|".join(PRODUCT_NAMES), lambda m: PRODUCT_NAMES[m.group()], source)
+
+
 def normalize(source: str) -> str:
-    """Upstream source after rule 2's first two kinds of change."""
+    """Upstream source after rule 2's mechanical kinds of change (1, 2 and 5)."""
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "upstream.py"
-        target.write_text(rewrite_roots(source), encoding="utf-8")
+        target.write_text(rename_product(rewrite_roots(source)), encoding="utf-8")
         ruff = [sys.executable, "-m", "ruff"]
         config = ["--config", str(REPO / "pyproject.toml"), "--quiet", str(target)]
         subprocess.run([*ruff, "check", "--fix-only", *config], capture_output=True, check=False)

@@ -43,16 +43,17 @@ Mertina Agent 是 Nous Research 的 [Hermes Agent](https://github.com/NousResear
 
 ### 2. 语义逐字，并注明来源
 
-「逐字拷贝」指**语义逐字**：行为和结构不变，形式服从本仓库的规范。允许的改动只有四类：
+「逐字拷贝」指**语义逐字**：行为和结构不变，形式服从本仓库的规范。允许的改动只有五类：
 
 1. 按规则 1 改写 import 根：`from agent.` → `from mertina.agent.`，`hermes_cli` → `mertina.cli`，`import hermes_bootstrap` → `from mertina import bootstrap`。**写在字符串里的模块路径也算**，例如 `_forward("agent.agent_runtime_helpers", ...)`、`importlib.import_module(f"agent.transports.{name}")`、`logging.getLogger("run_agent")`
 2. `ruff check --fix` 和 `ruff format` 的机械改写（`Dict` → `dict`、重新换行等）
 3. 为通过 mypy strict 补全类型标注（如 `**kwargs` → `**kwargs: Any`），以及把超长的 docstring 和注释折行，措辞不变
 4. 为保留上游写法而加的 `# noqa` 或 `# type: ignore`，同一行写明原因（例如保留上游的参数名 `id`，或上游把两个签名不同的函数绑在同一个名字上）
+5. 把上游的产品名换成我们的，大小写对应：`HERMES` → `MERTINA`、`Hermes` → `Mertina`、`hermes` → `mertina`。代码、字符串、注释和 docstring 都换，例如环境变量 `HERMES_TIMEZONE` → `MERTINA_TIMEZONE`、`~/.hermes` → `~/.mertina`、模型看到的 `[hermes note: ...]` → `[mertina note: ...]`。例外有三种，保持原样：来源头（`# Ported from hermes-agent ...`）、指向上游的 URL（如 `hermes-agent.nousresearch.com`）、Nous 的 Hermes 系列模型名（如 `nousresearch/hermes-4-70b`）。注释里提到的上游模块按规则 1 写成我们的路径（`hermes_cli.config` → `mertina.cli.config`）
 
 删减范围外的功能不属于拷贝：它放在紧随其后的单独 commit 里，让那次 diff 只包含被删掉的东西。
 
-删减 commit 以删除为主：删掉整行、整块，或一行中属于范围外功能的那一段（行内删减），剩下的原样保留。为了精简，允许少量改写，例如把依赖已删功能的表达式换成直接取值；**每一处改写都要在下面的偏离记录里有一行**。提交前运行 `uv run python scripts/port_check.py --cut-from <逐字搬运 commit>`，它把删减后不是整行保留的内容分成三类：`prose`（注释和 docstring）、`inline`（行内删减）、`rewrite`（改写）。前两类不用登记；除去第 3、4 类改动，每一条 `rewrite` 都必须能在偏离记录里找到。
+删减 commit 以删除为主：删掉整行、整块，或一行中属于范围外功能的那一段（行内删减），剩下的原样保留。为了精简，允许少量改写，例如把依赖已删功能的表达式换成直接取值；**每一处改写都要在下面的偏离记录里有一行**。提交前运行 `uv run python scripts/port_check.py --cut-from <逐字搬运 commit>`，它把删减后不是整行保留的内容分成三类：`prose`（注释和 docstring）、`inline`（行内删减）、`rewrite`（改写）。前两类不用登记；除去第 3–5 类改动，每一条 `rewrite` 都必须能在偏离记录里找到。
 
 docstring 和注释是文字说明：不做 import 改写；删减之后可以按实际代码改写，让描述和代码一致，不算偏离。删掉一段代码时，只描述这段代码的注释随它一起删掉。
 
@@ -93,7 +94,7 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 
 ## 偏离记录
 
-删减 commit 里的每一处改写（`port_check --cut-from` 报为 `rewrite` 的行）记录在这里，以免被误认为是无意的漂移。单纯删除、行内删减、注释和 docstring 的改写，以及规则 2 的第 1–4 类改动都不在这里记录。
+删减 commit 里的每一处改写（`port_check --cut-from` 报为 `rewrite` 的行）记录在这里，以免被误认为是无意的漂移。单纯删除、行内删减、注释和 docstring 的改写，以及规则 2 的第 1–5 类改动都不在这里记录。
 
 | 上游 | Mertina | 原因 |
 |---|---|---|
@@ -109,7 +110,7 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 | `turn_api_call.perform_api_call`：`response = run_llm_execution_middleware(api_kwargs, _perform_api_call, ...)`，内层经流式调用或 `relay_llm.execute(..., agent._interruptible_api_call, ...)` 发出请求 | `response = agent._interruptible_api_call(api_kwargs)` | LLM 执行中间件和 Relay 整层不在 v0.1 内，流式输出在 v0.1.1；直接发一次非流式请求 |
 | `turn_context.build_api_messages`：`for idx, msg in enumerate(canonical_messages)`，遍历经 `canonicalize_replay_history` 规范化过的历史前缀 | `for msg in messages:` | 回放规范化服务于会话恢复和 prompt 缓存，v0.1 没有这两项；`idx` 只给已删除的空消息填充用 |
 | `chat_completion_helpers._chat_summary_attempt`：`response = _managed_summary_call(agent, api_request_id, summary_kwargs, lambda request: summary_client.chat.completions.create(...), ...)`，经 Relay 发出总结请求 | `response = summary_client.chat.completions.create(**summary_kwargs)` | Relay 整层不在 v0.1 内，与 `perform_api_call` 同理 |
-| `prompt_builder.DEFAULT_AGENT_IDENTITY`：首句 `"You are Hermes Agent, built by Nous Research. Be direct: ..."` | `"You are Mertina Agent. Be direct: ..."`，其余文字不变 | **行为改变：** 上游文案让模型自称 Nous Research 的 Hermes Agent |
+| `prompt_builder.DEFAULT_AGENT_IDENTITY`：首句 `"You are Hermes Agent, built by Nous Research. Be direct: ..."`（经规则 2 第 5 类后为 `"You are Mertina Agent, built by Nous Research. ..."`） | `"You are Mertina Agent. Be direct: ..."`，其余文字不变 | **行为改变：** 删掉上游的作者署名，模型不再声称自己由 Nous Research 构建 |
 | `system_prompt._identity_parts`：`return ([_soul_content], True) if _soul_content else ([DEFAULT_AGENT_IDENTITY], False)`，有 SOUL.md 时用它作身份 | `return ([DEFAULT_AGENT_IDENTITY], False)` | SOUL.md 属于 P1 的助手人设，v0.1 只用默认身份。这一行是从表达式中间删掉 SOUL.md 分支，`port_check` 把它报为 `rewrite` |
 
 ## 与上游对照
@@ -120,9 +121,11 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 uv run python scripts/port_check.py
 ```
 
-它按每个移植文件头里记录的 SHA 读取上游文件（`git show <sha>:<path>`，不受检出所在分支影响），先做规则 2 的第 1、2 类改动，再逐行比较：
+它按每个移植文件头里记录的 SHA 读取上游文件（`git show <sha>:<path>`，不受检出所在分支影响），先做规则 2 的第 1、2、5 类改动，再逐行比较：
 
-- 列出所有不在上游里的行。删减不会产生这种行，所以每一行都应能归到来源头、第 3、4 类改动，或偏离记录里的一行
+第 5 类的三种例外脚本不识别，它们会被列为不在上游里的行，由人确认。
+
+- 列出所有不在上游里的行。删减不会产生这种行，所以每一行都应能归到来源头、第 3、4 类改动、第 5 类的例外，或偏离记录里的一行
 - 保留下来的定义不按上游顺序、import 根没改写（包括字符串里的模块路径）、包目录的 `__init__.py` 没搬时，报失败并以非零状态退出
 
 加上 `--cut-from <逐字搬运 commit>` 时，它还会把删减后不是整行保留的内容分成 `prose`、`inline`、`rewrite` 三类列出（见规则 2）。

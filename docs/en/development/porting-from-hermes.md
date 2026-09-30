@@ -51,18 +51,19 @@ No correspondence is invented.
 ### 2. Copy verbatim in substance, and say where it came from
 
 "Copied verbatim" means **verbatim in substance**: behavior and structure are unchanged, and the form
-follows this repository's standards. Only four kinds of change are allowed:
+follows this repository's standards. Only five kinds of change are allowed:
 
 1. Rewriting import roots by rule 1: `from agent.` → `from mertina.agent.`, `hermes_cli` → `mertina.cli`, `import hermes_bootstrap` → `from mertina import bootstrap`. **Module paths inside strings count too**, such as `_forward("agent.agent_runtime_helpers", ...)`, `importlib.import_module(f"agent.transports.{name}")` and `logging.getLogger("run_agent")`
 2. The mechanical rewrites of `ruff check --fix` and `ruff format` (`Dict` → `dict`, re-wrapping, ...)
 3. Completing type hints so mypy strict passes (such as `**kwargs` → `**kwargs: Any`), and wrapping
    over-long docstrings and comments without changing their wording
 4. A `# noqa` or `# type: ignore` that keeps upstream's code as written, with the reason on the same line (such as keeping upstream's parameter name `id`, or two functions of different signatures bound to one name)
+5. Upstream's product name replaced by ours, case for case: `HERMES` → `MERTINA`, `Hermes` → `Mertina`, `hermes` → `mertina`. It applies to code, strings, comments and docstrings, such as the environment variable `HERMES_TIMEZONE` → `MERTINA_TIMEZONE`, `~/.hermes` → `~/.mertina`, and the `[hermes note: ...]` the model sees → `[mertina note: ...]`. Three things keep the upstream name: the provenance header (`# Ported from hermes-agent ...`), URLs that point upstream (such as `hermes-agent.nousresearch.com`), and Nous's Hermes model names (such as `nousresearch/hermes-4-70b`). A comment naming an upstream module uses our path by rule 1 (`hermes_cli.config` → `mertina.cli.config`)
 
 Cutting features that are out of scope is not part of the copy. It goes in a separate commit right
 after it, so that commit's diff shows only what was removed.
 
-A cut commit mostly deletes: whole lines, whole blocks, or the part of a line that belongs to an out-of-scope feature (an inline cut), with the rest left as it was. A few rewrites for the sake of a smaller file are allowed, such as reading a value directly instead of through a removed helper, but **each rewrite has a row in the deviations table below**. Before committing, run `uv run python scripts/port_check.py --cut-from <port commit>`. It sorts what the cut did not keep whole into `prose` (comments and docstrings), `inline` (inline cuts) and `rewrite`. The first two need no record; apart from changes 3 and 4, every `rewrite` must be in the deviations table.
+A cut commit mostly deletes: whole lines, whole blocks, or the part of a line that belongs to an out-of-scope feature (an inline cut), with the rest left as it was. A few rewrites for the sake of a smaller file are allowed, such as reading a value directly instead of through a removed helper, but **each rewrite has a row in the deviations table below**. Before committing, run `uv run python scripts/port_check.py --cut-from <port commit>`. It sorts what the cut did not keep whole into `prose` (comments and docstrings), `inline` (inline cuts) and `rewrite`. The first two need no record; apart from changes 3 to 5, every `rewrite` must be in the deviations table.
 
 Docstrings and comments are prose: no import rewriting, and after a cut they may be rewritten to match the code, which is not a departure. When code is deleted, a comment that only describes that code goes with it.
 
@@ -106,7 +107,7 @@ For example, `agent/agent_runtime_helpers.py` holds only `_ra()` and `create_ope
 
 ## Deviations
 
-Every rewrite in a cut commit (a line `port_check --cut-from` reports as `rewrite`) is recorded here so it is not mistaken for drift. Plain deletions, inline cuts, rewritten comments and docstrings, and rule 2's changes 1 to 4 are not recorded here.
+Every rewrite in a cut commit (a line `port_check --cut-from` reports as `rewrite`) is recorded here so it is not mistaken for drift. Plain deletions, inline cuts, rewritten comments and docstrings, and rule 2's changes 1 to 5 are not recorded here.
 
 | Upstream | Mertina | Why |
 |---|---|---|
@@ -122,7 +123,7 @@ Every rewrite in a cut commit (a line `port_check --cut-from` reports as `rewrit
 | `turn_api_call.perform_api_call`: `response = run_llm_execution_middleware(api_kwargs, _perform_api_call, ...)`, whose inner call streams or goes through `relay_llm.execute(..., agent._interruptible_api_call, ...)` | `response = agent._interruptible_api_call(api_kwargs)` | The LLM execution middleware and Relay are outside v0.1 and streaming comes in v0.1.1; one non-streaming request is sent directly |
 | `turn_context.build_api_messages`: `for idx, msg in enumerate(canonical_messages)`, over the history prefix normalized by `canonicalize_replay_history` | `for msg in messages:` | Replay normalization serves session resume and prompt caching, neither of which is in v0.1; `idx` only fed the deleted empty-message fill |
 | `chat_completion_helpers._chat_summary_attempt`: `response = _managed_summary_call(agent, api_request_id, summary_kwargs, lambda request: summary_client.chat.completions.create(...), ...)` sends the summary through Relay | `response = summary_client.chat.completions.create(**summary_kwargs)` | Relay is outside v0.1, as for `perform_api_call` |
-| `prompt_builder.DEFAULT_AGENT_IDENTITY`: opens with `"You are Hermes Agent, built by Nous Research. Be direct: ..."` | `"You are Mertina Agent. Be direct: ..."`, the rest unchanged | **Behavior change:** upstream's text makes the model call itself Hermes Agent by Nous Research |
+| `prompt_builder.DEFAULT_AGENT_IDENTITY`: opens with `"You are Hermes Agent, built by Nous Research. Be direct: ..."` (`"You are Mertina Agent, built by Nous Research. ..."` after rule 2's change 5) | `"You are Mertina Agent. Be direct: ..."`, the rest unchanged | **Behavior change:** upstream's authorship is dropped, so the model no longer says Nous Research built it |
 | `system_prompt._identity_parts`: `return ([_soul_content], True) if _soul_content else ([DEFAULT_AGENT_IDENTITY], False)` uses SOUL.md as the identity when it exists | `return ([DEFAULT_AGENT_IDENTITY], False)` | SOUL.md is the assistant persona, in P1; v0.1 uses the default identity. The SOUL.md branch is deleted from the middle of the expression, which `port_check` reports as a `rewrite` |
 
 ## Comparing against upstream
@@ -133,9 +134,11 @@ Before each port commit, with a Hermes checkout beside this repository, run:
 uv run python scripts/port_check.py
 ```
 
-It reads each upstream file at the SHA its ported file's header records (`git show <sha>:<path>`, so the checkout's branch does not matter), applies changes 1 and 2 of rule 2, and compares line by line:
+It reads each upstream file at the SHA its ported file's header records (`git show <sha>:<path>`, so the checkout's branch does not matter), applies changes 1, 2 and 5 of rule 2, and compares line by line:
 
-- It lists every line that is not in upstream. Cuts leave none, so each one should trace back to the provenance header, changes 3 and 4, or a row of the deviations table
+The script does not know change 5's three exceptions; they are listed as lines not in upstream, for a person to confirm.
+
+- It lists every line that is not in upstream. Cuts leave none, so each one should trace back to the provenance header, changes 3 and 4, an exception to change 5, or a row of the deviations table
 - It fails, with a non-zero exit status, when kept definitions are out of upstream order, when an import root was not rewritten (module paths inside strings included), or when a package `__init__.py` was not ported
 
 With `--cut-from <port commit>` it also lists what the cut did not keep whole, sorted into `prose`, `inline` and `rewrite` (see rule 2).

@@ -92,16 +92,16 @@ TASK_COMPLETION_GUIDANCE = (
 # model that issues one tool call per turn multiplies the number of round-trips — and therefore the
 # resent context — for any task that needs several independent reads, searches, or safe lookups.
 # Batching independent calls into a single assistant response collapses N turns into one, cutting
-# both latency and the resent-context cost that compounds over a long conversation. The hermes-agent
-# runtime already executes a batch of tool calls concurrently when they are independent (read-only
-# tools always; path-scoped file ops when their targets don't overlap — see
+# both latency and the resent-context cost that compounds over a long conversation. The
+# mertina-agent runtime already executes a batch of tool calls concurrently when they are
+# independent (read-only tools always; path-scoped file ops when their targets don't overlap — see
 # run_agent._execute_tool_calls / tool_dispatch_helpers). The missing piece was telling the *model*
 # to emit those calls together in the first place. Until now the only batching steer in the prompt
 # lived in GOOGLE_MODEL_OPERATIONAL_GUIDANCE — Gemini/Gemma got it, every other model got nothing.
 # Short on purpose — shipped in the cached system prompt to every user, every session. Token cost is
 # paid once at install and amortised across all sessions via prefix caching. Keep it tight. Ported
 # from cline/cline#11514 ("encourage parallel tool calls"), adapted from Cline's TypeScript
-# tool-surface guidance to hermes-agent's Python prompt-assembly architecture.
+# tool-surface guidance to mertina-agent's Python prompt-assembly architecture.
 PARALLEL_TOOL_CALL_GUIDANCE = (
     "# Parallel tool calls\n"
     "When you need several pieces of information that don't depend on each other, request them together in a "  # noqa: E501  # upstream's prompt text
