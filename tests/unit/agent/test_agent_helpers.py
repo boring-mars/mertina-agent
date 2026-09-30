@@ -6,12 +6,18 @@ from typing import Any
 import pytest
 
 from mertina.agent.agent_runtime_helpers import extract_reasoning, strip_think_blocks
+from mertina.agent.error_classifier import ClassifiedError, FailoverReason
 from mertina.agent.message_content import flatten_message_text
 from mertina.agent.message_sanitization import (
     apply_reasoning_content_policy,
     matches_reasoning_echo_family,
 )
-from mertina.agent.turn_failure_copy import site_copy
+from mertina.agent.turn_failure_copy import (
+    exhausted_copy,
+    nonretryable_copy,
+    provider_label_for,
+    site_copy,
+)
 from mertina.utils import base_url_host_matches, base_url_hostname
 
 # --- strip_think_blocks / extract_reasoning -------------------------------------------------------
@@ -100,3 +106,40 @@ def test_site_copy_fills_the_fields_it_is_given() -> None:
     text = site_copy("max_iterations_no_summary", limit=5)
 
     assert "(5 tool calls)" in text
+
+
+def test_provider_label_for_is_the_configured_provider() -> None:
+    assert provider_label_for("acme") == "acme"
+    assert provider_label_for("") == "The provider"
+    assert provider_label_for(None) == "The provider"
+
+
+@pytest.mark.parametrize(
+    ("reason", "lead"),
+    [
+        ("rate_limit", "acme rate-limited every one of 3 attempts"),
+        ("server_error", "acme returned a server error on all 3 attempts"),
+        ("unknown", "acme didn't answer after 3 attempts"),
+    ],
+)
+def test_exhausted_copy(reason: str, lead: str) -> None:
+    assert exhausted_copy(reason, label="acme", attempts=3, summary="HTTP 500: boom") == (
+        f"{lead} — it looks temporarily unavailable. Wait a minute and try again."
+        "\n\nProvider said: HTTP 500: boom"
+    )
+
+
+@pytest.mark.parametrize(
+    ("reason", "text"),
+    [
+        (FailoverReason.format_error, "acme rejected this request as malformed"),
+        (FailoverReason.auth, "Check the model name, the endpoint and the API key."),
+    ],
+)
+def test_nonretryable_copy(reason: FailoverReason, text: str) -> None:
+    copy = nonretryable_copy(
+        ClassifiedError(reason=reason), provider="acme", model="m", summary="HTTP 401: no"
+    )
+
+    assert text in copy
+    assert copy.endswith("\n\nProvider said: HTTP 401: no")

@@ -129,6 +129,9 @@ class _Agent:
     def _vprint(self, *args: Any, **kwargs: Any) -> None:
         pass
 
+    def _clear_status_buffer(self) -> None:
+        pass
+
     def interrupt(self, message: str | None = None) -> None:
         self._interrupt_requested = True
         self._interrupt_message = message

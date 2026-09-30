@@ -157,13 +157,13 @@ _STATUS_HANDLERS: dict[int, Callable[[_Ctx], Verdict]] = {
 }
 
 
-def _error_obj(body: Any) -> dict:
+def _error_obj(body: Any) -> dict[str, Any]:
     """``body["error"]`` when it is a dict, else ``{}``."""
     err = body.get("error") if isinstance(body, dict) else None
     return err if isinstance(err, dict) else {}
 
 
-def _body_message_candidates(body: dict) -> Iterator[Any]:
+def _body_message_candidates(body: dict[str, Any]) -> Iterator[Any]:
     """Body message fields in priority order (OpenAI, flat, litellm/Bedrock proxy, FastAPI
     shapes)."""
     yield _error_obj(body).get("message")
@@ -206,7 +206,7 @@ def _status_of(exc: Any) -> int | None:
     return code if isinstance(code, int) and 100 <= code < 600 else None
 
 
-def _body_of(exc: Any) -> dict | None:
+def _body_of(exc: Any) -> dict[str, Any] | None:
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
         return body
@@ -220,15 +220,15 @@ def _body_of(exc: Any) -> dict | None:
 
 def _extract_status_code(error: Exception) -> int | None:
     """HTTP status code from the error or its cause chain."""
-    return _from_cause_chain(error, _status_of, None)
+    return _from_cause_chain(error, _status_of, None)  # type: ignore[no-any-return]  # _status_of yields int | None
 
 
-def _extract_error_body(error: Exception) -> dict:
+def _extract_error_body(error: Exception) -> dict[str, Any]:
     """Structured error body from an SDK exception or its cause chain."""
-    return _from_cause_chain(error, _body_of, {})
+    return _from_cause_chain(error, _body_of, {})  # type: ignore[no-any-return]  # _body_of yields a dict
 
 
-def _extract_message(error: Exception, body: dict) -> str:
+def _extract_message(error: Exception, body: dict[str, Any]) -> str:
     """Extract the most informative error message (structured body first)."""
     msg = next(
         (m for m in _body_message_candidates(body or {}) if isinstance(m, str) and m.strip()), None

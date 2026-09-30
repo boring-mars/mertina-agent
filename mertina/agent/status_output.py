@@ -18,6 +18,8 @@ class StatusOutputMixin:
 
     # Set by AIAgent; declared here so the mixin type-checks on its own.
     _print_fn: Callable[..., Any] | None
+    log_prefix: str
+    _retry_status_buffer: list[tuple[str, str]]
 
     def _safe_print(self, *args: Any, diagnostic: bool = False, **kwargs: Any) -> None:
         """Print that swallows broken pipes / closed stdout (headless stdout can vanish
@@ -38,7 +40,7 @@ class StatusOutputMixin:
         if force or not getattr(self, "_mute_post_response", False):
             self._safe_print(*args, **kwargs)
 
-    def _call_callback(self, name: str, *args, origin: str) -> None:
+    def _call_callback(self, name: str, *args: Any, origin: str) -> None:
         """Invoke ``self.<name>(*args)`` if set, swallowing errors — a driver callback must never
         break the loop."""
         cb = getattr(self, name, None)

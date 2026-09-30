@@ -52,7 +52,7 @@ def _failed_turn_result(
 
 
 # Terminal status label per non-retryable reason (default names the HTTP status).
-_NONRETRYABLE_LABELS = {}
+_NONRETRYABLE_LABELS: dict[FailoverReason, str] = {}
 
 
 def nonretryable_client_error_result(

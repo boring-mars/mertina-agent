@@ -6,9 +6,12 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
+import openai
 import pytest
 
 from mertina import model_tools
+from mertina.agent import retry_utils, turn_api_error
 from mertina.agent.context_compressor import MAX_ITERATIONS_SUMMARY_REQUEST
 from mertina.run_agent import AIAgent
 from mertina.tools.registry import ToolRegistry
@@ -270,6 +273,119 @@ def test_an_interrupt_during_a_tool_ends_the_turn_and_the_next_turn_continues(
 
     assert after["final_response"] == "Picking up again."
     assert _roles(after["messages"])[-2:] == ["user", "assistant"]
+
+
+# --- retries --------------------------------------------------------------------------------------
+
+_REQUEST = httpx.Request("POST", "http://fake.test/v1/chat/completions")
+
+
+def _status_error(
+    cls: type[openai.APIStatusError], status: int, headers: dict[str, str] | None = None
+) -> openai.APIStatusError:
+    response = httpx.Response(status, request=_REQUEST, headers=headers)
+    return cls("boom", response=response, body=None)
+
+
+@pytest.fixture
+def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(retry_utils, "jittered_backoff", lambda *args, **kwargs: 0.0)
+
+
+@pytest.mark.usefixtures("no_backoff")
+def test_a_rate_limit_is_retried_and_the_retry_trace_dropped(reg: ToolRegistry) -> None:
+    agent, completions = _agent([_status_error(openai.RateLimitError, 429), _response("ok")])
+
+    result = agent.run_conversation("hi")
+
+    assert result["final_response"] == "ok"
+    assert len(completions.requests) == 2
+    assert agent._retry_status_buffer == []
+
+
+@pytest.mark.usefixtures("no_backoff")
+def test_a_connection_error_is_retried(reg: ToolRegistry) -> None:
+    agent, completions = _agent([openai.APIConnectionError(request=_REQUEST), _response("ok")])
+
+    assert agent.run_conversation("hi")["final_response"] == "ok"
+    assert len(completions.requests) == 2
+
+
+def test_retry_after_sets_the_wait(reg: ToolRegistry, monkeypatch: pytest.MonkeyPatch) -> None:
+    waits: list[float] = []
+
+    def record(agent: Any, wait_time: float, **kwargs: Any) -> None:
+        waits.append(wait_time)
+
+    monkeypatch.setattr(turn_api_error, "interruptible_backoff_sleep", record)
+    limited = _status_error(openai.RateLimitError, 429, {"retry-after": "7"})
+    agent, _ = _agent([limited, _response("ok")])
+
+    assert agent.run_conversation("hi")["final_response"] == "ok"
+    assert waits == [7.0]
+
+
+@pytest.mark.usefixtures("no_backoff")
+def test_server_errors_exhaust_the_retries(reg: ToolRegistry) -> None:
+    agent, completions = _agent([_status_error(openai.InternalServerError, 500)] * 3)
+
+    result = agent.run_conversation("hi")
+
+    assert len(completions.requests) == 3
+    assert result["failed"] is True
+    assert result["completed"] is False
+    assert result["failure_reason"] == "server_error"
+    assert result["failure_retryable"] is True
+    assert result["final_response"] == (
+        "The provider returned a server error on all 3 attempts — it looks temporarily "
+        "unavailable. Wait a minute and try again.\n\nProvider said: HTTP 500: boom"
+    )
+    assert agent._retry_status_buffer == []  # flushed on the terminal failure
+
+
+@pytest.mark.parametrize(
+    ("cls", "status", "copy"),
+    [
+        (openai.BadRequestError, 400, "rejected this request as malformed"),
+        (openai.AuthenticationError, 401, "Check the model name, the endpoint and the API key."),
+    ],
+)
+def test_a_client_error_is_not_retried(
+    reg: ToolRegistry, cls: type[openai.APIStatusError], status: int, copy: str
+) -> None:
+    agent, completions = _agent([_status_error(cls, status)], provider="acme")
+
+    result = agent.run_conversation("hi")
+
+    assert len(completions.requests) == 1
+    assert result["failed"] is True
+    assert result["failure_retryable"] is False
+    assert result["final_response"].startswith("acme ")
+    assert copy in result["final_response"]
+
+
+def test_a_stop_during_the_backoff_ends_the_turn_and_the_next_turn_continues(
+    reg: ToolRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(retry_utils, "jittered_backoff", lambda *args, **kwargs: 30.0)
+    agent, completions = _agent([_status_error(openai.InternalServerError, 500)])
+    stopper = threading.Timer(0.1, agent.interrupt)
+    stopper.start()
+
+    result = agent.run_conversation("hi")
+    stopper.join()
+
+    assert result["interrupted"] is True
+    assert result["final_response"] == (
+        "Operation interrupted: retrying API call after error (retry 1/3)."
+    )
+    assert len(completions.requests) == 1
+    assert agent._interrupt_requested is False
+
+    completions.responses = [_response("Back again.")]
+    after = agent.run_conversation("again", conversation_history=result["messages"])
+
+    assert after["final_response"] == "Back again."
 
 
 # --- reasoning_content echo-back ------------------------------------------------------------------

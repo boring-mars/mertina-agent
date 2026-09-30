@@ -150,7 +150,7 @@ def _run_api_retry_loop(agent: Any, s: _LoopState) -> dict[str, Any] | None:
         except Exception as api_error:
             _ae = _run_phase(handle_api_error, agent, s, api_error=api_error)
             if _ae.action == "return":
-                return _ae.result
+                return _ae.result  # type: ignore[no-any-return]  # _run_phase returns the verdict untyped
     return None
 
 
