@@ -19,15 +19,6 @@ from typing import Any
 _jitter_counter = 0
 _jitter_lock = threading.Lock()
 
-# Z.AI Coding Plan's GLM-5.2 endpoint often returns 429 code 1305 ("service may be
-# temporarily overloaded"). Short retries hammer the same window, so after
-# ``_ZAI_CODING_OVERLOAD_SHORT_ATTEMPTS`` normal retries the wait widens progressively;
-# the cap stays interactive-friendly (a TUI message should fail visibly in minutes).
-# The short count is shared by ``adaptive_rate_limit_backoff`` and
-# ``zai_coding_overload_retry_ceiling`` so the two cannot silently desync.
-_ZAI_CODING_OVERLOAD_LONG_BACKOFF = (30.0, 60.0, 90.0, 120.0)
-_ZAI_CODING_OVERLOAD_SHORT_ATTEMPTS = 3
-
 
 def parse_retry_after_seconds(value_or_headers: Any) -> float | None:
     """Parse a ``Retry-After`` value (numeric / HTTP-date) or a headers mapping (both casings
@@ -143,58 +134,3 @@ def jittered_backoff(
     # Seed from time + counter so coarse clocks still decorrelate.
     seed = (time.time_ns() ^ (tick * 0x9E3779B9)) & 0xFFFFFFFF
     return delay + random.Random(seed).uniform(0, jitter_ratio * delay)
-
-
-def _error_text(error: Any) -> str:
-    """Best-effort flattened provider error text for retry classification."""
-    parts = [
-        error,
-        getattr(error, "message", None),
-        getattr(error, "body", None),
-        getattr(error, "response", None),
-    ]
-    return " ".join(str(part) for part in parts if part is not None).lower()
-
-
-def is_zai_coding_overload_error(*, base_url: str | None, model: str | None, error: Any) -> bool:
-    """True only for the narrow Z.AI Coding Plan overload shape (429 + code
-    1305 / "temporarily overloaded"), so ordinary quota 429s still fail fast."""
-    text = _error_text(error)
-    return (
-        getattr(error, "status_code", None) == 429
-        and "api.z.ai/api/coding/paas/v4" in (base_url or "").lower()
-        and "glm-5.2" in (model or "").lower()
-        and ("1305" in text or "temporarily overloaded" in text)
-    )
-
-
-def adaptive_rate_limit_backoff(
-    attempt: int,
-    *,
-    base_url: str | None,
-    model: str | None,
-    error: Any,
-    default_wait: float,
-    short_attempts: int = _ZAI_CODING_OVERLOAD_SHORT_ATTEMPTS,
-) -> tuple[float, str | None]:
-    """``(wait_seconds, reason_label)``: ``default_wait`` for most providers; Z.AI Coding GLM-5.2
-    overloads keep ``short_attempts`` short retries, then 30→60→90→120s with light jitter.
-    ``attempt`` is 1-based."""
-    if not is_zai_coding_overload_error(base_url=base_url, model=model, error=error):
-        return default_wait, None
-    if attempt <= short_attempts:
-        return default_wait, "zai_coding_overload_short"
-    idx = min(attempt - short_attempts - 1, len(_ZAI_CODING_OVERLOAD_LONG_BACKOFF) - 1)
-    base_delay = _ZAI_CODING_OVERLOAD_LONG_BACKOFF[idx]
-    return jittered_backoff(
-        1, base_delay=base_delay, max_delay=base_delay, jitter_ratio=0.2
-    ), "zai_coding_overload_long"
-
-
-def zai_coding_overload_retry_ceiling(
-    short_attempts: int = _ZAI_CODING_OVERLOAD_SHORT_ATTEMPTS,
-) -> int:
-    """Retry-loop ceiling for the full Z.AI overload schedule: one past the last long entry,
-    because the loop gives up when ``retry_count >= ceiling`` BEFORE computing the attempt's
-    backoff (the default ``api_max_retries`` of 3 equals ``short_attempts``)."""
-    return short_attempts + len(_ZAI_CODING_OVERLOAD_LONG_BACKOFF) + 1
