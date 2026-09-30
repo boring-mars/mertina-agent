@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 import sys  # noqa: E402  # upstream order
 from typing import Any  # noqa: E402  # upstream order
 
+from mertina.agent.api_error_summary import (  # noqa: E402  # upstream order
+    ApiErrorSummaryMixin,
+)
 from mertina.agent.client_lifecycle import ClientLifecycleMixin  # noqa: E402  # upstream order
 from mertina.agent.interrupt_control import InterruptControlMixin  # noqa: E402  # upstream order
 from mertina.agent.lazy_forward import forward as _forward  # noqa: E402  # upstream order
@@ -26,6 +29,7 @@ from mertina.agent.vision_message_prep import VisionMessagePrepMixin  # noqa: E4
 class AIAgent(
     ClientLifecycleMixin,
     StatusOutputMixin,
+    ApiErrorSummaryMixin,
     InterruptControlMixin,
     TurnFacadeMixin,
     VisionMessagePrepMixin,

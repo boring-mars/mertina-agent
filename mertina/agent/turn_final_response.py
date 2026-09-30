@@ -45,6 +45,11 @@ def finish_text_response(
 
     final_response = assistant_message.content or ""
 
+    # Surface the one-shot fallback switch notice before dropping the retry buffer so a
+    # provider/model switch stays visible on success.
+    agent._emit_pending_fallback_notice()
+    agent._clear_status_buffer()
+
     final_response = agent._strip_think_blocks(final_response).strip()
 
     final_msg = agent._build_assistant_message(assistant_message, finish_reason)
