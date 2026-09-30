@@ -22,6 +22,9 @@ dependencies = [
     "openai==2.24.0",
     # run_agent.main(), imported only under __main__; Hermes pins the same version.
     "fire==0.7.1",
+    # Windows ships no IANA tz database, so zoneinfo cannot resolve MERTINA_TIMEZONE there
+    # without this data package. No-op elsewhere; Hermes pins the same version.
+    "tzdata==2025.3; sys_platform == 'win32'",
 ]
 
 [dependency-groups]
