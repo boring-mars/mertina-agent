@@ -1,7 +1,7 @@
 [project]
 name = "mertina-agent"
 # Maintained by the release tooling. Do not edit by hand in feature PRs.
-version = "0.0.0"
+version = "0.1.0"
 description = "A tool-using agent loop for OpenAI-compatible models"
 readme = "README.md"
 license = "MIT"
