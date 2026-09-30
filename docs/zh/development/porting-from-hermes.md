@@ -112,6 +112,10 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 | `chat_completion_helpers._chat_summary_attempt`：`response = _managed_summary_call(agent, api_request_id, summary_kwargs, lambda request: summary_client.chat.completions.create(...), ...)`，经 Relay 发出总结请求 | `response = summary_client.chat.completions.create(**summary_kwargs)` | Relay 整层不在 v0.1 内，与 `perform_api_call` 同理 |
 | `prompt_builder.DEFAULT_AGENT_IDENTITY`：首句 `"You are Hermes Agent, built by Nous Research. Be direct: ..."`（经规则 2 第 5 类后为 `"You are Mertina Agent, built by Nous Research. ..."`） | `"You are Mertina Agent. Be direct: ..."`，其余文字不变 | **行为改变：** 删掉上游的作者署名，模型不再声称自己由 Nous Research 构建 |
 | `system_prompt._identity_parts`：`return ([_soul_content], True) if _soul_content else ([DEFAULT_AGENT_IDENTITY], False)`，有 SOUL.md 时用它作身份 | `return ([DEFAULT_AGENT_IDENTITY], False)` | SOUL.md 属于 P1 的助手人设，v0.1 只用默认身份。这一行是从表达式中间删掉 SOUL.md 分支，`port_check` 把它报为 `rewrite` |
+| `turn_failure_copy.provider_label_for`：`return provider_label(str(provider or ""))`，从 `hermes_cli.models` 的服务商注册表取显示名 | `return str(provider or "") or "The provider"` | **行为改变：** 服务商注册表（`CANONICAL_PROVIDERS` 与别名表）不在 v0.1 内；文案直接用调用方配置的 provider，没有时用 "The provider" |
+| `turn_failure_copy._NEXT_STEPS_RETRY`：`"Wait a minute and send /retry, or switch models with /model."` | `"Wait a minute and try again."` | **行为改变：** 用户可见文案。v0.1 没有 `/retry`、`/model` |
+| `turn_failure_copy._NONRETRYABLE_COPY[format_error]`：`` "... Start a clean session with /new or switch models with /model; if it keeps happening, run `mertina doctor`." `` | `"... Check the model name and the request settings, then try again."`，前半句不变 | **行为改变：** 用户可见文案。v0.1 没有 `/new`、`/model`、`mertina doctor` |
+| `turn_failure_copy._NONRETRYABLE_DEFAULT_COPY`：`` "... Pick another model with /model, or check the details in `{home}/logs/agent.log`." `` | `"... Check the model name, the endpoint and the API key."`，前半句不变 | **行为改变：** 用户可见文案。v0.1 没有 `/model`，也不写 Mertina home 下的 `agent.log`；鉴权分支删除后 401/403 也走这条，所以点明 API key |
 
 ## 与上游对照
 
