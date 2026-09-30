@@ -109,6 +109,8 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 | `turn_api_call.perform_api_call`：`response = run_llm_execution_middleware(api_kwargs, _perform_api_call, ...)`，内层经流式调用或 `relay_llm.execute(..., agent._interruptible_api_call, ...)` 发出请求 | `response = agent._interruptible_api_call(api_kwargs)` | LLM 执行中间件和 Relay 整层不在 v0.1 内，流式输出在 v0.1.1；直接发一次非流式请求 |
 | `turn_context.build_api_messages`：`for idx, msg in enumerate(canonical_messages)`，遍历经 `canonicalize_replay_history` 规范化过的历史前缀 | `for msg in messages:` | 回放规范化服务于会话恢复和 prompt 缓存，v0.1 没有这两项；`idx` 只给已删除的空消息填充用 |
 | `chat_completion_helpers._chat_summary_attempt`：`response = _managed_summary_call(agent, api_request_id, summary_kwargs, lambda request: summary_client.chat.completions.create(...), ...)`，经 Relay 发出总结请求 | `response = summary_client.chat.completions.create(**summary_kwargs)` | Relay 整层不在 v0.1 内，与 `perform_api_call` 同理 |
+| `prompt_builder.DEFAULT_AGENT_IDENTITY`：首句 `"You are Hermes Agent, built by Nous Research. Be direct: ..."` | `"You are Mertina Agent. Be direct: ..."`，其余文字不变 | **行为改变：** 上游文案让模型自称 Nous Research 的 Hermes Agent |
+| `system_prompt._identity_parts`：`return ([_soul_content], True) if _soul_content else ([DEFAULT_AGENT_IDENTITY], False)`，有 SOUL.md 时用它作身份 | `return ([DEFAULT_AGENT_IDENTITY], False)` | SOUL.md 属于 P1 的助手人设，v0.1 只用默认身份。这一行是从表达式中间删掉 SOUL.md 分支，`port_check` 把它报为 `rewrite` |
 
 ## 与上游对照
 
