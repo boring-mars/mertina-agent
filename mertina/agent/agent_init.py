@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import suppress
+from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse, urlunparse
 
@@ -107,12 +108,17 @@ def _init_session_state(
     agent: Any,
     session_id: str | None,
 ) -> None:
+    agent.session_start = datetime.now()
     agent.session_id = session_id
     _set_defaults(agent, _SESSION_STATE)
 
 
 def _apply_agent_section(agent: Any, _agent_cfg: dict[str, Any]) -> None:
     _agent_section = _cfg_dict(_agent_cfg, "agent")
+    # Both: "auto" (model-list match), true, false, or list of model substrings; independent
+    # of each other (gates in agent/system_prompt.py).
+    agent._tool_use_enforcement = _agent_section.get("tool_use_enforcement", "auto")
+    agent._execution_guidance = _agent_section.get("execution_guidance", "auto")
 
     # App-level API retry count (wraps each model API call). Default 3; 1 = single attempt.
     try:
@@ -146,6 +152,8 @@ _PASSTHROUGH_PARAMS = (
     "max_iterations",
     "verbose_logging",
     "quiet_mode",
+    "platform",
+    "pass_session_id",
     # Model response configuration (None = provider/model default)
     "max_tokens",
 )
@@ -163,6 +171,8 @@ def init_agent(
     log_prefix: str = "",
     session_id: str | None = None,
     max_tokens: int | None = None,
+    platform: str | None = None,
+    pass_session_id: bool = False,
 ) -> None:
     """Initialize the AI Agent (body of :meth:`AIAgent.__init__`).
 

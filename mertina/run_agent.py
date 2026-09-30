@@ -53,6 +53,8 @@ class AIAgent(
         log_prefix: str = "",
         session_id: str | None = None,
         max_tokens: int | None = None,
+        platform: str | None = None,
+        pass_session_id: bool = False,
     ) -> None:
         """Forwarder — see ``agent.agent_init.init_agent`` (same keyword parameters)."""
         init_kwargs = {k: v for k, v in locals().items() if k not in ("self",)}
