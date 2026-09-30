@@ -38,8 +38,6 @@ class ApiErrorVerdict:
 
     action: str
     messages: Any
-    conversation_history: Any
-    approx_tokens: Any
     retry_count: Any
     max_retries: Any
     result: dict[str, Any] | None = None
@@ -51,9 +49,6 @@ def handle_api_error(
     api_error: Any,
     messages: Any,
     api_messages: Any,
-    api_kwargs: Any,
-    conversation_history: Any,
-    approx_tokens: Any,
     retry_count: Any,
     max_retries: Any,
     api_call_count: Any,
@@ -66,8 +61,6 @@ def handle_api_error(
         return ApiErrorVerdict(
             action=action,
             messages=messages,
-            conversation_history=conversation_history,
-            approx_tokens=approx_tokens,
             retry_count=retry_count,
             max_retries=max_retries,
             result=result,
@@ -79,10 +72,6 @@ def handle_api_error(
         api_error,
         provider=getattr(agent, "provider", "") or "",
         model=getattr(agent, "model", "") or "",
-        approx_tokens=approx_tokens,
-        num_messages=len(api_messages) if api_messages else 0,
-        base_url=str(getattr(agent, "base_url", "") or ""),
-        api_key=getattr(agent, "api_key", None),
     )
     logger.debug(
         "Error classified: reason=%s status=%s retryable=%s compress=%s rotate=%s fallback=%s",
@@ -96,7 +85,7 @@ def handle_api_error(
     retry_count += 1
     elapsed_time = time.time() - api_start_time
 
-    error_type, error_msg, _provider, _base, _model = log_api_error_attempt(
+    error_type, error_msg, _provider, _base, _model = log_api_error_attempt(  # noqa: RUF059  # upstream's unpacking
         agent,
         api_error,
         retry_count=retry_count,
@@ -104,7 +93,6 @@ def handle_api_error(
         status_code=status_code,
         elapsed_time=elapsed_time,
         api_messages=api_messages,
-        approx_tokens=approx_tokens,
         retryable=bool(classified.retryable),
     )
 
@@ -114,7 +102,6 @@ def handle_api_error(
             abort_turn_on_interrupt(
                 agent,
                 messages,
-                conversation_history,
                 api_call_count,
                 abort_message="Interrupt detected during error handling, aborting retries.",
                 interrupt_text=f"Operation interrupted: handling API error ({error_type}: {agent._clean_error_message(str(api_error))}).",  # noqa: E501  # upstream's message
@@ -139,16 +126,12 @@ def handle_api_error(
         api_error=api_error,
         classified=classified,
         status_code=status_code,
-        error_msg=error_msg,
         is_rate_limited=is_rate_limited,
         _provider=_provider,
         _base=_base,
         _model=_model,
         messages=messages,
         api_messages=api_messages,
-        api_kwargs=api_kwargs,
-        conversation_history=conversation_history,
-        approx_tokens=approx_tokens,
         retry_count=retry_count,
         max_retries=max_retries,
         api_call_count=api_call_count,
@@ -189,16 +172,12 @@ def settle_unrecovered_error(
     api_error: Any,
     classified: Any,
     status_code: Any,
-    error_msg: Any,
     is_rate_limited: Any,
     _provider: Any,
     _base: Any,
     _model: Any,
     messages: Any,
     api_messages: Any,
-    api_kwargs: Any,
-    conversation_history: Any,
-    approx_tokens: Any,
     retry_count: Any,
     max_retries: Any,
     api_call_count: Any,
@@ -231,12 +210,8 @@ def settle_unrecovered_error(
                 api_error,
                 classified,
                 status_code=status_code,
-                api_kwargs=api_kwargs,
-                api_messages=api_messages,
                 messages=messages,
-                conversation_history=conversation_history,
                 api_call_count=api_call_count,
-                approx_tokens=approx_tokens,
                 provider=_provider,
                 base_url=_base,
                 model=_model,
@@ -252,13 +227,9 @@ def settle_unrecovered_error(
                 classified,
                 max_retries=max_retries,
                 is_rate_limited=is_rate_limited,
-                error_msg=error_msg,
-                api_kwargs=api_kwargs,
                 api_messages=api_messages,
                 messages=messages,
-                conversation_history=conversation_history,
                 api_call_count=api_call_count,
-                approx_tokens=approx_tokens,
                 provider=_provider,
                 base_url=_base,
                 model=_model,
@@ -271,18 +242,14 @@ def settle_unrecovered_error(
         retry_count=retry_count,
         max_retries=max_retries,
         is_rate_limited=is_rate_limited,
-        base_url=_base,
-        model=_model,
     )
     _interrupted = interruptible_backoff_sleep(
         agent,
         wait_time,
         messages=messages,
-        conversation_history=conversation_history,
         api_call_count=api_call_count,
         abort_message="Interrupt detected during retry wait, aborting.",
         interrupt_text=f"Operation interrupted: retrying API call after error (retry {retry_count}/{max_retries}).",  # noqa: E501  # upstream's message
-        activity_label=f"error retry backoff ({retry_count}/{max_retries})",
     )
     if _interrupted is not None:
         return _verdict("return", _interrupted)

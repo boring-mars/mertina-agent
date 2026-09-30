@@ -82,7 +82,6 @@ class _LoopState:
     before any later phase reads them, exactly as the former inline locals were."""
 
     # Fixed for the turn.
-    conversation_history: Any
     effective_task_id: Any
     # Turn-scoped state (rebound by the phases).
     messages: Any
@@ -95,7 +94,6 @@ class _LoopState:
     # Per-iteration slots.
     api_messages: Any = None
     tools_for_api: Any = None
-    approx_tokens: Any = None
     api_start_time: Any = None
     retry_count: int = 0
     max_retries: Any = None
@@ -109,7 +107,6 @@ class _LoopState:
 # _LoopState fields seeded from TurnContext (same name minus the leading underscore).
 _CTX_FIELDS = frozenset(
     {
-        "conversation_history",
         "effective_task_id",
         "messages",
         "active_system_prompt",
@@ -139,9 +136,10 @@ def _run_phase(fn: Callable[..., Any], agent: Any, state: _LoopState, **extra: A
 
 
 def _run_api_retry_loop(agent: Any, s: _LoopState) -> dict[str, Any] | None:
-    """One API call (build → call → check).
+    """One API call (build → call → check, error handler).
 
-    Returns None once the loop is left."""
+    Returns a turn result dict when the error handler ends the turn, else None once the loop is
+    left (success, or a retry after the backoff)."""
     while s.retry_count < s.max_retries:
         try:
             _run_phase(build_api_request, agent, s)
@@ -153,8 +151,6 @@ def _run_api_retry_loop(agent: Any, s: _LoopState) -> dict[str, Any] | None:
             _ae = _run_phase(handle_api_error, agent, s, api_error=api_error)
             if _ae.action == "return":
                 return _ae.result
-            if _ae.action == "break":
-                return None
     return None
 
 
