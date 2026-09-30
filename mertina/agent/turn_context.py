@@ -25,6 +25,7 @@ class TurnContext:
     """Values produced by the turn prologue and consumed by the turn loop."""
 
     messages: list[dict[str, Any]]  # working list for this turn (loop appends to it)
+    conversation_history: list[dict[str, Any]] | None  # None after rotation
     active_system_prompt: str | None
     effective_task_id: str
 
@@ -90,6 +91,7 @@ def build_turn_context(
 
     return TurnContext(
         messages=messages,
+        conversation_history=conversation_history,
         active_system_prompt=active_system_prompt,
         effective_task_id=effective_task_id,
     )

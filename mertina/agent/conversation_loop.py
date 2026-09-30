@@ -22,6 +22,7 @@ from mertina.agent.message_sanitization import _sanitize_surrogates
 from mertina.agent.turn_api_call import (
     perform_api_call,
 )
+from mertina.agent.turn_api_error import handle_api_error
 from mertina.agent.turn_api_request import build_api_request
 from mertina.agent.turn_context import build_turn_context
 from mertina.agent.turn_final_response import finish_text_response
@@ -81,6 +82,7 @@ class _LoopState:
     before any later phase reads them, exactly as the former inline locals were."""
 
     # Fixed for the turn.
+    conversation_history: Any
     effective_task_id: Any
     # Turn-scoped state (rebound by the phases).
     messages: Any
@@ -93,6 +95,7 @@ class _LoopState:
     # Per-iteration slots.
     api_messages: Any = None
     tools_for_api: Any = None
+    approx_tokens: Any = None
     api_start_time: Any = None
     retry_count: int = 0
     max_retries: Any = None
@@ -106,6 +109,7 @@ class _LoopState:
 # _LoopState fields seeded from TurnContext (same name minus the leading underscore).
 _CTX_FIELDS = frozenset(
     {
+        "conversation_history",
         "effective_task_id",
         "messages",
         "active_system_prompt",
@@ -139,11 +143,18 @@ def _run_api_retry_loop(agent: Any, s: _LoopState) -> dict[str, Any] | None:
 
     Returns None once the loop is left."""
     while s.retry_count < s.max_retries:
-        _run_phase(build_api_request, agent, s)
-        _run_phase(perform_api_call, agent, s)
-        _rc = _run_phase(check_api_response, agent, s)
-        if _rc.action == "break":
-            return None
+        try:
+            _run_phase(build_api_request, agent, s)
+            _run_phase(perform_api_call, agent, s)
+            _rc = _run_phase(check_api_response, agent, s)
+            if _rc.action == "break":
+                return None
+        except Exception as api_error:
+            _ae = _run_phase(handle_api_error, agent, s, api_error=api_error)
+            if _ae.action == "return":
+                return _ae.result
+            if _ae.action == "break":
+                return None
     return None
 
 
@@ -183,7 +194,9 @@ def _run_conversation_turn(
         s.api_start_time, s.retry_count, s.max_retries = time.time(), 0, agent._api_max_retries
         s.finish_reason, s.response, s.api_kwargs = "stop", None, None
 
-        _run_api_retry_loop(agent, s)
+        early_result = _run_api_retry_loop(agent, s)
+        if early_result is not None:
+            return early_result
 
         try:
             _run_phase(normalize_model_response, agent, s)
