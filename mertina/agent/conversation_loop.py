@@ -20,6 +20,7 @@ from mertina.agent.message_sanitization import _sanitize_surrogates
 # Phase helpers of the turn loop, bound at import so a source-tree swap cannot load a
 # skewed phase mid-turn.
 from mertina.agent.turn_api_call import (
+    handle_api_interrupt,
     perform_api_call,
 )
 from mertina.agent.turn_api_error import handle_api_error
@@ -29,15 +30,21 @@ from mertina.agent.turn_final_response import finish_text_response
 from mertina.agent.turn_finalizer import finalize_turn
 from mertina.agent.turn_iteration_prep import (
     announce_api_call,
+    apply_retry_restarts,
     begin_iteration,
 )
 from mertina.agent.turn_loop_errors import handle_outer_loop_error
 from mertina.agent.turn_request_assembly import assemble_api_request
 from mertina.agent.turn_response_check import check_api_response
 from mertina.agent.turn_response_intake import normalize_model_response
+from mertina.agent.turn_retry_state import TurnRetryState
 from mertina.agent.turn_tool_round import run_tool_round
 
 logger = logging.getLogger(__name__)
+
+
+# Stable prefix ACP/TUI match on to treat the text as cancellation metadata, not assistant prose.
+INTERRUPT_WAITING_FOR_MODEL_PREFIX = "Operation interrupted: waiting for model response ("
 
 
 def _ra() -> ModuleType:
@@ -82,21 +89,33 @@ class _LoopState:
     before any later phase reads them, exactly as the former inline locals were."""
 
     # Fixed for the turn.
+    user_message: Any
+    conversation_history: Any
     effective_task_id: Any
     # Turn-scoped state (rebound by the phases).
     messages: Any
     active_system_prompt: Any
+    current_turn_user_idx: Any
+    _preflight_compression_blocked: Any
     api_call_count: int = 0
     final_response: Any = None
     interrupted: bool = False
     failed: bool = False
+    length_continue_retries: int = 0
+    # Per-turn backstop for the refunding restarts (redirect / rebuilt-for-fallback).
+    # Unlike ``retry_count`` (rebound to 0 each iteration) this accumulates for the whole
+    # turn so a runaway interrupt/redirect that keeps re-arming a restart flag cannot
+    # refund the iteration budget forever and hold the turn lease indefinitely.
+    restart_count: int = 0
     _turn_exit_reason: str = "unknown"  # diagnostic: why the loop ended
     # Per-iteration slots.
     api_messages: Any = None
     tools_for_api: Any = None
+    thinking_spinner: Any = None
     api_start_time: Any = None
     retry_count: int = 0
     max_retries: Any = None
+    _retry: Any = None
     finish_reason: str = "stop"
     response: Any = None
     api_kwargs: Any = None  # None until built
@@ -107,9 +126,13 @@ class _LoopState:
 # _LoopState fields seeded from TurnContext (same name minus the leading underscore).
 _CTX_FIELDS = frozenset(
     {
+        "user_message",
+        "conversation_history",
         "effective_task_id",
         "messages",
         "active_system_prompt",
+        "current_turn_user_idx",
+        "_preflight_compression_blocked",
     }
 )
 # Keyword names each phase helper takes (minus ``agent``), cached per function object.
@@ -147,6 +170,9 @@ def _run_api_retry_loop(agent: Any, s: _LoopState) -> dict[str, Any] | None:
             _rc = _run_phase(check_api_response, agent, s)
             if _rc.action == "break":
                 return None
+        except InterruptedError:
+            if _run_phase(handle_api_interrupt, agent, s).action == "break":
+                return None
         except Exception as api_error:
             _ae = _run_phase(handle_api_error, agent, s, api_error=api_error)
             if _ae.action == "return":
@@ -171,6 +197,7 @@ def _run_conversation_turn(
         task_id,
         restore_or_build_system_prompt=_restore_or_build_system_prompt,
         sanitize_surrogates=_sanitize_surrogates,
+        ra=_ra,
     )
 
     s = _LoopState(
@@ -188,11 +215,17 @@ def _run_conversation_turn(
         _run_phase(announce_api_call, agent, s)
 
         s.api_start_time, s.retry_count, s.max_retries = time.time(), 0, agent._api_max_retries
-        s.finish_reason, s.response, s.api_kwargs = "stop", None, None
+        s._retry, s.finish_reason, s.response, s.api_kwargs = TurnRetryState(), "stop", None, None
 
         early_result = _run_api_retry_loop(agent, s)
         if early_result is not None:
             return early_result
+
+        _rs = _run_phase(apply_retry_restarts, agent, s)
+        if _rs.action == "break":
+            break
+        if _rs.action == "continue":
+            continue
 
         try:
             _run_phase(normalize_model_response, agent, s)

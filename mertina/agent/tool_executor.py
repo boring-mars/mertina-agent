@@ -67,6 +67,13 @@ def _max_workers_for_tool_batch(runnable_calls: list[Any]) -> int:
     return min(len(runnable_calls), max_workers)
 
 
+def _ra():
+    """Lazy reference to ``run_agent`` so patches like ``run_agent._set_interrupt`` work."""
+    from mertina import run_agent
+
+    return run_agent
+
+
 @dataclass
 class _ToolCallRef:
     """Identity of one tool call as every result message sees it: the name and args, the
@@ -149,6 +156,33 @@ class _ManagedToolResult:
     middleware_trace: list[dict[str, Any]] | None
     blocked: bool
     dispatched: bool
+
+
+@contextlib.contextmanager
+def _registered_tool_worker(agent):
+    """Track this worker tid for interrupt fan-out (``AIAgent.interrupt()``); on ANY exit
+    (incl. BaseException) discard it and clear its interrupt bit so a recycled tid starts clean."""
+    tid = threading.current_thread().ident
+    with agent._tool_worker_threads_lock:
+        agent._tool_worker_threads.add(tid)
+    try:
+        yield tid
+    finally:
+        with agent._tool_worker_threads_lock:
+            agent._tool_worker_threads.discard(tid)
+        with contextlib.suppress(Exception):
+            _ra()._set_interrupt(False, tid)
+
+
+_NO_REASON = object()
+
+
+def _interrupt_worker_tids(agent, tids, *, reason=_NO_REASON) -> None:
+    """Raise the interrupt bit on each worker tid (best-effort, via ``run_agent``)."""
+    kwargs = {} if reason is _NO_REASON else {"reason": reason}
+    for tid in tids:
+        with contextlib.suppress(Exception):
+            _ra()._set_interrupt(True, tid, **kwargs)
 
 
 def _dispatch_authorized_once(
@@ -349,10 +383,16 @@ class _ConcurrentBatch:
 
     def run_worker(self, index: int) -> None:
         """Worker function executed in a thread."""
-        pc = self.parsed_calls[index]
-        outcome = self._dispatch_worker(index, pc.ref(self.effective_task_id))
-        if outcome is not None:
-            self.results[index] = outcome
+        agent, pc = self.agent, self.parsed_calls[index]
+        with _registered_tool_worker(agent) as _worker_tid:
+            # An interrupt may have fanned out before our registration; apply it to our tid.
+            if agent._interrupt_requested:
+                _interrupt_worker_tids(
+                    agent, [_worker_tid], reason=getattr(agent, "_tool_interrupt_reason", None)
+                )
+            outcome = self._dispatch_worker(index, pc.ref(self.effective_task_id))
+            if outcome is not None:
+                self.results[index] = outcome
 
     def submit_all(
         self, executor: concurrent.futures.Executor, runnable: list[int]
@@ -381,8 +421,8 @@ class _ConcurrentBatch:
                 return False
 
             if agent._interrupt_requested:
-                # A running tool is not interrupted mid-call and runs to completion;
-                # cancel unstarted futures so we don't block on them.
+                # Tools without interrupt checks (web_search, read_file) run to
+                # completion; cancel unstarted futures so we don't block on them.
                 agent._vprint(
                     f"{agent.log_prefix}⚡ Interrupt: cancelling {len(not_done)} pending concurrent tool(s)",  # noqa: E501  # upstream's message
                     force=True,
@@ -391,7 +431,7 @@ class _ConcurrentBatch:
                 continue
             for f in not_done:
                 f.cancel()
-            # Give running tools a moment to finish before the pool is left behind.
+            # Give running tools a moment to notice the per-thread interrupt and exit gracefully.
             concurrent.futures.wait(not_done, timeout=3.0)
             return True
 

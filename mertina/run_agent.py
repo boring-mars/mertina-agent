@@ -24,6 +24,9 @@ from mertina.agent.reasoning_params import ReasoningParamsMixin  # noqa: E402  #
 from mertina.agent.status_output import StatusOutputMixin  # noqa: E402  # upstream order
 from mertina.agent.turn_facade import TurnFacadeMixin  # noqa: E402  # upstream order
 from mertina.agent.vision_message_prep import VisionMessagePrepMixin  # noqa: E402  # upstream order
+from mertina.tools.interrupt import (  # noqa: E402  # upstream order
+    set_interrupt as _set_interrupt,  # noqa: F401  # turn code calls it through _ra()
+)
 
 
 class AIAgent(

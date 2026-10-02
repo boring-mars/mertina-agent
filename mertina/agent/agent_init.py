@@ -10,6 +10,7 @@ load-bearing: later phases read attributes earlier ones set.
 from __future__ import annotations
 
 import sys
+import threading
 from contextlib import suppress
 from datetime import datetime
 from typing import Any
@@ -43,8 +44,28 @@ def _set_defaults(agent: Any, table: dict[str, Any]) -> None:
 
 # Control-flow state (interrupts).
 _CONTROL_STATE: dict[str, Any] = {
+    # Interrupts. Hard cancellation is separate from redirect/message state; the Event makes
+    # the cause atomic for auxiliary stream pollers.
     "_interrupt_requested": False,
     "_interrupt_message": None,  # optional message that triggered the interrupt
+    "_hard_interrupt_requested": threading.Event,
+    "_execution_thread_id": None,  # set at run_conversation() start
+    "_interrupt_thread_signal_pending": False,
+    # /steer: the drain hook appends the note to the last tool result after the current
+    # batch — no interrupt, no new user turn (role alternation preserved).
+    "_pending_steer": None,
+    "_pending_steer_lock": threading.Lock,
+    # Active-turn redirect: keep the valid turn prefix, cancel only the in-flight request,
+    # rebuild the tail with the correction. Drained at a role-safe boundary.
+    "_pending_redirect": None,
+    "_pending_redirect_lock": threading.Lock,
+    # Concurrent-tool worker tids: `_set_interrupt` on `_execution_thread_id` alone doesn't
+    # reach ThreadPoolExecutor workers, so interrupt()/clear_interrupt() fan out to these.
+    "_tool_worker_threads": set,
+    "_tool_worker_threads_lock": threading.Lock,
+    # Subagent delegation: depth (0 = top-level) and running children (interrupt propagation).
+    "_active_children": list,
+    "_active_children_lock": threading.Lock,
 }
 
 # Session state.

@@ -9,6 +9,7 @@ reads back. ``build_api_messages`` builds the wire copy for one API call."""
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -53,6 +54,21 @@ def _stage_turn_user_message(
     return user_msg
 
 
+def _bind_interrupt_scope(agent: Any, ra) -> None:
+    """Record the execution thread so interrupt()/clear_interrupt() scope the tool-level
+    signal to THIS agent's thread; clear stale state, preserving a pending interrupt."""
+    agent._execution_thread_id = threading.current_thread().ident
+    ra()._set_interrupt(False, agent._execution_thread_id)
+    if agent._interrupt_requested:
+        ra()._set_interrupt(
+            True, agent._execution_thread_id, reason=getattr(agent, "_tool_interrupt_reason", None)
+        )
+    else:
+        agent._interrupt_message = None
+        agent._tool_interrupt_reason = None
+    agent._interrupt_thread_signal_pending = False
+
+
 def build_turn_context(
     agent: Any,
     user_message: Any,
@@ -62,6 +78,7 @@ def build_turn_context(
     *,
     restore_or_build_system_prompt: Callable[[Any, str | None, list[dict[str, Any]] | None], None],
     sanitize_surrogates: Callable[[str], str],
+    ra,
 ) -> TurnContext:
     """Run the once-per-turn setup and return the loop's input context.
 
@@ -87,6 +104,8 @@ def build_turn_context(
     if agent._cached_system_prompt is None:
         restore_or_build_system_prompt(agent, system_message, conversation_history)
     active_system_prompt = agent._cached_system_prompt
+
+    _bind_interrupt_scope(agent, ra)
 
     return TurnContext(
         messages=messages,
