@@ -335,23 +335,14 @@ def _iter_pool_sockets(client: Any):
         return
     if not pools:
         return
-    from mertina.agent.process_bootstrap import MERTINA_TRANSPORT_OWNER_EXT
-
     seen: set[int] = set()
     for pool, owner in pools:
         # ``is None``, not falsiness: an empty ``_connections`` must still let us walk in-flight ``_requests``.
         raw_conns = getattr(pool, "_connections", None)
         if raw_conns is None:
             raw_conns = getattr(pool, "_pool", None)
-        # A process-shared pool carries other clients' idle + in-flight connections: only this
-        # client's own in-flight requests (stamped by ``_SharedTransport.handle_request``) may be
-        # shut down.
         connections = [] if owner is not None else list(raw_conns or [])
         for pool_req in list(getattr(pool, "_requests", None) or []):
-            if owner is not None:
-                exts = getattr(getattr(pool_req, "request", None), "extensions", None) or {}
-                if exts.get(MERTINA_TRANSPORT_OWNER_EXT) != owner:
-                    continue
             conn = getattr(pool_req, "connection", None)
             if conn is not None:
                 connections.append(conn)

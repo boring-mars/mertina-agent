@@ -60,13 +60,9 @@ def _bind_interrupt_scope(agent: Any, ra) -> None:
     agent._execution_thread_id = threading.current_thread().ident
     ra()._set_interrupt(False, agent._execution_thread_id)
     if agent._interrupt_requested:
-        ra()._set_interrupt(
-            True, agent._execution_thread_id, reason=getattr(agent, "_tool_interrupt_reason", None)
-        )
+        ra()._set_interrupt(True, agent._execution_thread_id)
     else:
         agent._interrupt_message = None
-        agent._tool_interrupt_reason = None
-    agent._interrupt_thread_signal_pending = False
 
 
 def build_turn_context(

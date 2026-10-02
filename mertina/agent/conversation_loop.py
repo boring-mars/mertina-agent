@@ -37,7 +37,6 @@ from mertina.agent.turn_loop_errors import handle_outer_loop_error
 from mertina.agent.turn_request_assembly import assemble_api_request
 from mertina.agent.turn_response_check import check_api_response
 from mertina.agent.turn_response_intake import normalize_model_response
-from mertina.agent.turn_retry_state import TurnRetryState
 from mertina.agent.turn_tool_round import run_tool_round
 
 logger = logging.getLogger(__name__)
@@ -89,33 +88,21 @@ class _LoopState:
     before any later phase reads them, exactly as the former inline locals were."""
 
     # Fixed for the turn.
-    user_message: Any
-    conversation_history: Any
     effective_task_id: Any
     # Turn-scoped state (rebound by the phases).
     messages: Any
     active_system_prompt: Any
-    current_turn_user_idx: Any
-    _preflight_compression_blocked: Any
     api_call_count: int = 0
     final_response: Any = None
     interrupted: bool = False
     failed: bool = False
-    length_continue_retries: int = 0
-    # Per-turn backstop for the refunding restarts (redirect / rebuilt-for-fallback).
-    # Unlike ``retry_count`` (rebound to 0 each iteration) this accumulates for the whole
-    # turn so a runaway interrupt/redirect that keeps re-arming a restart flag cannot
-    # refund the iteration budget forever and hold the turn lease indefinitely.
-    restart_count: int = 0
     _turn_exit_reason: str = "unknown"  # diagnostic: why the loop ended
     # Per-iteration slots.
     api_messages: Any = None
     tools_for_api: Any = None
-    thinking_spinner: Any = None
     api_start_time: Any = None
     retry_count: int = 0
     max_retries: Any = None
-    _retry: Any = None
     finish_reason: str = "stop"
     response: Any = None
     api_kwargs: Any = None  # None until built
@@ -126,13 +113,9 @@ class _LoopState:
 # _LoopState fields seeded from TurnContext (same name minus the leading underscore).
 _CTX_FIELDS = frozenset(
     {
-        "user_message",
-        "conversation_history",
         "effective_task_id",
         "messages",
         "active_system_prompt",
-        "current_turn_user_idx",
-        "_preflight_compression_blocked",
     }
 )
 # Keyword names each phase helper takes (minus ``agent``), cached per function object.
@@ -215,7 +198,7 @@ def _run_conversation_turn(
         _run_phase(announce_api_call, agent, s)
 
         s.api_start_time, s.retry_count, s.max_retries = time.time(), 0, agent._api_max_retries
-        s._retry, s.finish_reason, s.response, s.api_kwargs = TurnRetryState(), "stop", None, None
+        s.finish_reason, s.response, s.api_kwargs = "stop", None, None
 
         early_result = _run_api_retry_loop(agent, s)
         if early_result is not None:
@@ -224,8 +207,6 @@ def _run_conversation_turn(
         _rs = _run_phase(apply_retry_restarts, agent, s)
         if _rs.action == "break":
             break
-        if _rs.action == "continue":
-            continue
 
         try:
             _run_phase(normalize_model_response, agent, s)

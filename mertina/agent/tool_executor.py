@@ -174,15 +174,11 @@ def _registered_tool_worker(agent):
             _ra()._set_interrupt(False, tid)
 
 
-_NO_REASON = object()
-
-
-def _interrupt_worker_tids(agent, tids, *, reason=_NO_REASON) -> None:
+def _interrupt_worker_tids(agent, tids) -> None:
     """Raise the interrupt bit on each worker tid (best-effort, via ``run_agent``)."""
-    kwargs = {} if reason is _NO_REASON else {"reason": reason}
     for tid in tids:
         with contextlib.suppress(Exception):
-            _ra()._set_interrupt(True, tid, **kwargs)
+            _ra()._set_interrupt(True, tid)
 
 
 def _dispatch_authorized_once(
@@ -387,9 +383,7 @@ class _ConcurrentBatch:
         with _registered_tool_worker(agent) as _worker_tid:
             # An interrupt may have fanned out before our registration; apply it to our tid.
             if agent._interrupt_requested:
-                _interrupt_worker_tids(
-                    agent, [_worker_tid], reason=getattr(agent, "_tool_interrupt_reason", None)
-                )
+                _interrupt_worker_tids(agent, [_worker_tid])
             outcome = self._dispatch_worker(index, pc.ref(self.effective_task_id))
             if outcome is not None:
                 self.results[index] = outcome

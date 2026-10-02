@@ -2,7 +2,8 @@
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
 """Wire-client lifecycle for ``AIAgent``.
 
-``ClientLifecycleMixin`` owns the shared primary client.
+``ClientLifecycleMixin`` owns the shared primary client and the per-request client cache
+(owner-thread close vs stranger-thread abort).
 """
 
 import logging
@@ -11,18 +12,14 @@ from typing import Any
 
 from mertina.agent.lazy_forward import forward as _forward
 from mertina.agent.lazy_forward import forward_static as _forward_static
-from mertina.utils import base_url_host_matches
 
 logger = logging.getLogger(
     "mertina.run_agent"
 )  # origin module's logger name: log records / caplog filters unchanged
 
 
-# Per-request cache slot attribute names (OpenAI-style and Anthropic clients).
+# Per-request cache slot attribute name.
 _OPENAI_SLOT = "_request_client_cache"
-
-
-_ANTHROPIC_SLOT = "_request_anthropic_client_cache"
 
 
 _NO_SOCKETS_SUFFIX = (
@@ -49,9 +46,6 @@ class ClientLifecycleMixin:
             f"base_url={getattr(self, 'base_url', 'unknown')} "
             f"model={getattr(self, 'model', 'unknown')}"
         )
-
-    def _anthropic_log_context(self) -> str:
-        return f"provider={getattr(self, 'provider', None)} model={getattr(self, 'model', None)}"
 
     def _openai_client_lock(self) -> threading.RLock:
         if getattr(self, "_client_lock", None) is None:
@@ -132,26 +126,6 @@ class ClientLifecycleMixin:
         self._close_openai_client(client, reason=f"replace:{reason}", shared=True)
         return new_client
 
-    @staticmethod
-    def _api_kwargs_have_image_parts(api_kwargs: dict) -> bool:
-        """True when the outbound request still has native image parts (Chat ``messages`` / Responses ``input``)."""
-        if not isinstance(api_kwargs, dict):
-            return False
-
-        def _contains_image(value: Any) -> bool:
-            if isinstance(value, dict):
-                return value.get("type") in {"image_url", "input_image"} or any(
-                    _contains_image(v) for v in value.values()
-                )
-            return isinstance(value, list) and any(_contains_image(v) for v in value)
-
-        return any(
-            _contains_image(item)
-            for field in ("messages", "input")
-            if isinstance(api_kwargs.get(field), list)
-            for item in api_kwargs[field]
-        )
-
     # ------------------------------------------------------------------ per-request client slots
     # One single-slot cache per client kind: {"client", "key", "poisoned", "in_use"}. Reuse keeps the warm httpx
     # pool between sequential calls; ``in_use`` keeps concurrent calls off one pool; ``poisoned`` marks a pool
@@ -205,35 +179,21 @@ class ClientLifecycleMixin:
                 _reset_slot(cache)
         return False
 
-    def _take_request_slot(self, slot_attr: str) -> tuple:
-        """Teardown: empty the slot and return ``(client, was_in_use)``."""
-        with self._openai_client_lock():
-            cache = getattr(self, slot_attr, None)
-            client, in_use = (cache["client"], bool(cache["in_use"])) if cache else (None, False)
-            if cache is not None:
-                _reset_slot(cache)
-        return client, in_use
-
     def _abort_request_slot_client(self, slot_attr: str, client: Any, *, reason: str) -> None:
-        """Cross-thread abort (interrupt loop, stale detector): ``shutdown(SHUT_RDWR)`` without releasing FDs.
+        """Cross-thread abort (interrupt): ``shutdown(SHUT_RDWR)`` without releasing FDs.
 
         ``close()`` from a non-owning thread races the live SSL BIO and corrupts unrelated FDs; shutdown unblocks
         the owner's recv/send so it closes from its own context. The slot is poisoned so the pool is never reused.
         """
         if client is None:
             return
-        anthropic = slot_attr == _ANTHROPIC_SLOT
-        label = "Anthropic" if anthropic else "OpenAI"
-        context = self._anthropic_log_context() if anthropic else self._client_log_context()
+        label = "OpenAI"
+        context = self._client_log_context()
         with self._openai_client_lock():
             cache = self._request_slot(slot_attr)
             if cache["client"] is client:
                 cache["poisoned"] = True
         try:
-            # Non-HTTP providers cancel without closing owner-thread file descriptors.
-            if callable(getattr(type(client), "cancel", None)):
-                client.cancel()
-                return
             shutdown_count = self._force_close_tcp_sockets(client)
             # Zero sockets shut down means the worker stays blocked — WARN, not success.
             # tcp_force_closed=0 means the stranger-thread abort found no sockets to shut down — the worker
@@ -254,26 +214,16 @@ class ClientLifecycleMixin:
                 "%s client abort failed (%s, shared=False) %s error=%s", label, reason, context, exc
             )
 
-    def _create_request_openai_client(self, *, reason: str, api_kwargs: dict | None = None) -> Any:
+    def _create_request_openai_client(self, *, reason: str) -> Any:
         from unittest.mock import Mock
 
         primary_client = self._ensure_primary_openai_client(reason=reason)
-        if self.provider == "moa" or isinstance(primary_client, Mock):
+        if isinstance(primary_client, Mock):
             return primary_client
         with self._openai_client_lock():
             request_kwargs = dict(self._client_kwargs)
-        # No SDK retry loop: the outer loop owns retries/rotation/fallback, and SDK retries stretch a hung
-        # request ~3x past our stale detector.
+        # No SDK retry loop: the outer loop owns retries.
         request_kwargs["max_retries"] = 0
-        is_copilot = base_url_host_matches(
-            str(request_kwargs.get("base_url", "")), "githubcopilot.com"
-        )
-        if is_copilot and self._api_kwargs_have_image_parts(api_kwargs or {}):
-            from mertina.cli.copilot_auth import copilot_request_headers
-
-            request_kwargs["default_headers"] = copilot_request_headers(
-                is_agent_turn=True, is_vision=True
-            )
         cached, stale = self._checkout_request_slot(_OPENAI_SLOT, request_kwargs)
         if cached is not None:
             return cached
