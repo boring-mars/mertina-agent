@@ -118,3 +118,81 @@ def test_close_tolerates_none_and_failing_clients() -> None:
 
     agent._close_openai_client(None, reason="test", shared=False)
     agent._close_openai_client(_Broken(), reason="test", shared=False)
+
+
+# --- per-request clients --------------------------------------------------------------------------
+
+
+class _RequestAgent(_Agent):
+    """Builds a fresh ``_FakeClient`` per request client and records what was shut down."""
+
+    def __init__(self) -> None:
+        super().__init__(_FakeClient())
+        self.built: list[dict[str, Any]] = []
+        self.shut: list[Any] = []
+
+    def _create_openai_client(
+        self, client_kwargs: dict[str, Any], *, reason: str, shared: bool
+    ) -> _FakeClient:
+        self.built.append(client_kwargs)
+        return _FakeClient()
+
+    def _force_close_tcp_sockets(self, client: Any) -> int:
+        self.shut.append(client)
+        return 1
+
+
+def test_a_request_client_has_sdk_retries_off_and_is_reused_after_a_clean_finish() -> None:
+    agent = _RequestAgent()
+
+    first = agent._create_request_openai_client(reason="test")
+    agent._close_request_openai_client(first, reason="request_complete")
+    second = agent._create_request_openai_client(reason="test")
+
+    assert second is first
+    assert not first.closed
+    assert [kwargs["max_retries"] for kwargs in agent.built] == [0]
+    assert agent._client_kwargs.get("max_retries") is None
+
+
+def test_a_failed_request_closes_its_client() -> None:
+    agent = _RequestAgent()
+
+    first = agent._create_request_openai_client(reason="test")
+    agent._close_request_openai_client(first, reason="request_error_cleanup")
+    second = agent._create_request_openai_client(reason="test")
+
+    assert first.closed
+    assert second is not first
+
+
+def test_a_client_in_use_is_not_handed_out_twice() -> None:
+    agent = _RequestAgent()
+
+    first = agent._create_request_openai_client(reason="test")
+    second = agent._create_request_openai_client(reason="test")
+
+    assert second is not first
+    agent._close_request_openai_client(second, reason="request_complete")
+    assert second.closed  # untracked: fully closed, never cached
+
+
+def test_an_aborted_client_is_shut_down_not_closed_and_never_reused() -> None:
+    agent = _RequestAgent()
+    client = agent._create_request_openai_client(reason="test")
+
+    agent._abort_request_openai_client(client, reason="interrupt_abort")
+
+    assert agent.shut == [client]
+    assert not client.closed  # the owner thread closes it
+    agent._close_request_openai_client(client, reason="request_complete")
+    assert client.closed
+    assert agent._create_request_openai_client(reason="test") is not client
+
+
+def test_aborting_without_a_client_does_nothing() -> None:
+    agent = _RequestAgent()
+
+    agent._abort_request_openai_client(None, reason="interrupt_abort")
+
+    assert agent.shut == []

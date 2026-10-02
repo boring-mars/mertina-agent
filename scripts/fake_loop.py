@@ -83,7 +83,10 @@ def run() -> tuple[dict[str, Any], FakeCompletions]:
         quiet_mode=True,
     )
     completions = FakeCompletions()
-    agent.client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    agent.client = client
+    # Requests run on per-request clients built from the same factory as the shared one.
+    agent._create_openai_client = lambda *args, **kwargs: client
     return agent.run_conversation("What day is it today?"), completions
 
 

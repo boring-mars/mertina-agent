@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import re
+from collections.abc import Iterator
 from types import ModuleType
 from typing import Any
 
@@ -247,7 +248,7 @@ def copy_reasoning_content_for_api(
     apply_reasoning_content_policy(source_msg, api_msg, agent._needs_thinking_reasoning_pad())
 
 
-def _iter_httpx_pools_with_owner(http_client: Any):
+def _iter_httpx_pools_with_owner(http_client: Any) -> Iterator[tuple[Any, int | None]]:
     """Yield ``(pool, owner)`` pairs reachable from an httpx client, including mounted transports:
     keepalive and proxy configs put live connections on ``client._mounts``, which a
     ``_transport``-only walk misses.
@@ -257,8 +258,8 @@ def _iter_httpx_pools_with_owner(http_client: Any):
     (``process_bootstrap.build_keepalive_http_client``). Callers must then touch only the
     in-flight requests stamped with that owner.
 
-    Walking the default transport alone makes ``force_close_tcp_sockets`` return 0 while a stream is still
-    mid-recv — the interrupt logs success and the provider keeps burning the slot (#72975).
+    Walking the default transport alone makes ``force_close_tcp_sockets`` return 0 while a stream is
+    still mid-recv — the interrupt logs success and the provider keeps burning the slot (#72975).
     """
     seen_pools: set[int] = set()
     try:
@@ -280,7 +281,7 @@ def _iter_httpx_pools_with_owner(http_client: Any):
         return
 
 
-def _connection_candidates(conn: Any):
+def _connection_candidates(conn: Any) -> Iterator[Any]:
     """Walk nested wrappers: proxy tunnels (``_connection``) plus httpx/httpcore
     stream envelopes (``_stream``/``_httpcore_stream``: BoundSyncStream →
     ResponseStream → connection byte stream → HTTP11/2 connection)."""
@@ -298,14 +299,14 @@ def _connection_candidates(conn: Any):
                 stack.append(nxt)
 
 
-def _socket_from_candidate(candidate: Any):
+def _socket_from_candidate(candidate: Any) -> Any:
     """Raw socket behind a connection/stream wrapper yielded by ``_connection_candidates``."""
     stream = getattr(candidate, "_network_stream", None) or getattr(candidate, "_stream", None)
     sock = _socket_from_stream(stream) if stream is not None else None
     return sock if sock is not None else _socket_from_stream(candidate)
 
 
-def _socket_from_stream(stream: Any):
+def _socket_from_stream(stream: Any) -> Any:
     """Raw socket behind an httpcore network stream (several backends), or None."""
     sock = getattr(stream, "_sock", None)
     if sock is None and callable(getattr(stream, "get_extra_info", None)):
@@ -322,7 +323,7 @@ def _socket_from_stream(stream: Any):
     return sock
 
 
-def _iter_pool_sockets(client: Any):
+def _iter_pool_sockets(client: Any) -> Iterator[Any]:
     """Yield raw sockets reachable from an OpenAI/httpx client pool. Defensive over private
     httpcore internals (``conn._connection``, proxy tunnel wrappers) that vary by release; also
     walks mount transports and in-flight ``PoolRequest.connection`` objects (``_connections``
@@ -337,7 +338,8 @@ def _iter_pool_sockets(client: Any):
         return
     seen: set[int] = set()
     for pool, owner in pools:
-        # ``is None``, not falsiness: an empty ``_connections`` must still let us walk in-flight ``_requests``.
+        # ``is None``, not falsiness: an empty ``_connections`` must still let us walk in-flight
+        # ``_requests``.
         raw_conns = getattr(pool, "_connections", None)
         if raw_conns is None:
             raw_conns = getattr(pool, "_pool", None)

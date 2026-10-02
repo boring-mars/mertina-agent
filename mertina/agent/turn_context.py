@@ -13,6 +13,7 @@ import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any
 
 from mertina.agent.iteration_budget import IterationBudget
@@ -54,7 +55,7 @@ def _stage_turn_user_message(
     return user_msg
 
 
-def _bind_interrupt_scope(agent: Any, ra) -> None:
+def _bind_interrupt_scope(agent: Any, ra: Callable[[], ModuleType]) -> None:
     """Record the execution thread so interrupt()/clear_interrupt() scope the tool-level
     signal to THIS agent's thread; clear stale state, preserving a pending interrupt."""
     agent._execution_thread_id = threading.current_thread().ident
@@ -74,7 +75,7 @@ def build_turn_context(
     *,
     restore_or_build_system_prompt: Callable[[Any, str | None, list[dict[str, Any]] | None], None],
     sanitize_surrogates: Callable[[str], str],
-    ra,
+    ra: Callable[[], ModuleType],
 ) -> TurnContext:
     """Run the once-per-turn setup and return the loop's input context.
 

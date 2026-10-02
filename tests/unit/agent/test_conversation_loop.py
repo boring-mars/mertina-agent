@@ -53,6 +53,9 @@ class _Agent:
         self._cached_system_prompt: str | None = None
         self._interrupt_requested = False
         self._interrupt_message: str | None = None
+        self._execution_thread_id: int | None = None
+        self._tool_worker_threads: set[int | None] = set()
+        self._tool_worker_threads_lock = threading.Lock()
         self.prompt_builds = 0
         for key in _SESSION_KEYS:
             setattr(self, f"session_{key}", 0)

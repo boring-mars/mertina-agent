@@ -28,13 +28,15 @@ from mertina.agent.transports.types import NormalizedResponse
 logger = logging.getLogger(__name__)
 
 
-def _context_thread_target(callback):
+def _context_thread_target(callback: Callable[[], Any]) -> Callable[[], Any]:
     """Bind a no-argument thread target to the caller's ContextVars."""
     context = contextvars.copy_context()
     return lambda: context.run(callback)
 
 
-def _dispatch_nonstreaming_api_request(agent, api_kwargs: dict, *, make_client):
+def _dispatch_nonstreaming_api_request(
+    agent: Any, api_kwargs: dict[str, Any], *, make_client: Callable[[str], Any]
+) -> Any:
     """Run one non-streaming LLM request and return it.
 
     ``make_client(reason)`` builds the per-request client so callers can register it with their
@@ -56,13 +58,13 @@ class _RequestClientRegistry:
     NEXT call check it out.
     """
 
-    def __init__(self, agent):
+    def __init__(self, agent: Any) -> None:
         self.agent = agent
-        self.client = None
-        self.owner_tid = None
+        self.client: Any = None
+        self.owner_tid: int | None = None
         self.lock = threading.Lock()
 
-    def set_client(self, client):
+    def set_client(self, client: Any) -> Any:
         with self.lock:
             self.client, self.owner_tid = client, threading.get_ident()
         return client
@@ -86,7 +88,7 @@ class _RequestClientRegistry:
         self.agent._close_request_openai_client(request_client, reason=reason)
 
 
-def interruptible_api_call(agent, api_kwargs: dict):
+def interruptible_api_call(agent: Any, api_kwargs: dict[str, Any]) -> Any:
     """Run the API call on a worker thread so the caller can detect interrupts
     without waiting for the full HTTP round-trip. Each worker gets its own
     per-request client (interrupts close only that one)."""

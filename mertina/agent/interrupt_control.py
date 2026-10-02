@@ -5,6 +5,7 @@ Extracted from ``run_agent.py``; every method resolves through ``AIAgent``'s MRO
 """
 
 import logging
+from typing import Any
 
 from mertina.tools.interrupt import set_interrupt as _set_interrupt
 
@@ -17,7 +18,7 @@ _REASON_NEW_MESSAGE = "user sent a new message"
 _REASON_USER_INTERRUPT = "user interrupt"
 
 
-def _ic_signal_tool_workers(agent, active: bool) -> None:
+def _ic_signal_tool_workers(agent: Any, active: bool) -> None:
     """Fan the tool interrupt bit out to concurrent-tool worker tids.
 
     ``is_interrupted()`` inside a tool only sees its own tid, so without this a hung
@@ -41,12 +42,14 @@ class InterruptControlMixin:
 
     # Set by AIAgent; declared here so the mixin type-checks on its own.
     quiet_mode: bool
+    _execution_thread_id: int | None
 
     def interrupt(
         self,
         message: str | None = None,
     ) -> bool:
-        """Request the agent to interrupt its current tool-calling loop (call from another thread)."""
+        """Request the agent to interrupt its current tool-calling loop (call from another
+        thread)."""
         tool_interrupt_reason = _REASON_NEW_MESSAGE if message else _REASON_USER_INTERRUPT
 
         def _publish_interrupt_state() -> None:
@@ -61,7 +64,8 @@ class InterruptControlMixin:
 
         _publish_interrupt_state()
 
-        # Scope the tool interrupt to this agent's execution thread so other in-process agents are unaffected.
+        # Scope the tool interrupt to this agent's execution thread so other in-process agents are
+        # unaffected.
         if self._execution_thread_id is not None:
             _set_interrupt(True, self._execution_thread_id)
         _ic_signal_tool_workers(self, True)

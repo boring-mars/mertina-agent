@@ -15,8 +15,9 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any
 
 from mertina.agent.display import (
@@ -67,7 +68,7 @@ def _max_workers_for_tool_batch(runnable_calls: list[Any]) -> int:
     return min(len(runnable_calls), max_workers)
 
 
-def _ra():
+def _ra() -> ModuleType:
     """Lazy reference to ``run_agent`` so patches like ``run_agent._set_interrupt`` work."""
     from mertina import run_agent
 
@@ -159,7 +160,7 @@ class _ManagedToolResult:
 
 
 @contextlib.contextmanager
-def _registered_tool_worker(agent):
+def _registered_tool_worker(agent: Any) -> Iterator[int | None]:
     """Track this worker tid for interrupt fan-out (``AIAgent.interrupt()``); on ANY exit
     (incl. BaseException) discard it and clear its interrupt bit so a recycled tid starts clean."""
     tid = threading.current_thread().ident
@@ -174,7 +175,7 @@ def _registered_tool_worker(agent):
             _ra()._set_interrupt(False, tid)
 
 
-def _interrupt_worker_tids(agent, tids) -> None:
+def _interrupt_worker_tids(agent: Any, tids: list[int | None]) -> None:
     """Raise the interrupt bit on each worker tid (best-effort, via ``run_agent``)."""
     for tid in tids:
         with contextlib.suppress(Exception):

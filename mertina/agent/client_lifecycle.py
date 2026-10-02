@@ -27,7 +27,7 @@ _NO_SOCKETS_SUFFIX = (
 )
 
 
-def _reset_slot(cache: dict, *, in_use: bool = False) -> None:
+def _reset_slot(cache: dict[str, Any], *, in_use: bool = False) -> None:
     cache["client"] = None
     cache["key"] = None
     cache["poisoned"] = False
@@ -127,14 +127,14 @@ class ClientLifecycleMixin:
         return new_client
 
     # ------------------------------------------------------------------ per-request client slots
-    # One single-slot cache per client kind: {"client", "key", "poisoned", "in_use"}. Reuse keeps the warm httpx
-    # pool between sequential calls; ``in_use`` keeps concurrent calls off one pool; ``poisoned`` marks a pool
-    # whose sockets were shut from a stranger thread (never reuse it).
-    # Reuse reasons: closes from the FD-owning worker's own finally after a response — the only closes that
-    # attest a healthy pool. Poisoning still wins.
+    # One single-slot cache per client kind: {"client", "key", "poisoned", "in_use"}. Reuse keeps
+    # the warm httpx pool between sequential calls; ``in_use`` keeps concurrent calls off one pool;
+    # ``poisoned`` marks a pool whose sockets were shut from a stranger thread (never reuse it).
+    # Reuse reasons: closes from the FD-owning worker's own finally after a response — the only
+    # closes that attest a healthy pool. Poisoning still wins.
     _REQUEST_CLIENT_REUSE_REASONS = frozenset({"request_complete", "stream_request_complete"})
 
-    def _request_slot(self, slot_attr: str) -> dict:
+    def _request_slot(self, slot_attr: str) -> dict[str, Any]:
         cache = getattr(
             self, slot_attr, None
         )  # lazy: tests build agents via AIAgent.__new__ without __init__
@@ -143,7 +143,7 @@ class ClientLifecycleMixin:
             _reset_slot(cache)
         return cache
 
-    def _checkout_request_slot(self, slot_attr: str, key: Any) -> tuple:
+    def _checkout_request_slot(self, slot_attr: str, key: Any) -> tuple[Any, Any]:
         """Return ``(reusable_client, stale_client)``; at most one is non-None."""
         with self._openai_client_lock():
             cache = self._request_slot(slot_attr)
@@ -157,8 +157,8 @@ class ClientLifecycleMixin:
             ):
                 cache["in_use"] = True
                 return cached, None
-            # Key changed / poisoned / externally closed — rebuild. in_use was False, so closing the stale
-            # client from this thread is FD-safe (no worker owns it).
+            # Key changed / poisoned / externally closed — rebuild. in_use was False, so closing the
+            # stale client from this thread is FD-safe (no worker owns it).
             _reset_slot(cache)
             return None, cached
 
@@ -182,8 +182,9 @@ class ClientLifecycleMixin:
     def _abort_request_slot_client(self, slot_attr: str, client: Any, *, reason: str) -> None:
         """Cross-thread abort (interrupt): ``shutdown(SHUT_RDWR)`` without releasing FDs.
 
-        ``close()`` from a non-owning thread races the live SSL BIO and corrupts unrelated FDs; shutdown unblocks
-        the owner's recv/send so it closes from its own context. The slot is poisoned so the pool is never reused.
+        ``close()`` from a non-owning thread races the live SSL BIO and corrupts unrelated FDs;
+        shutdown unblocks the owner's recv/send so it closes from its own context. The slot is
+        poisoned so the pool is never reused.
         """
         if client is None:
             return
@@ -196,13 +197,13 @@ class ClientLifecycleMixin:
         try:
             shutdown_count = self._force_close_tcp_sockets(client)
             # Zero sockets shut down means the worker stays blocked — WARN, not success.
-            # tcp_force_closed=0 means the stranger-thread abort found no sockets to shut down — the worker
-            # stays blocked in recv and the provider keeps the slot (#72975). Surface that as WARNING so it
-            # cannot be mistaken for a successful abort in the logs.
+            # tcp_force_closed=0 means the stranger-thread abort found no sockets to shut down — the
+            # worker stays blocked in recv and the provider keeps the slot (#72975). Surface that as
+            # WARNING so it cannot be mistaken for a successful abort in the logs.
             # See #72975.
             _log = logger.warning if shutdown_count == 0 else logger.info
             _log(
-                "%s client aborted (%s, shared=False, tcp_force_closed=%d, deferred_close=stranger_thread) %s%s",
+                "%s client aborted (%s, shared=False, tcp_force_closed=%d, deferred_close=stranger_thread) %s%s",  # noqa: E501  # upstream's message
                 label,
                 reason,
                 shutdown_count,
@@ -230,7 +231,8 @@ class ClientLifecycleMixin:
         if stale is not None:
             self._close_openai_client(stale, reason=f"reuse_evict:{reason}", shared=False)
         client = self._create_openai_client(request_kwargs, reason=reason, shared=False)
-        # Snapshot nested dicts (default_headers) so an aliased inner object can't mutate the cache key.
+        # Snapshot nested dicts (default_headers) so an aliased inner object can't mutate the cache
+        # key.
         snapshot = {k: dict(v) if isinstance(v, dict) else v for k, v in request_kwargs.items()}
         self._store_request_slot(_OPENAI_SLOT, client, snapshot)
         return client

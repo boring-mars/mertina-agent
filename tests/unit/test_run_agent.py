@@ -2,7 +2,9 @@
 
 import json
 import threading
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from typing import Any
 
@@ -13,7 +15,9 @@ import pytest
 from mertina import model_tools
 from mertina.agent import retry_utils, turn_api_error
 from mertina.agent.context_compressor import MAX_ITERATIONS_SUMMARY_REQUEST
+from mertina.agent.conversation_loop import INTERRUPT_WAITING_FOR_MODEL_PREFIX
 from mertina.run_agent import AIAgent
+from mertina.tools.interrupt import is_interrupted, is_thread_interrupted
 from mertina.tools.registry import ToolRegistry
 
 
@@ -89,6 +93,8 @@ def _agent(responses: list[Any], **kwargs: Any) -> tuple[Any, _Completions]:
     agent = AIAgent(api_key="test-key", model="fake-model", quiet_mode=True, **kwargs)
     client = _Client(responses)
     agent.client = client
+    # Requests run on per-request clients built from the same factory as the shared one.
+    agent._create_openai_client = lambda *args, **kwargs: client
     return agent, client.chat.completions
 
 
@@ -273,6 +279,137 @@ def test_an_interrupt_during_a_tool_ends_the_turn_and_the_next_turn_continues(
 
     assert after["final_response"] == "Picking up again."
     assert _roles(after["messages"])[-2:] == ["user", "assistant"]
+
+
+@pytest.mark.parametrize("calls", [1, 2], ids=["sequential", "concurrent"])
+def test_tools_see_the_stop_on_their_own_thread(reg: ToolRegistry, calls: int) -> None:
+    started = threading.Barrier(calls + 1, timeout=5)
+
+    def wait(args: dict[str, Any], **kwargs: Any) -> str:
+        started.wait()
+        deadline = time.monotonic() + 5
+        while not is_interrupted():
+            if time.monotonic() > deadline:
+                return "timed out"
+            time.sleep(0.01)
+        return "stopped"
+
+    _register(reg, "wait", wait)
+    agent, _ = _agent([_response(tool_calls=[(f"c{i}", "wait", {}) for i in range(calls)])])
+
+    def stop() -> None:
+        started.wait()
+        agent.interrupt()
+
+    stopper = threading.Thread(target=stop)
+    stopper.start()
+    result = agent.run_conversation("go")
+    stopper.join()
+
+    assert result["interrupted"] is True
+    assert [m["content"] for m in result["messages"] if m["role"] == "tool"] == ["stopped"] * calls
+    assert not is_thread_interrupted(threading.get_ident())
+
+
+class _HeldServer:
+    """A local chat-completions endpoint that never answers its first request."""
+
+    def __init__(self) -> None:
+        self.received = threading.Event()
+        self.release = threading.Event()
+        self.requests: list[dict[str, Any]] = []
+        server = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                server.requests.append(body)
+                if len(server.requests) == 1:
+                    server.received.set()
+                    server.release.wait(timeout=10)
+                    return
+                payload = json.dumps(
+                    {
+                        "id": "c1",
+                        "object": "chat.completion",
+                        "created": 0,
+                        "model": body["model"],
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {"role": "assistant", "content": "Back again."},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                    }
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args: Any) -> None:
+                pass
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd.daemon_threads = True
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.base_url = f"http://127.0.0.1:{self.httpd.server_address[1]}/v1"
+
+    def close(self) -> None:
+        self.release.set()
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+@pytest.fixture
+def held_server(monkeypatch: pytest.MonkeyPatch) -> Iterator[_HeldServer]:
+    # A configured proxy would hold the connection instead of the server.
+    for name in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    server = _HeldServer()
+    yield server
+    server.close()
+
+
+def test_a_stop_while_waiting_for_the_model_aborts_the_request(
+    reg: ToolRegistry, held_server: _HeldServer
+) -> None:
+    agent: Any = AIAgent(
+        api_key="test-key", model="fake-model", base_url=held_server.base_url, quiet_mode=True
+    )
+
+    def stop() -> None:
+        held_server.received.wait(timeout=5)
+        agent.interrupt()
+
+    stopper = threading.Thread(target=stop)
+    stopper.start()
+    started = time.monotonic()
+    result = agent.run_conversation("hi")
+    elapsed = time.monotonic() - started
+    stopper.join()
+
+    assert result["interrupted"] is True
+    assert result["final_response"].startswith(INTERRUPT_WAITING_FOR_MODEL_PREFIX)
+    assert elapsed < 5  # the socket was shut, not waited out
+    assert _roles(result["messages"]) == ["user"]
+    assert agent._interrupt_requested is False
+
+    after = agent.run_conversation("again", conversation_history=result["messages"])
+
+    assert after["final_response"] == "Back again."
+    assert len(held_server.requests) == 2
 
 
 # --- retries --------------------------------------------------------------------------------------

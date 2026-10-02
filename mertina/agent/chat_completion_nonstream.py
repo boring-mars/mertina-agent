@@ -2,6 +2,8 @@
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
 """Request-local worker lifecycle and interrupt polling."""
 
+from typing import Any
+
 from mertina.agent import chat_completion_helpers as h
 
 
@@ -12,24 +14,24 @@ class _NonStreamRequest:
     instance; ``_abort_request`` may run from the poll (stranger) thread.
     """
 
-    def __init__(self, agent, api_kwargs: dict):
+    def __init__(self, agent: Any, api_kwargs: dict[str, Any]) -> None:
         self.agent = agent
         self.api_kwargs = api_kwargs
-        self.result = {"response": None, "error": None}
+        self.result: dict[str, Any] = {"response": None, "error": None}
         self.clients = h._RequestClientRegistry(agent)
         # Request-local cancel flag: agent._interrupt_requested is cleared at turn
         # boundaries but this daemon worker can outlive the turn, so it must know THIS
         # request was force-closed and not surface the transport error as a bug (#6600).
         self.cancelled = False
-        self.thread = None
+        self.thread: Any = None
 
-    def _make_client(self, reason: str):
+    def _make_client(self, reason: str) -> Any:
         # Per-request clients are registered with the abort machinery so an interrupt can
         # force-close the worker's connection, never the shared client (#67142).
         client = self.agent._create_request_openai_client(reason=reason)
         return self.clients.set_client(client)
 
-    def _call(self):
+    def _call(self) -> None:
         try:
             self.result["response"] = h._dispatch_nonstreaming_api_request(
                 self.agent, self.api_kwargs, make_client=self._make_client
@@ -57,7 +59,7 @@ class _NonStreamRequest:
     def _abort_request(self, reason: str) -> None:
         """Interrupt kill: abort the request client (#67142); the worker sees its own
         forced close via the cancel flag."""
-        with h.contextlib.suppress(Exception):
+        with h.contextlib.suppress(Exception):  # type: ignore[attr-defined]  # re-exported for this module
             self.clients.close_once(reason)
 
     def _interrupt(self) -> None:
@@ -69,10 +71,10 @@ class _NonStreamRequest:
         self._abort_request("interrupt_abort")
         raise InterruptedError("Agent interrupted during API call")
 
-    def run(self):
+    def run(self) -> Any:
         agent = self.agent
 
-        self.thread = t = h.threading.Thread(
+        self.thread = t = h.threading.Thread(  # type: ignore[attr-defined]  # re-exported for this module
             target=h._context_thread_target(self._call), daemon=True
         )
         t.start()

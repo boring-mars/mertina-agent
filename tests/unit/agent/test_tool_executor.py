@@ -20,6 +20,8 @@ class _Agent:
 
     def __init__(self) -> None:
         self._interrupt_requested = False
+        self._tool_worker_threads: set[int | None] = set()
+        self._tool_worker_threads_lock = threading.Lock()
         self.interrupt_reasons: list[str] = []
         self.printed: list[str] = []
         self.log_prefix = ""
