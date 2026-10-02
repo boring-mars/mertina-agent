@@ -17,17 +17,6 @@ _REASON_NEW_MESSAGE = "user sent a new message"
 _REASON_USER_INTERRUPT = "user interrupt"
 
 
-def _ic_abort_active_request(agent, reason: str, failure_log: str) -> None:
-    """Shut the registered in-flight request's sockets (the inline request registers its client
-    here)."""
-    abort = getattr(agent, "_active_request_abort", None)
-    if callable(abort):
-        try:
-            abort(reason)
-        except Exception:
-            logger.debug(failure_log, exc_info=True)
-
-
 def _ic_signal_tool_workers(agent, active: bool) -> None:
     """Fan the tool interrupt bit out to concurrent-tool worker tids.
 
@@ -72,9 +61,6 @@ class InterruptControlMixin:
 
         _publish_interrupt_state()
 
-        # The inline request registers its client here so this cross-thread interrupt can still
-        # shut the sockets.
-        _ic_abort_active_request(self, "interrupt_abort", "Failed to abort active inline request")
         # Scope the tool interrupt to this agent's execution thread so other in-process agents are unaffected.
         if self._execution_thread_id is not None:
             _set_interrupt(True, self._execution_thread_id)
