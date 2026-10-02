@@ -1,5 +1,6 @@
 # Ported from hermes-agent agent/chat_completion_nonstream.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
+# Partial: only the parts ported so far. Upstream order is kept.
 """Request-local worker lifecycle and interrupt polling."""
 
 from typing import Any

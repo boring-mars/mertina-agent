@@ -1,6 +1,5 @@
 # Ported from hermes-agent agent/message_content.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
-# Partial: only the parts ported so far. Upstream order is kept.
 from __future__ import annotations
 
 from collections.abc import Mapping
