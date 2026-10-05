@@ -13,7 +13,6 @@ import concurrent.futures
 import contextlib
 import json
 import logging
-import os
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -26,9 +25,6 @@ from mertina.agent.display import (
 )
 from mertina.agent.display import (
     build_tool_preview as _build_tool_preview,
-)
-from mertina.agent.display import (
-    redact_tool_args_for_display as _redact_tool_args_for_display,
 )
 from mertina.agent.message_sanitization import coalesce_tool_call_id
 from mertina.agent.tool_dispatch_helpers import (
@@ -196,8 +192,8 @@ def _dispatch_authorized_once(
     *,
     execute: Callable[[dict[str, Any]], Any],
 ) -> Any:
-    """The one real dispatch."""
-    _advance_start_order(lambda: _begin_tool_execution(agent, ref, display_index))
+    """Announce the call, then the one real dispatch."""
+    _begin_tool_execution(agent, ref)
     return execute(ref.args)
 
 
@@ -267,32 +263,13 @@ def _safe_callback(callback, label: str, *args, **kwargs) -> None:
         logging.debug("%s callback error: %s", label, callback_error)
 
 
-def _begin_tool_execution(agent, ref: _ToolCallRef, display_index: int | None) -> None:
-    """Run user-visible and checkpoint preflight on final tool arguments."""
-    function_name, function_args, effective_task_id, tool_call_id = (
+def _begin_tool_execution(agent, ref: _ToolCallRef) -> None:
+    """Run user-visible preflight on final tool arguments."""
+    function_name, function_args = (
         ref.name,
         ref.args,
-        ref.task_id,
-        ref.call_id,
     )
-    display_args = _redact_tool_args_for_display(function_name, function_args) or function_args
-    if _tool_progress_enabled(agent):
-        prefix = f"Tool {display_index}" if display_index is not None else "Tool"
-        if agent.verbose_logging:
-            print(f"  📞 {prefix}: {function_name}({list(display_args.keys())})")
-            print(
-                agent._wrap_verbose(
-                    "Args: ", json.dumps(display_args, indent=2, ensure_ascii=False)
-                )
-            )
-        else:
-            print(
-                f"  📞 {prefix}: {function_name}({list(function_args.keys())}) - {_preview(json.dumps(display_args, ensure_ascii=False), agent.log_prefix_chars)}"
-            )
-
-    agent._current_tool = function_name
-    agent._touch_activity(f"executing tool: {function_name}")
-    _set_worker_activity_callback(agent)
+    display_args = function_args
 
     if agent.tool_progress_callback:
         try:
@@ -308,25 +285,6 @@ def _begin_tool_execution(agent, ref: _ToolCallRef, display_index: int | None) -
                 preview,
                 display_args,
             )
-    _safe_callback(
-        agent.tool_start_callback, "Tool start", tool_call_id, function_name, display_args
-    )
-
-    if not agent._checkpoint_mgr.enabled:
-        return
-    with contextlib.suppress(Exception):
-        if function_name in {"write_file", "patch"}:
-            _ensure_file_checkpoint(agent, function_name, function_args, effective_task_id)
-        elif function_name == "terminal":
-            command = function_args.get("command", "")
-            if _is_destructive_command(command):
-                from mertina.tools.file_tools_paths import container_backend_for_task
-
-                if container_backend_for_task(effective_task_id or "default") is None:
-                    from mertina.agent.runtime_cwd import scope_terminal_cwd
-
-                    cwd = function_args.get("workdir") or scope_terminal_cwd() or os.getcwd()
-                    agent._checkpoint_mgr.ensure_checkpoint(cwd, f"before terminal: {command[:60]}")
 
 
 def _commit_tool_result(
@@ -384,8 +342,7 @@ def _commit_tool_result(
     messages.append(tool_message)
 
     if not blocked:
-        # ``tool.completed`` projects AFTER the canonical append + flush so resume can
-        # reconstruct the result even if the UI bridge dies mid-projection.
+        # ``tool.completed`` projects AFTER the canonical append.
         _safe_callback(
             agent.tool_progress_callback,
             "Tool progress",
@@ -398,14 +355,6 @@ def _commit_tool_result(
             result=function_result,
         )
     return persisted_result, function_result, tool_message.get("_tool_output_risk")
-
-
-def _tool_progress_enabled(agent) -> bool:
-    return not agent.quiet_mode and getattr(agent, "tool_progress_mode", "all") != "off"
-
-
-def _preview(text: str, limit: int) -> str:
-    return text[:limit] + "..." if len(text) > limit else text
 
 
 # ── Concurrent batch machinery ──────────────────────────────────────────────
