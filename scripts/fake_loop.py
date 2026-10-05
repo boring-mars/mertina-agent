@@ -1,10 +1,15 @@
-"""Run one full agent turn against a fake model: the v0.1.0 acceptance check.
+"""Run agent turns against a fake model: the v0.1 acceptance check.
 
-A real ``AIAgent`` talks to a scripted chat-completions client instead of the network. v0.1.0 has
-no built-in tool yet (the first one is ``web_search`` in v0.1.2), so this script registers its own
-``clock`` tool in the real registry. The model asks for it and builds its second reply from the
-tool result it was sent back, so the script proves the whole round trip: request, tool call,
-dispatch, tool result, final answer.
+A real ``AIAgent`` talks to a scripted chat-completions client instead of the network. v0.1 has no
+built-in tool yet (the first one is ``web_search`` in v0.1.2), so this script registers its own
+``clock`` tool in the real registry. Two scenarios:
+
+- **Round trip.** The model asks for ``clock`` and builds its second reply from the tool result it
+  was sent back: request, tool call, dispatch, tool result, final answer. The answer streams to
+  ``stream_delta_callback`` and the call reports to ``tool_progress_callback``.
+- **Stop and continue.** The model asks for two clock calls and the user stops the turn as the
+  first one starts. Every tool call still gets a result, so the next turn, sent on the same
+  history, passes the fake model's check that each tool call was answered.
 
 Usage::
 
@@ -17,7 +22,8 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -82,57 +88,115 @@ def stream_chunks(response: SimpleNamespace) -> Iterator[SimpleNamespace]:
 
 
 class FakeCompletions:
-    """``client.chat.completions``: asks for ``clock``, then answers from its result."""
+    """``client.chat.completions``: asks for ``clock`` (``calls`` times in one reply), then answers
+    from its result. Like a real endpoint, it rejects a history with an unanswered tool call."""
 
-    def __init__(self) -> None:
+    def __init__(self, calls: int = 1) -> None:
+        self.calls = calls
         self.requests: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> Any:
         self.requests.append(kwargs)
-        response = self._reply(kwargs["messages"])
+        messages = kwargs["messages"]
+        answered = {m.get("tool_call_id") for m in messages if m.get("role") == "tool"}
+        for message in messages:
+            for call in message.get("tool_calls") or []:
+                if call["id"] not in answered:
+                    raise ValueError(f"tool call {call['id']} has no tool result")
+        response = self._reply(messages)
         return stream_chunks(response) if kwargs.get("stream") else response
 
-    @staticmethod
-    def _reply(messages: list[dict[str, Any]]) -> SimpleNamespace:
-        tool_rows = [m for m in messages if m.get("role") == "tool"]
-        if not tool_rows:
-            call = SimpleNamespace(
-                id="call_clock_1",
-                type="function",
-                function=SimpleNamespace(name="clock", arguments="{}"),
-            )
-            return _message(None, [call])
-        weekday = json.loads(tool_rows[-1]["content"])["weekday"]
-        return _message(f"Today is {weekday}.")
+    def _reply(self, messages: list[dict[str, Any]]) -> SimpleNamespace:
+        weekdays = []
+        for row in (m for m in messages if m.get("role") == "tool"):
+            try:
+                weekdays.append(json.loads(row["content"])["weekday"])
+            except (ValueError, KeyError, TypeError):
+                pass  # a call the stop skipped
+        if not weekdays:
+            calls = [
+                SimpleNamespace(
+                    id=f"call_clock_{n}",
+                    type="function",
+                    function=SimpleNamespace(name="clock", arguments="{}"),
+                )
+                for n in range(1, self.calls + 1)
+            ]
+            return _message(None, calls)
+        return _message(f"Today is {weekdays[0]}.")
 
 
-def run() -> tuple[dict[str, Any], FakeCompletions]:
-    """One turn of a real AIAgent against the fake client."""
-    register_clock()
-    agent = AIAgent(
+@dataclass
+class Run:
+    """One scenario's turns, the requests the fake model saw, and what the callbacks received."""
+
+    results: list[dict[str, Any]]
+    completions: FakeCompletions
+    deltas: list[str | None] = field(default_factory=list)
+    progress: list[tuple[str, str]] = field(default_factory=list)
+
+
+def _agent(scenario: Run, on_progress: Callable[[str], None] | None = None) -> Any:
+    """A real AIAgent on the scenario's fake client, recording what its callbacks receive."""
+
+    def progress(event: str, name: str, *args: Any, **kwargs: Any) -> None:
+        scenario.progress.append((event, name))
+        if on_progress is not None:
+            on_progress(event)
+
+    agent: Any = AIAgent(
         base_url="http://fake-model.invalid/v1",
         api_key="not-a-real-key",
         model="fake-model",
         max_iterations=5,
         quiet_mode=True,
+        stream_delta_callback=scenario.deltas.append,
+        tool_progress_callback=progress,
     )
-    completions = FakeCompletions()
-    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    client = SimpleNamespace(chat=SimpleNamespace(completions=scenario.completions))
     agent.client = client
     # Requests run on per-request clients built from the same factory as the shared one.
     agent._create_openai_client = lambda *args, **kwargs: client
-    return agent.run_conversation("What day is it today?"), completions
+    return agent
 
 
-def check(result: dict[str, Any], completions: FakeCompletions) -> list[str]:
-    """Problems with the turn; empty when the round trip is complete."""
+def run() -> Run:
+    """One turn with a tool round trip."""
+    register_clock()
+    scenario = Run([], FakeCompletions())
+    scenario.results.append(_agent(scenario).run_conversation("What day is it today?"))
+    return scenario
+
+
+def run_stop() -> Run:
+    """A turn stopped as its first tool starts, then a turn on the same history."""
+    register_clock()
+    scenario = Run([], FakeCompletions(calls=2))
+    stopped: list[bool] = []
+
+    def stop_on_first_start(event: str) -> None:
+        if event == "tool.started" and not stopped:
+            stopped.append(True)
+            agent.interrupt()
+
+    agent = _agent(scenario, stop_on_first_start)
+    first = agent.run_conversation("What day is it today?")
+    after = agent.run_conversation("Go on.", conversation_history=first["messages"])
+    scenario.results.extend([first, after])
+    return scenario
+
+
+def check(scenario: Run) -> list[str]:
+    """Problems with the round trip; empty when it is complete."""
     problems = []
+    (result,) = scenario.results
+    requests = scenario.completions.requests
     roles = [m["role"] for m in result["messages"]]
     if roles != ["user", "assistant", "tool", "assistant"]:
         problems.append(f"unexpected transcript roles: {roles}")
-    if len(completions.requests) != 2:
-        problems.append(f"expected 2 model requests, got {len(completions.requests)}")
-    elif [t["function"]["name"] for t in completions.requests[0].get("tools", [])] != ["clock"]:
+    if len(requests) != 2:
+        problems.append(f"expected 2 model requests, got {len(requests)}")
+    elif [t["function"]["name"] for t in requests[0].get("tools", [])] != ["clock"]:
         problems.append("the first request did not offer the clock tool")
     if not result["completed"]:
         problems.append(f"turn did not complete: {result['turn_exit_reason']}")
@@ -143,21 +207,55 @@ def check(result: dict[str, Any], completions: FakeCompletions) -> list[str]:
             problems.append(
                 f"final answer does not use the tool result: {result['final_response']!r}"
             )
+    text = [d for d in scenario.deltas if d is not None]
+    if "".join(text).strip() != result["final_response"] or len(text) < 3:
+        problems.append(f"the answer did not stream in pieces: {scenario.deltas!r}")
+    if scenario.progress != [("tool.started", "clock"), ("tool.completed", "clock")]:
+        problems.append(f"unexpected tool progress: {scenario.progress}")
     return problems
 
 
+def check_stop(scenario: Run) -> list[str]:
+    """Problems with the stop; empty when the stopped turn left a history the next turn can use."""
+    problems = []
+    stopped, after = scenario.results
+    if not stopped["interrupted"]:
+        problems.append(f"the first turn was not interrupted: {stopped['turn_exit_reason']}")
+    calls = [c["id"] for m in stopped["messages"] for c in m.get("tool_calls") or []]
+    answered = [m["tool_call_id"] for m in stopped["messages"] if m["role"] == "tool"]
+    if calls != ["call_clock_1", "call_clock_2"] or sorted(answered) != calls:
+        problems.append(f"tool calls {calls} were answered by {answered}")
+    if not after["completed"] or not str(after["final_response"]).startswith("Today is "):
+        problems.append(f"the turn after the stop failed: {after['final_response']!r}")
+    return problems
+
+
+def _print(label: str, scenario: Run) -> None:
+    print(f"--- {label}")
+    shown = 0
+    for result in scenario.results:  # each turn's messages include the history before it
+        for message in result["messages"][shown:]:
+            detail = message.get("content") or json.dumps(
+                [c["function"]["name"] for c in message.get("tool_calls", [])]
+            )
+            print(f"{message['role']:>9}: {detail}")
+        shown = len(result["messages"])
+    print(f"streamed: {scenario.deltas!r}")
+    print(f"progress: {scenario.progress!r}")
+
+
 def main() -> int:
-    result, completions = run()
-    for message in result["messages"]:
-        detail = message.get("content") or json.dumps(
-            [c["function"]["name"] for c in message.get("tool_calls", [])]
-        )
-        print(f"{message['role']:>9}: {detail}")
-    print(f"api_calls={result['api_calls']} total_tokens={result['total_tokens']}")
-    problems = check(result, completions)
+    round_trip, stop = run(), run_stop()
+    _print("round trip", round_trip)
+    _print("stop and continue", stop)
+    problems = check(round_trip) + check_stop(stop)
     for problem in problems:
         print(f"FAIL: {problem}")
-    print("OK: full loop with a tool round trip" if not problems else "FAILED")
+    print(
+        "OK: a streamed tool round trip, and a stop the next turn recovers from"
+        if not problems
+        else "FAILED"
+    )
     return 1 if problems else 0
 
 
