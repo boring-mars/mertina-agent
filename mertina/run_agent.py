@@ -12,6 +12,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 import sys  # noqa: E402  # upstream order
+from collections.abc import Callable  # noqa: E402  # upstream order
 from typing import Any  # noqa: E402  # upstream order
 
 from mertina.agent.api_error_summary import (  # noqa: E402  # upstream order
@@ -22,6 +23,7 @@ from mertina.agent.interrupt_control import InterruptControlMixin  # noqa: E402 
 from mertina.agent.lazy_forward import forward as _forward  # noqa: E402  # upstream order
 from mertina.agent.reasoning_params import ReasoningParamsMixin  # noqa: E402  # upstream order
 from mertina.agent.status_output import StatusOutputMixin  # noqa: E402  # upstream order
+from mertina.agent.stream_delivery import StreamDeliveryMixin  # noqa: E402  # upstream order
 from mertina.agent.turn_facade import TurnFacadeMixin  # noqa: E402  # upstream order
 from mertina.agent.vision_message_prep import VisionMessagePrepMixin  # noqa: E402  # upstream order
 from mertina.tools.interrupt import (  # noqa: E402  # upstream order
@@ -31,6 +33,7 @@ from mertina.tools.interrupt import (  # noqa: E402  # upstream order
 
 class AIAgent(
     ClientLifecycleMixin,
+    StreamDeliveryMixin,
     StatusOutputMixin,
     ApiErrorSummaryMixin,
     InterruptControlMixin,
@@ -59,6 +62,27 @@ class AIAgent(
         quiet_mode: bool = False,
         log_prefix: str = "",
         session_id: str | None = None,
+        tool_progress_callback: callable = None,
+        tool_start_callback: callable = None,
+        tool_complete_callback: callable = None,
+        thinking_callback: callable = None,
+        reasoning_callback: callable = None,
+        clarify_callback: callable = None,
+        read_terminal_callback: callable = None,
+        read_preview_callback: callable = None,
+        drive_preview_callback: callable = None,
+        read_window_below_callback: callable = None,
+        connection_callback: callable = None,
+        tour_callback: callable = None,
+        step_callback: callable = None,
+        stream_delta_callback: callable = None,
+        interim_assistant_callback: callable = None,
+        tool_gen_callback: callable = None,
+        status_callback: callable = None,
+        notice_callback: callable = None,
+        notice_clear_callback: callable = None,
+        event_callback: Callable[[str, dict], None] | None = None,
+        reaction_callback: Callable[[str], None] | None = None,
         max_tokens: int | None = None,
         platform: str | None = None,
         pass_session_id: bool = False,
@@ -90,6 +114,9 @@ class AIAgent(
 
     _interruptible_api_call = _forward(
         "mertina.agent.chat_completion_helpers", "interruptible_api_call"
+    )
+    _interruptible_streaming_api_call = _forward(
+        "mertina.agent.chat_completion_helpers", "interruptible_streaming_api_call"
     )
     _build_api_kwargs = _forward("mertina.agent.chat_completion_helpers", "build_api_kwargs")
 

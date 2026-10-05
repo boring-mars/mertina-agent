@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import sys
 import threading
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 from mertina.agent.iteration_budget import IterationBudget
+from mertina.agent.memory_manager import StreamingContextScrubber
+from mertina.agent.think_scrubber import StreamingThinkScrubber
 
 
 def _cfg_dict(cfg: dict[str, Any], key: str) -> dict[str, Any]:
@@ -57,6 +60,34 @@ _CONTROL_STATE: dict[str, Any] = {
 _SESSION_STATE: dict[str, Any] = {
     # Cached system prompt (built once).
     "_cached_system_prompt": None,
+}
+
+
+# Streaming delivery state.
+_STREAM_STATE: dict[str, Any] = {
+    "_stream_callback": None,  # streaming TTS; set early so _vprint can reference it
+    "_stream_needs_break": False,  # one "\n\n" before the next real text delta after tools
+    # Stateful scrubbers: <memory-context> / thinking spans split across deltas defeat
+    # per-delta regexes (both tags must be in one string).
+    "_stream_context_scrubber": StreamingContextScrubber,
+    "_stream_think_scrubber": StreamingThinkScrubber,
+    "_current_streamed_assistant_text": "",  # so a later completed interim isn't re-sent
+    "_delivered_interim_texts": set,  # interims this user turn (spans Codex continuations)
+    # Single-writer guard for the delta sink: each attempt claims a monotonic writer token and
+    # the sink drops chunks from threads holding a stale one, so a superseded stream can't
+    # interleave with the retry's. Threads that never claimed are never fenced.
+    "_stream_writer_lock": threading.Lock,
+    "_stream_writer_token": 0,
+    "_stream_writer_tls": threading.local,
+    "_stream_writer_dropped": 0,
+    # Set once a strict endpoint 400/422s on ``stream_options``; later streams omit it (#9705).
+    "_stream_options_unsupported": False,
+    # API-facing user message override when it differs from the persisted transcript (voice).
+    "_persist_user_message_idx": None,
+    "_persist_user_message_override": None,
+    "_persist_user_message_timestamp": None,
+    # Image-to-text fallbacks cached per payload/URL so one tool loop doesn't re-run vision.
+    "_anthropic_image_fallback_cache": dict,
 }
 
 
@@ -164,6 +195,30 @@ _PASSTHROUGH_PARAMS = (
     "max_tokens",
 )
 
+_CALLBACK_PARAMS = (
+    "tool_progress_callback",
+    "tool_start_callback",
+    "tool_complete_callback",
+    "thinking_callback",
+    "reasoning_callback",
+    "clarify_callback",
+    "read_terminal_callback",
+    "read_preview_callback",
+    "drive_preview_callback",
+    "read_window_below_callback",
+    "connection_callback",
+    "tour_callback",
+    "step_callback",
+    "stream_delta_callback",
+    "interim_assistant_callback",
+    "status_callback",
+    "notice_callback",
+    "notice_clear_callback",
+    "event_callback",
+    "reaction_callback",
+    "tool_gen_callback",
+)
+
 
 def init_agent(
     agent: Any,
@@ -176,6 +231,27 @@ def init_agent(
     quiet_mode: bool = False,
     log_prefix: str = "",
     session_id: str | None = None,
+    tool_progress_callback: callable = None,
+    tool_start_callback: callable = None,
+    tool_complete_callback: callable = None,
+    thinking_callback: callable = None,
+    reasoning_callback: callable = None,
+    clarify_callback: callable = None,
+    read_terminal_callback: callable = None,
+    read_preview_callback: callable = None,
+    drive_preview_callback: callable = None,
+    read_window_below_callback: callable = None,
+    connection_callback: callable = None,
+    tour_callback: callable = None,
+    step_callback: callable = None,
+    stream_delta_callback: callable = None,
+    interim_assistant_callback: callable = None,
+    tool_gen_callback: callable = None,
+    status_callback: callable = None,
+    notice_callback: callable = None,
+    notice_clear_callback: callable = None,
+    event_callback: Callable[[str, dict], None] | None = None,
+    reaction_callback: Callable[[str], None] | None = None,
     max_tokens: int | None = None,
     platform: str | None = None,
     pass_session_id: bool = False,
@@ -202,10 +278,14 @@ def init_agent(
     _resolve_api_mode(agent)
     _finalize_routing(agent)
 
+    # Platform callbacks are stored under their parameter names verbatim.
+    for _cb in _CALLBACK_PARAMS:
+        setattr(agent, _cb, _params[_cb])
     agent.suppress_status_output = False
 
     _set_defaults(agent, _CONTROL_STATE)
 
+    _set_defaults(agent, _STREAM_STATE)
     _build_client(agent, api_key, base_url)
     _load_tools(agent)
     _init_session_state(

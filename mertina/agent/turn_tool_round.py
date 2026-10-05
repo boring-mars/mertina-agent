@@ -8,6 +8,7 @@ then execute the tools. Nothing here imports ``agent.conversation_loop`` at modu
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,7 +56,17 @@ def run_tool_round(
     )
     append_message(messages, assistant_msg)
 
+    # Flush open streaming boxes before tools so early content doesn't wrap tool feed
+    # lines. Display callback only — TTS (_stream_callback) must NOT receive None (EOS).
+    if agent.stream_delta_callback:
+        with suppress(Exception):
+            agent.stream_delta_callback(None)
+
     agent._execute_tool_calls(assistant_message, messages, effective_task_id, api_call_count)
+
+    # Defer the paragraph break: _fire_stream_delta() prepends one "\n\n" when real
+    # text arrives, so tool iterations don't stack blank lines.
+    agent._stream_needs_break = True
 
     return _verdict("continue")
 

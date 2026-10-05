@@ -29,6 +29,7 @@ def build_api_request(
     tools_for_api: Any,
 ) -> ApiRequestBuild:
     """Assemble the attempt's request."""
+    agent._reset_stream_delivery_tracking()
     if tools_for_api == agent.tools:
         api_kwargs = agent._build_api_kwargs(api_messages)
     else:

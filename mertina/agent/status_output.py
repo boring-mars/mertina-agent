@@ -30,14 +30,17 @@ class StatusOutputMixin:
         except (OSError, ValueError):
             pass
 
-    def _vprint(
-        self, *args: Any, force: bool = False, diagnostic: bool = False, **kwargs: Any
-    ) -> None:
-        """Verbose print — suppressed after the main response; ``force=True`` bypasses it.
-        ``suppress_status_output`` (``mertina chat -q``) wins."""
+    def _vprint(self, *args, force: bool = False, diagnostic: bool = False, **kwargs):
+        """Verbose print — suppressed while tokens are streaming (allowed during tool execution) and after
+        the main response; ``force=True`` bypasses both. ``suppress_status_output`` (``mertina chat -q``) wins."""
         if getattr(self, "suppress_status_output", False):
             return
-        if force or not getattr(self, "_mute_post_response", False):
+        if diagnostic and not self._warning_presentation_enabled():
+            return
+        if force or not (
+            getattr(self, "_mute_post_response", False)
+            or (self._has_stream_consumers() and not self._executing_tools)
+        ):
             self._safe_print(*args, **kwargs)
 
     def _call_callback(self, name: str, *args: Any, origin: str) -> None:
