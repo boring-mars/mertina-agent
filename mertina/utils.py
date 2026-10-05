@@ -33,6 +33,24 @@ def safe_json_loads(text: str, default: Any = None) -> Any:
         return default
 
 
+def _env_number(key: str, default, cast):
+    raw = os.getenv(key, "").strip()
+    try:
+        return cast(raw) if raw else default
+    except (ValueError, TypeError):
+        return default
+
+
+def env_int(key: str, default: int = 0) -> int:
+    """Read an environment variable as an integer, with fallback."""
+    return _env_number(key, default, int)
+
+
+def env_float(key: str, default: float = 0.0) -> float:
+    """Read an environment variable as a float, with fallback."""
+    return _env_number(key, default, float)
+
+
 def _parse_base_url(base_url: str) -> ParseResult | None:
     """``urlparse`` that tolerates a bare ``host[:port][/path]`` (no scheme)."""
     raw = (base_url or "").strip()
