@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mertina.agent.display import _detect_tool_failure, _tail_trunc
+from mertina.agent.display import _detect_tool_failure, _tail_trunc, build_tool_preview
 from mertina.agent.message_sanitization import coalesce_tool_call_id
 from mertina.agent.tool_dispatch_helpers import make_tool_result_message
 from mertina.tools.daemon_pool import DaemonThreadPoolExecutor
@@ -110,3 +110,26 @@ def test_daemon_pool_workers_are_daemons_and_see_the_callers_context() -> None:
 
     with DaemonThreadPoolExecutor(max_workers=1) as pool:
         assert pool.submit(probe).result(timeout=5) == ("caller", True)
+
+
+# --- build_tool_preview ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "args", "preview"),
+    [
+        ("web_search", {"query": "paris  weather\ntoday", "text": "x"}, "paris weather today"),
+        ("custom", {"path": "a.txt", "mode": "r"}, "a.txt"),  # first fallback key it has
+        ("custom", {"query": ["first", "second"]}, "first"),  # a list previews its first item
+        ("custom", {"mode": "r"}, None),
+        ("custom", {}, None),
+    ],
+)
+def test_build_tool_preview_picks_the_primary_argument(
+    name: str, args: dict[str, object], preview: str | None
+) -> None:
+    assert build_tool_preview(name, args) == preview
+
+
+def test_build_tool_preview_truncates_to_max_len() -> None:
+    assert build_tool_preview("web_search", {"query": "a long query"}, max_len=8) == "a lon..."

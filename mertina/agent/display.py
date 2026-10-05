@@ -34,7 +34,9 @@ _PRIMARY_ARGS = {
 _FALLBACK_PREVIEW_KEYS = ("query", "text", "command", "path", "name", "prompt", "code", "goal")
 
 
-def build_tool_preview(tool_name: str, args: dict, max_len: int | None = None) -> str | None:
+def build_tool_preview(
+    tool_name: str, args: dict[str, Any], max_len: int | None = None
+) -> str | None:
     """Build a short preview of a tool call's primary argument for display.
 
     *max_len* ``None`` defers to the global ``_tool_preview_max_len``; ``0`` means unlimited.

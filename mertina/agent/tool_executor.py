@@ -253,7 +253,9 @@ def _run_sequential_tool_execution_middleware(
     return _run_agent_tool_execution_middleware(agent, **kwargs)
 
 
-def _safe_callback(callback, label: str, *args, **kwargs) -> None:
+def _safe_callback(
+    callback: Callable[..., Any] | None, label: str, *args: Any, **kwargs: Any
+) -> None:
     """Invoke a UI/bridge callback if set; a failing callback is logged, never fatal."""
     if not callback:
         return
@@ -263,7 +265,7 @@ def _safe_callback(callback, label: str, *args, **kwargs) -> None:
         logging.debug("%s callback error: %s", label, callback_error)
 
 
-def _begin_tool_execution(agent, ref: _ToolCallRef) -> None:
+def _begin_tool_execution(agent: Any, ref: _ToolCallRef) -> None:
     """Run user-visible preflight on final tool arguments."""
     function_name, function_args = (
         ref.name,

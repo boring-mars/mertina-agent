@@ -27,6 +27,7 @@ class _Agent:
         self.log_prefix = ""
         self.verbose_logging = False
         self.session_id = "sess"
+        self.tool_progress_callback: Any = None
 
     def interrupt(self, reason: str) -> None:
         self.interrupt_reasons.append(reason)
@@ -130,6 +131,87 @@ def test_an_unknown_tool_yields_an_error_result(reg: ToolRegistry, execute: Any)
     execute(_Agent(), _message(_call("c1", "nope")), messages, "task")
 
     assert json.loads(messages[0]["content"]) == {"error": "Unknown tool: nope"}
+
+
+@pytest.mark.parametrize("execute", EXECUTORS)
+def test_progress_reports_each_call_as_it_starts_and_finishes(
+    reg: ToolRegistry, execute: Any
+) -> None:
+    reg.register("web_search", "demo", _schema("web_search"), lambda args, **kw: "3 results")
+    events: list[tuple[Any, ...]] = []
+    agent = _Agent()
+    agent.tool_progress_callback = lambda *args, **kwargs: events.append((*args, kwargs))
+
+    execute(agent, _message(_call("c1", "web_search", '{"query": "paris\\nweather"}')), [], "task")
+
+    started, completed = events
+    assert started == (
+        "tool.started",
+        "web_search",
+        "paris weather",
+        {"query": "paris\nweather"},
+        {},
+    )
+    event, name, preview, args, extra = completed
+    assert (event, name, preview, args) == ("tool.completed", "web_search", None, None)
+    assert extra["is_error"] is False
+    assert extra["result"] == "3 results"
+    assert extra["duration"] >= 0
+
+
+@pytest.mark.parametrize("execute", EXECUTORS)
+def test_a_failed_call_is_reported_as_an_error(reg: ToolRegistry, execute: Any) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    agent = _Agent()
+    agent.tool_progress_callback = lambda event, *args, **kwargs: events.append((event, kwargs))
+
+    execute(agent, _message(_call("c1", "nope")), [], "task")
+
+    assert [e for e, _ in events] == ["tool.started", "tool.completed"]
+    assert events[1][1]["is_error"] is True
+
+
+@pytest.mark.parametrize("execute", EXECUTORS)
+def test_a_failing_progress_callback_does_not_stop_the_tool(
+    reg: ToolRegistry, execute: Any
+) -> None:
+    reg.register("t", "demo", _schema("t"), lambda args, **kw: "ran")
+    agent = _Agent()
+
+    def broken(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("display went away")
+
+    agent.tool_progress_callback = broken
+    messages: list[dict[str, Any]] = []
+
+    execute(agent, _message(_call("c1", "t")), messages, "task")
+
+    assert messages[0]["content"] == "ran"
+
+
+def test_concurrent_progress_starts_on_the_workers_and_finishes_in_call_order(
+    reg: ToolRegistry,
+) -> None:
+    reg.register("t", "demo", _schema("t"), lambda args, **kw: f"done {args['n']}")
+    events: list[tuple[str, Any, bool]] = []
+    lock = threading.Lock()
+    agent = _Agent()
+
+    def record(event: str, name: str, preview: Any, args: Any, **kwargs: Any) -> None:
+        on_caller = threading.current_thread() is threading.main_thread()
+        with lock:
+            events.append((event, args or kwargs.get("result"), on_caller))
+
+    agent.tool_progress_callback = record
+
+    tool_executor.execute_tool_calls_concurrent(
+        agent, _message(_call("a", "t", '{"n": 1}'), _call("b", "t", '{"n": 2}')), [], "task"
+    )
+
+    started = [e for e in events if e[0] == "tool.started"]
+    assert sorted(args["n"] for _, args, _ in started) == [1, 2]
+    assert not any(on_caller for *_, on_caller in started)  # each worker announces its own call
+    assert events[2:] == [("tool.completed", "done 1", True), ("tool.completed", "done 2", True)]
 
 
 # --- sequential -----------------------------------------------------------------------------------

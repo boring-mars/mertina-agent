@@ -56,6 +56,7 @@ class _Agent:
         self._execution_thread_id: int | None = None
         self._tool_worker_threads: set[int | None] = set()
         self._tool_worker_threads_lock = threading.Lock()
+        self.tool_progress_callback: Any = None
         self.prompt_builds = 0
         for key in _SESSION_KEYS:
             setattr(self, f"session_{key}", 0)
