@@ -62,6 +62,7 @@ class AIAgent(
         quiet_mode: bool = False,
         log_prefix: str = "",
         session_id: str | None = None,
+        tool_progress_callback: callable = None,
         stream_delta_callback: Callable[..., Any] | None = None,
         tool_gen_callback: Callable[..., Any] | None = None,
         max_tokens: int | None = None,
