@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Iterator
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -52,15 +53,48 @@ def _message(content: str | None, tool_calls: list[Any] | None = None) -> Simple
     )
 
 
+def stream_chunks(response: SimpleNamespace) -> Iterator[SimpleNamespace]:
+    """``response`` as the chunks a ``stream=True`` request yields: text a word at a time, each
+    tool call's name then its arguments, the finish reason, then a choiceless usage chunk."""
+    choice = response.choices[0]
+    message = choice.message
+
+    def chunk(**delta: Any) -> SimpleNamespace:
+        fields = {"content": None, "tool_calls": None, "reasoning_content": None, **delta}
+        return SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(**fields), finish_reason=None)]
+        )
+
+    if getattr(message, "reasoning_content", None):
+        yield chunk(reasoning_content=message.reasoning_content)
+    for i, word in enumerate(message.content.split(" ") if message.content else []):
+        yield chunk(content=word if i == 0 else " " + word)
+    for index, call in enumerate(message.tool_calls or []):
+        named = SimpleNamespace(name=call.function.name, arguments=None)
+        yield chunk(tool_calls=[SimpleNamespace(index=index, id=call.id, function=named)])
+        args = SimpleNamespace(name=None, arguments=call.function.arguments)
+        yield chunk(tool_calls=[SimpleNamespace(index=index, id=None, function=args)])
+    yield SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(), finish_reason=choice.finish_reason)]
+    )
+    if response.usage is not None:
+        yield SimpleNamespace(choices=[], usage=response.usage)
+
+
 class FakeCompletions:
     """``client.chat.completions``: asks for ``clock``, then answers from its result."""
 
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
 
-    def create(self, **kwargs: Any) -> SimpleNamespace:
+    def create(self, **kwargs: Any) -> Any:
         self.requests.append(kwargs)
-        tool_rows = [m for m in kwargs["messages"] if m.get("role") == "tool"]
+        response = self._reply(kwargs["messages"])
+        return stream_chunks(response) if kwargs.get("stream") else response
+
+    @staticmethod
+    def _reply(messages: list[dict[str, Any]]) -> SimpleNamespace:
+        tool_rows = [m for m in messages if m.get("role") == "tool"]
         if not tool_rows:
             call = SimpleNamespace(
                 id="call_clock_1",

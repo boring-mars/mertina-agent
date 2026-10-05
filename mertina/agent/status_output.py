@@ -30,7 +30,9 @@ class StatusOutputMixin:
         except (OSError, ValueError):
             pass
 
-    def _vprint(self, *args, force: bool = False, diagnostic: bool = False, **kwargs):
+    def _vprint(
+        self, *args: Any, force: bool = False, diagnostic: bool = False, **kwargs: Any
+    ) -> None:
         """Verbose print — suppressed after the main response; ``force=True`` bypasses it.
         ``suppress_status_output`` (``mertina chat -q``) wins."""
         if getattr(self, "suppress_status_output", False):

@@ -6,12 +6,20 @@ Delta fan-out and the record of streamed assistant text.
 Extracted from ``run_agent.py``; every method resolves through ``AIAgent``'s MRO unchanged.
 """
 
+from collections.abc import Callable
+from typing import Any
+
 
 class StreamDeliveryMixin:
     """Delta fan-out (see module docstring)."""
 
+    stream_delta_callback: Callable[..., Any] | None
+    tool_gen_callback: Callable[..., Any] | None
+    _stream_callback: Callable[..., Any] | None
+    _strip_think_blocks: Callable[[str], str]
+
     @staticmethod
-    def _call_quietly(cb, *args) -> bool:
+    def _call_quietly(cb: Callable[..., Any] | None, *args: Any) -> bool:
         """Call ``cb(*args)`` if set, swallowing errors; True when it ran without raising."""
         if cb is None:
             return False
@@ -41,13 +49,13 @@ class StreamDeliveryMixin:
                 self._deliver_to_stream_callbacks(tail)
                 self._record_streamed_assistant_text(tail)
 
-        # Flush any benign partial-tag tail held by the think scrubber first (#17924): an innocent '<' at
-        # the end of the stream that turned out not to be a tag prefix should reach the UI.
-        # Suppress reasoning/thinking blocks via the stateful scrubber (#17924). Earlier versions ran
-        # _strip_think_blocks per-delta here, which destroyed downstream state machines when a tag was split
-        # across deltas (e.g. MiniMax-M2.7 sends '<think>' and its content as separate deltas — regex case 2
-        # erased the first delta, so the CLI/gateway state machine never saw the open tag and leaked the
-        # reasoning content as regular response text).
+        # Flush any benign partial-tag tail held by the think scrubber first (#17924): an innocent
+        # '<' at the end of the stream that turned out not to be a tag prefix should reach the UI.
+        # Suppress reasoning/thinking blocks via the stateful scrubber (#17924). Earlier versions
+        # ran _strip_think_blocks per-delta here, which destroyed downstream state machines when a
+        # tag was split across deltas (e.g. MiniMax-M2.7 sends '<think>' and its content as
+        # separate deltas — regex case 2 erased the first delta, so the CLI/gateway state machine
+        # never saw the open tag and leaked the reasoning content as regular response text).
         if think_scrubber is not None:
             think_tail = think_scrubber.flush()
             deliver(think_tail)
@@ -55,9 +63,9 @@ class StreamDeliveryMixin:
 
     @property
     def _current_streamed_assistant_text(self) -> str:
-        """Visible assistant text streamed so far this turn. Backed by a list of pieces: ``+=`` on a string
-        attribute copies the whole reply on every delta (quadratic). Hot-path emptiness checks look at
-        ``_streamed_assistant_text_parts`` so they do not join per token."""
+        """Visible assistant text streamed so far this turn. Backed by a list of pieces: ``+=`` on
+        a string attribute copies the whole reply on every delta (quadratic). Hot-path emptiness
+        checks look at ``_streamed_assistant_text_parts`` so they do not join per token."""
         parts = getattr(self, "_streamed_assistant_text_parts", None)
         return "".join(parts) if parts else ""
 
@@ -84,17 +92,18 @@ class StreamDeliveryMixin:
             self._stream_needs_break = False
             text = "\n\n" + text
         if isinstance(text, str):
-            # Stateful scrubber: per-delta regex stripping destroyed downstream state machines when a
-            # tag was split across deltas. Legacy callers lack the scrubber attribute and get the
-            # whole-string fallback.
+            # Stateful scrubber: per-delta regex stripping destroyed downstream state machines
+            # when a tag was split across deltas. Legacy callers lack the scrubber attribute and
+            # get the whole-string fallback.
             think_scrubber = getattr(self, "_stream_think_scrubber", None)
             text = (
                 think_scrubber.feed(text)
                 if think_scrubber is not None
                 else self._strip_think_blocks(text)
             )
-            # Only strip leading newlines on the first delta — mid-stream "\n" is legitimate markdown.
-            # Check the parts list, not the joined property (joining per token copies the whole reply).
+            # Only strip leading newlines on the first delta — mid-stream "\n" is legitimate
+            # markdown. Check the parts list, not the joined property (joining per token copies
+            # the whole reply).
             if not prepended_break and not getattr(self, "_streamed_assistant_text_parts", None):
                 text = text.lstrip("\n")
         if not text:
@@ -104,7 +113,8 @@ class StreamDeliveryMixin:
             self._record_streamed_assistant_text(text)
 
     def _fire_tool_gen_started(self, tool_name: str) -> None:
-        """Notify the display layer that the model is generating tool call arguments (spinner for large payloads)."""
+        """Notify the display layer that the model is generating tool call arguments (spinner for
+        large payloads)."""
         self._call_quietly(self.tool_gen_callback, tool_name)
 
     def _has_stream_consumers(self) -> bool:

@@ -19,6 +19,7 @@ from mertina.agent.conversation_loop import INTERRUPT_WAITING_FOR_MODEL_PREFIX
 from mertina.run_agent import AIAgent
 from mertina.tools.interrupt import is_interrupted, is_thread_interrupted
 from mertina.tools.registry import ToolRegistry
+from scripts.fake_loop import stream_chunks
 
 
 class _Completions:
@@ -33,7 +34,10 @@ class _Completions:
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
-        return response() if callable(response) else response
+        response = response() if callable(response) else response
+        if kwargs.get("stream") and hasattr(response, "choices"):
+            return stream_chunks(response)
+        return response  # a response, or chunks a test scripted itself
 
 
 class _Client:
@@ -223,6 +227,114 @@ def test_think_blocks_are_stripped_and_kept_as_reasoning(reg: ToolRegistry) -> N
     assert result["messages"][-1]["content"] == "It is Monday."
 
 
+# --- streaming ------------------------------------------------------------------------------------
+
+
+def _chunk(content: str | None = None, finish_reason: str | None = None) -> SimpleNamespace:
+    delta = SimpleNamespace(content=content, tool_calls=None, reasoning_content=None)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason=finish_reason)])
+
+
+def _dropping(*pieces: str) -> Callable[[], Iterator[SimpleNamespace]]:
+    """A scripted stream that sends ``pieces`` and then loses the connection."""
+
+    def stream() -> Iterator[SimpleNamespace]:
+        for piece in pieces:
+            yield _chunk(piece)
+        raise httpx.ReadError("connection reset")
+
+    return stream
+
+
+def test_text_streams_to_the_callback_as_it_arrives(reg: ToolRegistry) -> None:
+    deltas: list[str] = []
+    agent, completions = _agent(
+        [_response("<think>make a plan</think>Hello there.")], stream_delta_callback=deltas.append
+    )
+
+    result = agent.run_conversation("hi")
+
+    assert deltas == ["Hello", " there."]  # the think block, split across deltas, never shows
+    assert result["final_response"] == "Hello there."
+    (request,) = completions.requests
+    assert request["stream"] is True
+    assert request["stream_options"] == {"include_usage": True}
+    assert result["total_tokens"] == 15  # from the usage chunk
+
+
+def test_tool_names_stream_and_text_after_the_tools_starts_a_new_paragraph(
+    reg: ToolRegistry,
+) -> None:
+    _register(reg, "t", lambda args, **kw: "ok")
+    deltas: list[str | None] = []
+    names: list[str] = []
+    agent, _ = _agent(
+        [_response(tool_calls=[("c1", "t", {"x": 1})]), _response("All done.")],
+        stream_delta_callback=deltas.append,
+        tool_gen_callback=names.append,
+    )
+
+    result = agent.run_conversation("go")
+
+    assert names == ["t"]
+    assert deltas == [None, "\n\nAll", " done."]  # None closes the stream box before the tools
+    assert result["messages"][1]["tool_calls"][0]["function"]["arguments"] == '{"x": 1}'
+    assert result["final_response"] == "All done."
+
+
+def test_a_drop_before_any_text_is_retried_on_a_fresh_stream(reg: ToolRegistry) -> None:
+    deltas: list[str] = []
+    agent, completions = _agent(
+        [_dropping(), _response("Fine.")], stream_delta_callback=deltas.append
+    )
+
+    result = agent.run_conversation("hi")
+
+    assert result["final_response"] == "Fine."
+    assert deltas == ["Fine."]
+    assert len(completions.requests) == 2
+
+
+def test_a_drop_after_text_keeps_what_was_streamed(reg: ToolRegistry) -> None:
+    deltas: list[str] = []
+    agent, completions = _agent(
+        [_dropping("Partial", " answer")], stream_delta_callback=deltas.append
+    )
+
+    result = agent.run_conversation("hi")
+
+    assert deltas == ["Partial", " answer"]
+    assert len(completions.requests) == 1  # a retry would show the text twice
+    assert result["final_response"] == "Partial answer"
+    assert result["messages"][-1]["content"] == "Partial answer"
+
+
+def test_a_drop_after_text_nobody_saw_is_retried(reg: ToolRegistry) -> None:
+    agent, completions = _agent([_dropping("Partial"), _response("Whole answer.")])
+
+    result = agent.run_conversation("hi")
+
+    assert result["final_response"] == "Whole answer."
+    assert len(completions.requests) == 2
+
+
+def test_an_endpoint_that_rejects_stream_options_is_asked_again_without_them(
+    reg: ToolRegistry,
+) -> None:
+    rejected = openai.BadRequestError(
+        "Extra inputs are not permitted: stream_options",
+        response=httpx.Response(400, request=_REQUEST),
+        body=None,
+    )
+    agent, completions = _agent([rejected, _response("ok")])
+
+    assert agent.run_conversation("hi")["final_response"] == "ok"
+    first, second = completions.requests
+    assert "stream_options" in first
+    assert "stream_options" not in second
+    assert agent._stream_options_unsupported is True
+
+
 # --- budget, interrupts, failures -----------------------------------------------------------------
 
 
@@ -311,10 +423,27 @@ def test_tools_see_the_stop_on_their_own_thread(reg: ToolRegistry, calls: int) -
     assert not is_thread_interrupted(threading.get_ident())
 
 
+def _sse_events(model: str, pieces: list[str]) -> Iterator[bytes]:
+    """A streamed chat completion as server-sent events: one chunk per text piece, the finish
+    reason, the ``include_usage`` chunk, then ``[DONE]``."""
+
+    def event(choices: list[dict[str, Any]], **extra: Any) -> bytes:
+        chunk = {"id": "c1", "object": "chat.completion.chunk", "created": 0, "model": model}
+        return f"data: {json.dumps({**chunk, 'choices': choices, **extra})}\n\n".encode()
+
+    for piece in pieces:
+        yield event([{"index": 0, "delta": {"content": piece}, "finish_reason": None}])
+    yield event([{"index": 0, "delta": {}, "finish_reason": "stop"}])
+    yield event([], usage={"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3})
+    yield b"data: [DONE]\n\n"
+
+
 class _HeldServer:
-    """A local chat-completions endpoint that never answers its first request."""
+    """A local chat-completions endpoint that never finishes its first request: it streams
+    ``first_pieces`` (none by default) and then holds the connection open."""
 
     def __init__(self) -> None:
+        self.first_pieces: list[str] = []
         self.received = threading.Event()
         self.release = threading.Event()
         self.requests: list[dict[str, Any]] = []
@@ -325,30 +454,23 @@ class _HeldServer:
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 server.requests.append(body)
                 if len(server.requests) == 1:
+                    if server.first_pieces:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.end_headers()
+                        events = _sse_events(body["model"], server.first_pieces)
+                        for event in list(events)[: len(server.first_pieces)]:
+                            self.wfile.write(event)
+                        self.wfile.flush()
                     server.received.set()
                     server.release.wait(timeout=10)
                     return
-                payload = json.dumps(
-                    {
-                        "id": "c1",
-                        "object": "chat.completion",
-                        "created": 0,
-                        "model": body["model"],
-                        "choices": [
-                            {
-                                "index": 0,
-                                "message": {"role": "assistant", "content": "Back again."},
-                                "finish_reason": "stop",
-                            }
-                        ],
-                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-                    }
-                ).encode()
                 self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
-                self.wfile.write(payload)
+                for event in _sse_events(body["model"], ["Back", " again."]):
+                    self.wfile.write(event)
+                    self.wfile.flush()
 
             def log_message(self, *args: Any) -> None:
                 pass
@@ -410,6 +532,46 @@ def test_a_stop_while_waiting_for_the_model_aborts_the_request(
 
     assert after["final_response"] == "Back again."
     assert len(held_server.requests) == 2
+
+
+def test_a_stop_while_text_streams_keeps_the_partial_reply(
+    reg: ToolRegistry, held_server: _HeldServer
+) -> None:
+    held_server.first_pieces = ["Half", " an answer"]
+    deltas: list[str] = []
+    agent: Any = AIAgent(
+        api_key="test-key",
+        model="fake-model",
+        base_url=held_server.base_url,
+        quiet_mode=True,
+        stream_delta_callback=deltas.append,
+    )
+
+    def stop() -> None:
+        deadline = time.monotonic() + 5
+        while "".join(deltas) != "Half an answer" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        agent.interrupt()
+
+    stopper = threading.Thread(target=stop)
+    stopper.start()
+    started = time.monotonic()
+    result = agent.run_conversation("hi")
+    elapsed = time.monotonic() - started
+    stopper.join()
+
+    assert result["interrupted"] is True
+    assert result["final_response"] == "Half an answer"
+    assert _roles(result["messages"]) == ["user", "assistant"]
+    assert elapsed < 5  # the stream was aborted, not waited out
+
+    after = agent.run_conversation("go on", conversation_history=result["messages"])
+
+    assert after["final_response"] == "Back again."
+    assert held_server.requests[1]["messages"][-2] == {
+        "role": "assistant",
+        "content": "Half an answer",
+    }
 
 
 # --- retries --------------------------------------------------------------------------------------

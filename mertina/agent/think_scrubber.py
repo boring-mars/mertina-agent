@@ -66,7 +66,8 @@ class StreamingThinkScrubber:
             self._last_emitted_ended_newline = text.endswith("\n")
 
     def feed(self, text: str) -> str:
-        """Feed one delta; return the scrubbed visible portion ("" when it is all reasoning or held back)."""
+        """Feed one delta; return the scrubbed visible portion ("" when it is all reasoning or held
+        back)."""
         if not text:
             return ""
         buf = self._buf + text
@@ -113,10 +114,11 @@ class StreamingThinkScrubber:
         return buf[:-held] if held else buf
 
     def flush(self) -> str:
-        """End-of-stream flush: inside an unterminated block the held-back content is discarded (leaking
-        partial reasoning is worse than a truncated answer), otherwise the tail is emitted verbatim.
-        Always resets the boundary flag — intra-turn retries flush then stream again without ``reset()``,
-        and a stale False flag made the new stream's opening ``<think>`` look mid-line."""
+        """End-of-stream flush: inside an unterminated block the held-back content is discarded
+        (leaking partial reasoning is worse than a truncated answer), otherwise the tail is emitted
+        verbatim. Always resets the boundary flag — intra-turn retries flush then stream again
+        without ``reset()``, and a stale False flag made the new stream's opening ``<think>`` look
+        mid-line."""
         tail = "" if self._in_block else self._buf
         self._buf = ""
         self._in_block = False
@@ -132,11 +134,12 @@ class StreamingThinkScrubber:
         hits = [(idx, len(tag)) for tag in tags if (idx := buf_lower.find(tag)) != -1]
         return min(hits) if hits else (-1, 0)
 
-    def _find_earliest_closed_pair(self, buf: str):
-        """(start_idx, end_idx) of the earliest ``<tag>...</tag>`` pair (non-greedy, case-insensitive), else None."""
+    def _find_earliest_closed_pair(self, buf: str) -> tuple[int, int] | None:
+        """(start_idx, end_idx) of the earliest ``<tag>...</tag>`` pair (non-greedy,
+        case-insensitive), else None."""
         buf_lower = buf.lower()
         pairs = []
-        for open_tag, close_tag in zip(self._OPEN_TAGS, self._CLOSE_TAGS):
+        for open_tag, close_tag in zip(self._OPEN_TAGS, self._CLOSE_TAGS):  # noqa: B905  # upstream's zip; the tuples pair up
             open_idx = buf_lower.find(open_tag)
             close_idx = (
                 buf_lower.find(close_tag, open_idx + len(open_tag)) if open_idx != -1 else -1
@@ -158,9 +161,9 @@ class StreamingThinkScrubber:
         return min(hits) if hits else (-1, 0)
 
     def _is_block_boundary(self, buf: str, idx: int, already_emitted: list[str]) -> bool:
-        """True iff *idx* is a block boundary: position 0 after a newline-terminated (or no) prior emission,
-        or any position whose preceding text on the current line is whitespace-only (when no newline
-        precedes it in *buf*, the prior emission must also have ended with a newline)."""
+        """True iff *idx* is a block boundary: position 0 after a newline-terminated (or no) prior
+        emission, or any position whose preceding text on the current line is whitespace-only (when
+        no newline precedes it in *buf*, the prior emission must also have ended with a newline)."""
         prior_newline = (
             already_emitted[-1].endswith("\n")
             if already_emitted
@@ -174,7 +177,8 @@ class StreamingThinkScrubber:
 
     @classmethod
     def _max_partial_suffix(cls, buf: str, tags: tuple[str, ...]) -> int:
-        """Longest buf-suffix that is a strict prefix of any tag (full matches are real tags, handled elsewhere)."""
+        """Longest buf-suffix that is a strict prefix of any tag (full matches are real tags,
+        handled elsewhere)."""
         buf_lower = buf.lower()
         for i in range(min(len(buf_lower), cls._MAX_TAG_LEN - 1), 0, -1):
             suffix = buf_lower[-i:]

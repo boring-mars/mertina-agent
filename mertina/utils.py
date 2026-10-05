@@ -5,7 +5,8 @@
 
 import json
 import os
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 from urllib.parse import ParseResult, urlparse
 
 TRUTHY_STRINGS = frozenset({"1", "true", "yes", "on"})
@@ -33,7 +34,10 @@ def safe_json_loads(text: str, default: Any = None) -> Any:
         return default
 
 
-def _env_number(key: str, default, cast):
+_N = TypeVar("_N", int, float)
+
+
+def _env_number(key: str, default: _N, cast: Callable[[str], _N]) -> _N:
     raw = os.getenv(key, "").strip()
     try:
         return cast(raw) if raw else default

@@ -75,6 +75,16 @@ class _Agent:
         response = self.responses.pop(0)
         return response() if callable(response) else response
 
+    # The loop streams; the scripted model answers both paths the same way.
+    _interruptible_streaming_api_call = _interruptible_api_call
+    stream_delta_callback = None
+
+    def _has_stream_consumers(self) -> bool:
+        return False
+
+    def _reset_stream_delivery_tracking(self) -> None:
+        pass
+
     def _get_transport(self) -> ChatCompletionsTransport:
         return ChatCompletionsTransport()
 

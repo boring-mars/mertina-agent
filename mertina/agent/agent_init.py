@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime
 from typing import Any
@@ -195,8 +196,8 @@ def init_agent(
     quiet_mode: bool = False,
     log_prefix: str = "",
     session_id: str | None = None,
-    stream_delta_callback: callable = None,
-    tool_gen_callback: callable = None,
+    stream_delta_callback: Callable[..., Any] | None = None,
+    tool_gen_callback: Callable[..., Any] | None = None,
     max_tokens: int | None = None,
     platform: str | None = None,
     pass_session_id: bool = False,

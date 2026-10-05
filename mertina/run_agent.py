@@ -12,6 +12,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 import sys  # noqa: E402  # upstream order
+from collections.abc import Callable  # noqa: E402  # upstream order
 from typing import Any  # noqa: E402  # upstream order
 
 from mertina.agent.api_error_summary import (  # noqa: E402  # upstream order
@@ -61,8 +62,8 @@ class AIAgent(
         quiet_mode: bool = False,
         log_prefix: str = "",
         session_id: str | None = None,
-        stream_delta_callback: callable = None,
-        tool_gen_callback: callable = None,
+        stream_delta_callback: Callable[..., Any] | None = None,
+        tool_gen_callback: Callable[..., Any] | None = None,
         max_tokens: int | None = None,
         platform: str | None = None,
         pass_session_id: bool = False,

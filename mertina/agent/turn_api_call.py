@@ -51,7 +51,7 @@ def perform_api_call(
 
     _use_streaming = _should_stream(agent)
 
-    def _perform_api_call(next_api_kwargs):
+    def _perform_api_call(next_api_kwargs: Any) -> Any:
         if _use_streaming:
             return agent._interruptible_streaming_api_call(next_api_kwargs)
         return agent._interruptible_api_call(next_api_kwargs)

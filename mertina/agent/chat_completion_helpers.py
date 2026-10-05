@@ -16,7 +16,7 @@ import logging
 import re
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any
 
@@ -41,7 +41,7 @@ def _context_thread_target(callback: Callable[[], Any]) -> Callable[[], Any]:
     return lambda: context.run(callback)
 
 
-def _iter_provider_stream_chunks(stream):
+def _iter_provider_stream_chunks(stream: Any) -> Iterator[Any]:
     """Yield SDK chunks."""
     yield from stream
 
@@ -379,12 +379,12 @@ def handle_max_iterations(agent: Any, messages: list[dict[str, Any]], api_call_c
 
 
 def _build_partial_stream_stub(
-    role,
-    full_content,
-    full_reasoning,
-    model_name,
-    usage_obj,
-):
+    role: str,
+    full_content: str | None,
+    full_reasoning: str | None,
+    model_name: Any,
+    usage_obj: Any,
+) -> SimpleNamespace:
     """Stub for an SSE stream that ended without ``finish_reason`` after
     delivering content. Tagged ``PARTIAL_STREAM_STUB_ID`` + ``FINISH_REASON_LENGTH``
     instead of accepting truncated output as a complete turn (#32086).
@@ -448,7 +448,7 @@ def _is_sse_connection_error(exc: BaseException) -> bool:
     return any(phrase in err_lower for phrase in _SSE_CONN_PHRASES)
 
 
-def _with_stream_emitters(agent, run):
+def _with_stream_emitters(agent: Any, run: Callable[[], Any]) -> Any:
     """Run ``run()`` and return its response."""
     response = run()
     return response
@@ -460,22 +460,23 @@ class _ToolCallAccumulator:
     for every call in a parallel batch, distinguishing them only by id, so a new
     id at an already-seen raw index is redirected to a fresh slot."""
 
-    def __init__(self):
-        self.acc: dict = {}
-        self._notified: set = set()
-        self._last_id_at_idx: dict = {}  # raw_index -> last seen non-empty id
-        self._active_slot_by_idx: dict = {}  # raw_index -> current slot in acc
+    def __init__(self) -> None:
+        self.acc: dict[int, dict[str, Any]] = {}
+        self._notified: set[int] = set()
+        self._last_id_at_idx: dict[int, str] = {}  # raw_index -> last seen non-empty id
+        self._active_slot_by_idx: dict[int, int] = {}  # raw_index -> current slot in acc
         # Argument deltas are collected per slot and joined once in ``materialize`` —
         # ``+=`` per chunk rebuilds the whole string every delta (quadratic on big args).
         self._argument_parts: dict[int, list[str]] = {}
 
-    def materialize(self) -> dict:
-        """Join buffered argument deltas into each entry's ``arguments``; idempotent. Returns ``acc``."""
+    def materialize(self) -> dict[int, dict[str, Any]]:
+        """Join buffered argument deltas into each entry's ``arguments``; idempotent. Returns
+        ``acc``."""
         for idx, parts in self._argument_parts.items():
             self.acc[idx]["function"]["arguments"] = "".join(parts)
         return self.acc
 
-    def feed(self, tc_delta) -> str | None:
+    def feed(self, tc_delta: Any) -> str | None:
         """Merge one delta; return the tool name the first time it is complete."""
         raw_idx = getattr(tc_delta, "index", None)
         if raw_idx is None:
@@ -526,7 +527,7 @@ class _ToolCallAccumulator:
         name = entry["function"]["name"]
         if name and idx not in self._notified:
             self._notified.add(idx)
-            return name
+            return name  # type: ignore[no-any-return]  # entry names are str
         return None
 
 
@@ -535,31 +536,31 @@ class _StreamingCall(StreamingWaitMonitor):
     State shared between the request worker and the poll-loop monitor (interrupt abort) lives on
     the instance, mutated from both threads."""
 
-    def __init__(self, agent, api_kwargs: dict):
+    def __init__(self, agent: Any, api_kwargs: dict[str, Any]) -> None:
         self.agent = agent
         self.api_kwargs = api_kwargs
-        self.worker = None  # request thread
-        self.result = {"response": None, "error": None, "partial_tool_names": []}
+        self.worker: threading.Thread | None = None  # request thread
+        self.result: dict[str, Any] = {"response": None, "error": None, "partial_tool_names": []}
         self.clients = _RequestClientRegistry(agent)
         # Request-local cancel flag: the worker recognizes its own interrupt
         # force-close (RemoteProtocolError) and exits instead of retrying (#6600).
         self._request_cancelled = {"value": False}
         self.deltas_were_sent = {"yes": False}  # for the partial-delivery fallback
         self.stream_attempt_lock = threading.Lock()
-        self.stream_attempt_state = {
+        self.stream_attempt_state: dict[str, Any] = {
             "current": 0,
             "cancelled": set(),
             "discarded_chunks": 0,
             "discarded_bytes": 0,
         }
-        self.managed_stream_holder = {"stream": None}
+        self.managed_stream_holder: dict[str, Any] = {"stream": None}
         # Per-attempt: request-local client.
-        self._attempt_request_client = None
+        self._attempt_request_client: Any = None
 
     # ── shared small helpers ────────────────────────────────────────────
 
     @staticmethod
-    def _quiet(fn, *args) -> None:
+    def _quiet(fn: Callable[..., Any], *args: Any) -> None:
         """Best-effort callback: never let a display hook break the stream."""
         with contextlib.suppress(Exception):
             fn(*args)
@@ -605,7 +606,7 @@ class _StreamingCall(StreamingWaitMonitor):
         with self.stream_attempt_lock:
             return stream_attempt_id in self.stream_attempt_state["cancelled"]
 
-    def _discard_stale_stream_chunk(self, stream_attempt_id: int, chunk) -> None:
+    def _discard_stale_stream_chunk(self, stream_attempt_id: int, chunk: Any) -> None:
         try:
             chunk_bytes = len(repr(chunk))
         except Exception:
@@ -665,14 +666,14 @@ class _StreamingCall(StreamingWaitMonitor):
         return base, read, 30.0
 
     @staticmethod
-    def _choiceless_chunk(chunk, finish_reason):
+    def _choiceless_chunk(chunk: Any, finish_reason: Any) -> tuple[Any, Any]:
         """Chunk with empty ``choices`` -> ``(usage, finish_reason)``."""
         usage = (
             chunk.usage if hasattr(chunk, "usage") and chunk.usage else None
         )  # final usage chunk
         return usage, finish_reason
 
-    def _open_chat_stream(self, stream_kwargs: dict[str, Any]):
+    def _open_chat_stream(self, stream_kwargs: dict[str, Any]) -> Any:
         # Strict endpoints that
         # already 4xx'd on it this session (``_stream_options_unsupported``, see #9705).
         if not getattr(self.agent, "_stream_options_unsupported", False):
@@ -682,13 +683,13 @@ class _StreamingCall(StreamingWaitMonitor):
         )
         return request_client.chat.completions.create(**stream_kwargs)
 
-    def _call_chat_completions(self, stream_attempt_id: int):
+    def _call_chat_completions(self, stream_attempt_id: int) -> Any:
         """Stream a chat completions response."""
         import httpx as _httpx
 
         base_timeout, read_timeout, conn_cap = self._stream_timeouts()
-        content_parts: list = []
-        reasoning_parts: list = []
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         # OpenAI structured refusal (``delta.refusal``): the explanation streams here and
         # ``delta.content`` stays empty, so an un-accumulated refusal looks like an empty
         # stream and burns the empty-response retries (the non-streaming fix is #46013).
@@ -700,7 +701,7 @@ class _StreamingCall(StreamingWaitMonitor):
         role = "assistant"
         self._attempt_request_client = None
 
-        def _open_stream(next_api_kwargs: dict[str, Any]):
+        def _open_stream(next_api_kwargs: dict[str, Any]) -> Any:
             timeout = _httpx.Timeout(
                 connect=conn_cap, read=read_timeout, write=base_timeout, pool=conn_cap
             )
@@ -794,7 +795,9 @@ class _StreamingCall(StreamingWaitMonitor):
         )
 
     @staticmethod
-    def _assemble_tool_calls(tool_calls_acc, finish_reason):
+    def _assemble_tool_calls(
+        tool_calls_acc: dict[int, dict[str, Any]], finish_reason: Any
+    ) -> tuple[list[SimpleNamespace] | None, bool]:
         """Materialize accumulated tool calls; flag truncated/unparseable args."""
         mock_tool_calls = []
         has_truncated_tool_args = False
@@ -822,17 +825,17 @@ class _StreamingCall(StreamingWaitMonitor):
 
     def _finish_chat_stream(
         self,
-        role,
-        content_parts,
-        reasoning_parts,
-        tool_calls_acc,
-        finish_reason,
-        model_name,
-        usage_obj,
+        role: str,
+        content_parts: list[str],
+        reasoning_parts: list[str],
+        tool_calls_acc: dict[int, dict[str, Any]],
+        finish_reason: Any,
+        model_name: Any,
+        usage_obj: Any,
         *,
-        response_id=None,
-        refusal_parts=None,
-    ):
+        response_id: str | None = None,
+        refusal_parts: list[str] | None = None,
+    ) -> SimpleNamespace:
         """Assemble the non-streaming-shaped response after the chunk loop. A
         stream ending with no finish_reason is a drop, not a completion: return a
         partial-stream stub so the loop fails fast instead of executing empty
@@ -851,7 +854,7 @@ class _StreamingCall(StreamingWaitMonitor):
             and not tool_calls_acc
         ):
             raise EmptyStreamError(
-                "Provider returned an empty stream with no finish_reason (possible upstream error or malformed SSE response)."
+                "Provider returned an empty stream with no finish_reason (possible upstream error or malformed SSE response)."  # noqa: E501  # upstream's message
             )
         if has_truncated_tool_args and finish_reason is None:
             # Partial args WITH finish_reason="length" is a real output cap; with NONE the
@@ -860,8 +863,8 @@ class _StreamingCall(StreamingWaitMonitor):
                 (tool_calls_acc[idx]["function"]["name"] or "?") for idx in sorted(tool_calls_acc)
             ]
             logger.warning(
-                "Stream ended with no finish_reason while a tool call's arguments were still incomplete "
-                "(tools=%s); treating as a mid-tool-call stream drop, not an output-length truncation.",
+                "Stream ended with no finish_reason while a tool call's arguments were still incomplete "  # noqa: E501  # upstream's message
+                "(tools=%s); treating as a mid-tool-call stream drop, not an output-length truncation.",  # noqa: E501  # upstream's message
                 _dropped_names,
             )
             return _build_partial_stream_stub(
@@ -880,7 +883,7 @@ class _StreamingCall(StreamingWaitMonitor):
             # Text-only (or reasoning-only) drop: otherwise the partial text is stamped "stop".
             # A usage object proves the provider finished (include_usage's final chunk).
             logger.warning(
-                "Stream ended with no finish_reason after delivering text with no tool calls; treating as a mid-stream drop."
+                "Stream ended with no finish_reason after delivering text with no tool calls; treating as a mid-stream drop."  # noqa: E501  # upstream's message
             )
             return _build_partial_stream_stub(
                 role, full_content, full_reasoning, model_name, usage_obj
@@ -891,11 +894,12 @@ class _StreamingCall(StreamingWaitMonitor):
             content=full_content,
             tool_calls=mock_tool_calls,
             reasoning_content=full_reasoning,
-            # ``normalize_response`` reads ``message.refusal`` — same contract as the non-streaming object.
+            # ``normalize_response`` reads ``message.refusal`` — same contract as the non-streaming
+            # object.
             refusal="".join(refusal_parts or ()) or None,
         )
-        # The provider's id when the chunks carried one (chatcmpl-/gen-...): it is what a provider needs to
-        # look a request up. Fabricated only when the stream never sent one.
+        # The provider's id when the chunks carried one (chatcmpl-/gen-...): it is what a provider
+        # needs to look a request up. Fabricated only when the stream never sent one.
         response = SimpleNamespace(
             id=response_id or ("stream-" + str(uuid.uuid4())),
             model=model_name,
@@ -994,7 +998,7 @@ class _StreamingCall(StreamingWaitMonitor):
             if _is_empty_stream:
                 _what = "Provider returned an empty response stream after"
                 self.agent._buffer_diagnostic_status(
-                    f"❌ {_what} {max_retries + 1} attempts. The provider may be experiencing issues — try again in a moment."
+                    f"❌ {_what} {max_retries + 1} attempts. The provider may be experiencing issues — try again in a moment."  # noqa: E501  # upstream's message
                 )
         else:
             logger.exception("Streaming failed before delivery: %s", e)
@@ -1002,10 +1006,10 @@ class _StreamingCall(StreamingWaitMonitor):
         self.result["error"] = e
         return False
 
-    def _call_wire(self, stream_attempt_id: int):
+    def _call_wire(self, stream_attempt_id: int) -> Any:
         return self._call_chat_completions(stream_attempt_id)
 
-    def _call(self):
+    def _call(self) -> None:
         _max_stream_retries = env_int("MERTINA_STREAM_RETRIES", 2)
         # The one stream_options compatibility retry (#9705) is not a network retry and must not
         # consume the transient budget: on the last attempt (or MERTINA_STREAM_RETRIES=0) the
@@ -1023,7 +1027,8 @@ class _StreamingCall(StreamingWaitMonitor):
                     raise InterruptedError("Agent interrupted before stream retry")
                 try:
                     self.result["response"] = _with_stream_emitters(
-                        self.agent, lambda: self._call_wire(stream_attempt_id)
+                        self.agent,
+                        lambda: self._call_wire(stream_attempt_id),  # noqa: B023  # called before the loop moves on
                     )
                     return  # success
                 except Exception as e:
@@ -1045,7 +1050,7 @@ class _StreamingCall(StreamingWaitMonitor):
 
     # ── poll-loop monitor (interrupt) ───────────────────────────────────
 
-    def _run_call(self):
+    def _run_call(self) -> None:
         try:
             self._call()
         finally:
@@ -1066,7 +1071,7 @@ class _StreamingCall(StreamingWaitMonitor):
 
     # ── orchestration ───────────────────────────────────────────────────
 
-    def _partial_stream_stub(self):
+    def _partial_stream_stub(self) -> SimpleNamespace:
         """Tokens already reached the platform: a finish_reason="length" stub;
         tool_calls=None blocks executing incomplete calls.
         A text-only death with 0 visible chars never gets here: the error
@@ -1087,14 +1092,14 @@ class _StreamingCall(StreamingWaitMonitor):
             )
             _partial_text = (_partial_text or "") + _warn  # model/result bookkeeping, never gated
             logger.warning(
-                "Partial stream dropped tool call(s) %s after %s chars of text; surfaced warning to user: %s",
+                "Partial stream dropped tool call(s) %s after %s chars of text; surfaced warning to user: %s",  # noqa: E501  # upstream's message
                 _partial_names,
                 len(_partial_text or ""),
                 error,
             )
         if not _partial_names:
             logger.warning(
-                "Partial stream delivered before error; returning length-truncated stub with %s chars of "
+                "Partial stream delivered before error; returning length-truncated stub with %s chars of "  # noqa: E501  # upstream's message
                 "recovered content: %s",
                 len(_partial_text or ""),
                 error,
@@ -1108,7 +1113,7 @@ class _StreamingCall(StreamingWaitMonitor):
         )
         return _stub
 
-    def run(self):
+    def run(self) -> Any:
         """Run the request on a worker thread,
         drive the interrupt monitor, then translate the outcome."""
         self._call_done = threading.Event()
@@ -1127,7 +1132,7 @@ class _StreamingCall(StreamingWaitMonitor):
         return self.result["response"]
 
 
-def interruptible_streaming_api_call(agent, api_kwargs: dict):
+def interruptible_streaming_api_call(agent: Any, api_kwargs: dict[str, Any]) -> Any:
     """Streaming variant of _interruptible_api_call: fires the delta callbacks per
     text token (tool-call turns suppress them) and returns a SimpleNamespace in
     the non-streaming response shape."""
