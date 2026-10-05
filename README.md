@@ -92,8 +92,9 @@ The gateway, SessionDB and web frontend arrive in later milestones (see the [roa
 
 ## Getting started
 
-v0.1.0 runs the agent loop against a fake model. One full turn, with a tool call and its result
-sent back to the model:
+The agent loop runs against a fake model until real endpoints are wired up. The acceptance script
+runs a streamed turn with a tool call and its result sent back to the model, then stops a turn as
+its tool starts and continues the conversation on the same history:
 
 ```bash
 uv run python -m scripts.fake_loop

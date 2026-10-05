@@ -76,7 +76,7 @@ when it needs to, streams its answer, and can be stopped.
   and fallback come in P1.
 - **Minimal interrupt.** A stop flag checked before each model call and while streaming. On stop,
   pending tool calls are closed with an "interrupted" result so the history stays valid. Hermes's
-  interrupt handling during retries and its `/steer` integration are left out.
+  `/steer` integration is left out.
 - **System prompt.** The layered prompt builder, with only the layers this milestone needs
   (identity, tool guidance, time). Memory and skills layers arrive in v0.4.
 - **One tool.** `web_search`, behind the search provider interface, with one provider implemented.

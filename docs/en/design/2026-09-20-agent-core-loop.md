@@ -2,9 +2,9 @@
 
 **English** | [中文](../../zh/design/2026-09-20-agent-core-loop.md)
 
-**Status**: agreed, pending implementation
+**Status**: v0.1.0 released; v0.1.1 implemented (§8)
 **Roadmap milestone**: [v0.1 — Agent core](../../../ROADMAP.md#v01--agent-core)
-**Branch**: `feat/agent-core-loop`
+**Branch**: `feat/agent-core-loop` (v0.1.0), `feat/agent-streaming-retry-interrupt` (v0.1.1)
 **Upstream**: [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT). The survey below is based on a local checkout of upstream; the exact commit SHA is recorded in [Porting from Hermes](../development/porting-from-hermes.md).
 
 ---
@@ -69,7 +69,7 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 | D3 | `vendor/` is not committed | Committing it would add a 25,000-line diff. MIT attribution is satisfied by the per-file copyright headers plus [Porting from Hermes](../development/porting-from-hermes.md) in the development guidelines |
 | D4 | Flat layout (no `src/`) with exactly one top-level package, `mertina`, mirroring Hermes inside it | See §5 |
 | D5 | No wheel is published; the project ships as a standalone product run from a checkout or Docker (`[tool.uv] package = false`) | It is an application, not a library; this is also why there is no `src/` layout |
-| D6 | v0.1 is split into 0.1.0 / 0.1.1 / 0.1.2; this branch delivers v0.1.0 only | See §8 |
+| D6 | v0.1 is split into 0.1.0 / 0.1.1 / 0.1.2, one branch each | See §9 |
 | D7 | v0.1.0 ships no built-in tool: the acceptance script and the tests register their own, and the first built-in tool is `web_search`, ported in v0.1.2 | Keeps v0.1.0's tests free of any network dependency without adding a tool that has no upstream counterpart |
 
 ---
@@ -82,7 +82,7 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 | **L1** loop skeleton | `conversation_loop.py` + 15 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + 14 `AIAgent` mixins + `hermes_cli/config.py` + the ddgs provider under `plugins/web/` and others, 46 files in all | 28,234 | **Copied into vendor, then trimmed** — this is the part that has to be understood |
 | **L2** platform layer | `agent_runtime_helpers.py` (3,509), `model_metadata.py` (2,551), `turn_recovery.py` (1,813), `error_classifier.py` (1,394), `redact.py` (1,335), `display.py` (1,118), `hermes_constants.py` (1,515), `hermes_logging.py` (764) and others | ~36,000 | **Not copied wholesale**; when the loop reaches a function, that function alone is copied verbatim into a file of the same path (rule 5 of [Porting from Hermes](../development/porting-from-hermes.md)) |
 
-L0/L1/L2 is the **copy boundary** (what goes into vendor and what does not); it is a different axis from the milestone split in §8. All six L0 files are inside the boundary but land at different times: `transports/base.py`, `transports/types.py` and `iteration_budget.py` in v0.1.0; `retry_utils.py` and `tools/interrupt.py` in v0.1.1; `web_search_provider.py` in v0.1.2.
+L0/L1/L2 is the **copy boundary** (what goes into vendor and what does not); it is a different axis from the milestone split in §9. All six L0 files are inside the boundary but land at different times: `transports/base.py`, `transports/types.py` and `iteration_budget.py` in v0.1.0; `retry_utils.py` and `tools/interrupt.py` in v0.1.1; `web_search_provider.py` in v0.1.2.
 
 L2 is not the agent loop. It is model metadata tables, error classification, redaction, terminal rendering and global constants. For example, the OpenAI client is constructed in `agent_runtime_helpers.create_openai_client`. v0.1.0 ports that one function, and the lazy `process_bootstrap.OpenAI` proxy it uses, into files of the same path, and leaves the thousands of other lines in those files alone.
 
@@ -279,7 +279,7 @@ Python version follows Hermes: `>=3.11`.
 | `mertina/agent/vision_message_prep.py` | L1 trimmed (mixin) | `_get_transport()` and the tool-result content; upstream's image-part handling is out of scope for v0.1 |
 | `mertina/agent/reasoning_params.py` | L1 trimmed (mixin) | Builds the assistant message, and decides DeepSeek / Kimi / MiMo `reasoning_content` echo-back |
 | `mertina/agent/chat_completion_helpers.py` | L2, partial | Issuing the request (`interruptible_api_call` → `direct_api_call`), `build_api_kwargs`, `build_assistant_message`, and `handle_max_iterations` for an exhausted budget |
-| `mertina/agent/system_prompt.py` | L2, partial | Only `build_system_prompt`, which in v0.1.0 is the caller's `system_message` (see §7.2) |
+| `mertina/agent/system_prompt.py` | L1, partial in v0.1.0 | Only `build_system_prompt`, which in v0.1.0 is the caller's `system_message` (see §7.2). It is inside the L1 boundary, but v0.1.0 used only part of it, so it started as a partial port; v0.1.1 completes it as an L1 cut (see §8.1) |
 | `mertina/agent/message_content.py` | L2, partial | Only `flatten_message_text`: the text out of multi-part content |
 | `mertina/agent/think_scrubber.py` | L2, partial | Only `THINK_TAG_NAMES`; upstream's streaming think scrubber comes with streaming in v0.1.1 |
 | `mertina/agent/context_compressor.py` | L2, partial | Only the `MAX_ITERATIONS_SUMMARY_REQUEST` text; automatic context compression is out of scope for v0.1 |
@@ -330,19 +330,103 @@ The tools are registered by the acceptance script and the tests, so no network i
 
 ---
 
-## 8. Milestone split
+## 8. v0.1.1 design
+
+v0.1.1 adds the rest of Roadmap v0.1's loop behaviour on top of v0.1.0: streaming, minimal retry, minimal interruption, and the layered system prompt. The method is the same as in v0.1.0: each step is a verbatim port followed by a separate cut, and reached L2 functions are ported into files of the same name. The branch is `feat/agent-streaming-retry-interrupt`.
+
+### 8.1 Modules
+
+New files:
+
+| Path | Source | Notes |
+|---|---|---|
+| `mertina/agent/retry_utils.py` | L0 verbatim in substance + cut | `jittered_backoff` and `Retry-After` parsing |
+| `mertina/tools/interrupt.py` | L0 verbatim in substance + cut | Per-thread interrupt bits: `set_interrupt`, `is_interrupted`, `is_thread_interrupted`; acting-for-thread and interrupt reasons cut |
+| `mertina/agent/prompt_builder.py` | L1, cut | The default identity and tool-use guidance text blocks |
+| `mertina/agent/turn_api_error.py` | L1, cut | Classify, count and back off after a failed request |
+| `mertina/agent/api_error_summary.py` | L1, cut (mixin) | `_summarize_api_error`, `_clean_error_message`: error summaries for retry logs and failure copy |
+| `mertina/agent/stream_delivery.py` | L1, cut (mixin) | Delta fan-out: think scrubbing, a paragraph break after tools, the record of streamed text |
+| `mertina/agent/error_classifier.py` | L2, partial | `classify_api_error`, by status code and connection errors only |
+| `mertina/agent/turn_recovery.py` | L2, partial | Attempt logging, the interruptible backoff wait, and the results that end a turn when retries run out or the error is not retryable |
+| `mertina/agent/chat_completion_nonstream.py` | L2, partial | `_NonStreamRequest`: a non-streaming request on a worker thread while the caller polls for a stop |
+| `mertina/agent/chat_completion_stream_monitor.py` | L2, partial | `_monitor_loop`, the streaming request's stop poll |
+| `mertina/agent/errors.py` | L2, partial | Only `EmptyStreamError` |
+| `mertina/constants.py` | L2, partial | From `hermes_constants.py`: only the two constants of the partial-delivery stub |
+| `mertina/time.py` | L2, partial | From `hermes_time.py`: only `now()` and its timezone lookup, for the system prompt's timestamp line |
+
+Existing files with larger changes:
+
+| Path | Source | What v0.1.1 changes |
+|---|---|---|
+| `mertina/agent/system_prompt.py` | L1, cut | From v0.1.0's partial port (only `build_system_prompt`) to three layers: identity, tool guidance, and the caller's system message with a timestamp line |
+| `mertina/agent/chat_completion_helpers.py` | L2, partial | `interruptible_api_call` runs on a worker thread; adds `interruptible_streaming_api_call`, `_StreamingCall`, `_ToolCallAccumulator`, `_RequestClientRegistry` |
+| `mertina/agent/client_lifecycle.py` | L1, cut (mixin) | Request-local clients: one per request, reused after a clean finish, closed after an error, discarded after an abort |
+| `mertina/agent/agent_runtime_helpers.py` | L2, partial | `force_close_tcp_sockets` and the pool walk: an abort shuts sockets down, never closes them from another thread |
+| `mertina/agent/interrupt_control.py` | L1, cut (mixin) | `interrupt()` raises the bit on the execution thread and on concurrent tool threads; `clear_interrupt()` clears them |
+| `mertina/agent/tool_executor.py` | L1, cut | Registers tool worker threads so a stop reaches tools; `tool_progress_callback` started / completed |
+| `mertina/agent/display.py` | L2, partial | Adds `build_tool_preview`: the one-line argument preview in tool progress |
+| `mertina/agent/think_scrubber.py` | L2, whole file | `StreamingThinkScrubber`: reasoning tags scrubbed across chunk boundaries |
+| `mertina/agent/turn_api_call.py` | L1, cut | `_should_stream` and the streaming branch; a stop during the request keeps the half reply |
+| `mertina/agent/status_output.py`, `turn_failure_copy.py` | L1, cut (mixin) / L2, partial | The status buffer of a retrying turn, and the copy for exhausted and non-retryable failures |
+| `mertina/run_agent.py`, `mertina/agent/agent_init.py` | L1, cut | `StreamDeliveryMixin` joins the bases; the constructor gains `stream_delta_callback`, `tool_gen_callback` and `tool_progress_callback` |
+
+`system_prompt.py` has always been inside the L1 boundary (it is in vendor). v0.1.0 needed only part of `build_system_prompt`, so it was handled as a partial port with the Partial header; v0.1.1 uses its layering and treats it as an L1 cut, so the header is gone.
+
+### 8.2 Data flow
+
+```
+run_conversation()
+  → system prompt: identity + tool guidance + the caller's system message and timestamp line
+  → each request: reset the streamed-text record → perform_api_call
+       default → _StreamingCall (a worker thread reads the stream; the caller checks for a stop every 0.3s)
+           text deltas → think scrubbing → stream_delta_callback
+           a tool name arrives → tool_gen_callback
+       a Mock client (tests) → _NonStreamRequest (a worker thread sends the request; the caller polls for a stop)
+  → tool calls: stream_delta_callback(None) closes the output box → run the tools
+       each call: tool_progress_callback("tool.started", ...) → dispatch → append the result → ("tool.completed", ...)
+       the next text starts with a paragraph break
+  → no tool calls: take the final answer
+```
+
+Streaming is the default path, even with no callback registered, as upstream does. The return values of `chat()` and `run_conversation()` are unchanged.
+
+### 8.3 Errors, interruption, budget
+
+- **Retry**: a failed request is classified first. 429, 5xx and connection errors are retried with `jittered_backoff`, honouring `Retry-After`, for at most 3 attempts by default; other 4xx errors are not retried. The backoff wait can be interrupted. When retries run out, or the error is not retryable, the turn ends with copy that says why.
+- **Retries inside a stream**: a stream that drops before any text is reopened (`MERTINA_STREAM_RETRIES`, 2 by default); an endpoint that rejects `stream_options` is asked again without them. A drop after text was shown returns what was shown and is not retried, so nothing is shown twice. The exception is a drop in the middle of a tool call's arguments: network errors are retried then.
+- **Interruption**: `interrupt()` sets the stop flag and raises the interrupt bit on the execution thread and the tool threads, so tools can check it themselves. The model request runs on a worker thread and the caller checks every 0.3 seconds: on a stop it aborts the request-local client and raises `InterruptedError` at once. The worker thread is needed because on Windows a `shutdown()` from another thread does not wake a blocked read. The turn ends as interrupted: unfinished tool calls get results, and a stop mid-stream writes the half reply into history as an assistant message. The next turn can continue on the same history.
+- **Budget**: as in v0.1.0.
+
+### 8.4 Tests
+
+All against a fake client or a local HTTP server, with no outside network:
+
+- Retry: a rate limit retried, `Retry-After` setting the wait, a connection error retried, 5xx exhausting the retries, a 4xx not retried, a stop during the backoff
+- Interruption: a stop during a tool, tools seeing the stop on their own thread (sequential and concurrent), a stop while waiting for the model (a local server holds the request; the turn must return within 5 seconds), a stop mid-stream (the half reply kept, the next turn continuing)
+- Streaming: deltas in order, think tags split across chunks never shown, the tool name callback, the paragraph break after tools, drop retries, the partial-delivery stub, the retry without `stream_options`
+- Tool progress: started / completed on both executors, the error flag, a failing callback leaving the tool intact
+- The system prompt's layers and timestamp line
+
+### 8.5 Acceptance
+
+- `uv run python -m scripts.fake_loop` passes two scenarios: a streamed tool round trip (the deltas join into the final answer, and tool progress reports started then completed), and a turn stopped as its tool starts, followed by a turn on the same history while the fake model checks that every tool call has a result
+- Of Roadmap v0.1's "Done when", unit tests cover retries and a stop in the middle of a turn, and the conversation continues after a stop
+
+---
+
+## 9. Milestone split
 
 | | Contents | Result |
 |---|---|---|
-| **v0.1.0** (this branch) | L0 leaves + transports + registry + loop + `AIAgent` | The full loop runs against a fake client |
-| v0.1.1 | Streaming + retry + interruption (`tools/interrupt.py`, `agent/prompt_builder.py`, `agent/system_prompt.py`) | The Roadmap's stop semantics are met |
+| **v0.1.0** (`feat/agent-core-loop`) | L0 leaves + transports + registry + loop + `AIAgent` | The full loop runs against a fake client |
+| **v0.1.1** (`feat/agent-streaming-retry-interrupt`, see §8) | Streaming + retry + interruption (`tools/interrupt.py`, `agent/prompt_builder.py`, `agent/system_prompt.py`) | The Roadmap's stop semantics are met |
 | v0.1.2 | `web_search` + the `WebSearchProvider` interface + the config layer (`mertina/cli/config.py`) | The Roadmap's acceptance scenario runs against a real endpoint |
 
 When v0.1.2 lands, all three of the Roadmap's v0.1 "Done when" items are satisfied.
 
 ---
 
-## 9. Open questions
+## 10. Open questions
 
 - **How deep the L2 replacements go**: error classification, redaction and logging get minimal implementations in v0.1.0. Whether to revisit Hermes's counterparts is a P1 question.
 - **Whether `mertina/` needs more internal structure**: v0.1 has only the `agent/` and `tools/` subpackages, which is small. Revisit once the gateway, state and cron arrive.

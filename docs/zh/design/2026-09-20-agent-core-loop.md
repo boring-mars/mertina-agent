@@ -2,9 +2,9 @@
 
 [English](../../en/design/2026-09-20-agent-core-loop.md) | **中文**
 
-**状态**：已确认，待实现
+**状态**：v0.1.0 已发布；v0.1.1 已实现（§8）
 **对应 Roadmap 里程碑**：[v0.1 — Agent core](../../../ROADMAP.md#v01--agent-core)
-**分支**：`feat/agent-core-loop`
+**分支**：`feat/agent-core-loop`（v0.1.0）、`feat/agent-streaming-retry-interrupt`（v0.1.1）
 **上游**：[Hermes Agent](https://github.com/NousResearch/hermes-agent)（MIT）。勘察基于本地检出的上游快照，具体 commit SHA 记录在[从 Hermes 移植](../development/porting-from-hermes.md)中
 
 ---
@@ -69,7 +69,7 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 | D3 | `vendor/` 不提交 git | 提交会带来 2.5 万行 diff；MIT 署名靠每文件版权头 + 开发规范中的[从 Hermes 移植](../development/porting-from-hermes.md)即可满足 |
 | D4 | 扁平布局（不用 `src/`），顶层只有一个具名包 `mertina`，其内部严格镜像 Hermes | 见 §5 |
 | D5 | 不发布 wheel，作为独立产品从 checkout / Docker 运行（`[tool.uv] package = false`） | 项目定位是应用不是库；也是不用 `src/` 布局的理由 |
-| D6 | v0.1 拆成 0.1.0 / 0.1.1 / 0.1.2 三刀，本分支只做 v0.1.0 | 见 §8 |
+| D6 | v0.1 拆成 0.1.0 / 0.1.1 / 0.1.2 三刀，每刀一个分支 | 见 §9 |
 | D7 | v0.1.0 不带内置工具：工具路径由验收脚本和测试自己注册的工具跑通，第一个内置工具是 v0.1.2 从上游搬的 `web_search` | 让 v0.1.0 的测试完全不依赖网络，同时不在仓库里放一个上游没有对应物的工具 |
 
 ---
@@ -82,7 +82,7 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 | **L1** 循环骨架 | `conversation_loop.py` + 15 个 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + `AIAgent` 的 14 个 mixin + `hermes_cli/config.py` + `plugins/web/` 的 ddgs provider 等，共 46 个文件 | 28,234 | **拷进 vendor 后裁剪**，这是需要读懂的部分 |
 | **L2** 平台层 | `agent_runtime_helpers.py`(3,509)、`model_metadata.py`(2,551)、`turn_recovery.py`(1,813)、`error_classifier.py`(1,394)、`redact.py`(1,335)、`display.py`(1,118)、`hermes_constants.py`(1,515)、`hermes_logging.py`(764) 等 | ~36,000 | **不整体拷**；循环用到某个函数时，只把它逐字搬到同名文件（见[从 Hermes 移植](../development/porting-from-hermes.md)规则 5） |
 
-L0/L1/L2 划分的是**拷贝边界**（哪些文件进 vendor、哪些不进），与 §8 的里程碑划分是两个维度。L0 的 6 个文件都在边界内，但落地时间不同：`transports/base.py`、`transports/types.py`、`iteration_budget.py` 在 v0.1.0，`retry_utils.py`、`tools/interrupt.py` 在 v0.1.1，`web_search_provider.py` 在 v0.1.2。
+L0/L1/L2 划分的是**拷贝边界**（哪些文件进 vendor、哪些不进），与 §9 的里程碑划分是两个维度。L0 的 6 个文件都在边界内，但落地时间不同：`transports/base.py`、`transports/types.py`、`iteration_budget.py` 在 v0.1.0，`retry_utils.py`、`tools/interrupt.py` 在 v0.1.1，`web_search_provider.py` 在 v0.1.2。
 
 L2 不是 agent loop，是模型元数据表、错误分类、脱敏、终端渲染、全局常量。举例：openai 客户端的构造在 `agent_runtime_helpers.create_openai_client` 里，v0.1.0 只把这一个函数（以及它用到的延迟加载代理 `process_bootstrap.OpenAI`）搬到同名文件，这两个文件其余的几千行不动。
 
@@ -272,7 +272,7 @@ Python 版本跟随 Hermes：`>=3.11`。
 | `mertina/agent/vision_message_prep.py` | L1 裁剪（mixin） | `_get_transport()` 与工具结果内容；上游的图片分片处理不在 v0.1 内 |
 | `mertina/agent/reasoning_params.py` | L1 裁剪（mixin） | 组装 assistant 消息，以及 DeepSeek / Kimi / MiMo 的 `reasoning_content` 回传判定 |
 | `mertina/agent/chat_completion_helpers.py` | L2 部分搬运 | 发出请求（`interruptible_api_call` → `direct_api_call`）、`build_api_kwargs`、`build_assistant_message`，以及预算耗尽时的 `handle_max_iterations` |
-| `mertina/agent/system_prompt.py` | L2 部分搬运 | 只有 `build_system_prompt`，v0.1.0 只取调用方的 `system_message`（见 §7.2） |
+| `mertina/agent/system_prompt.py` | L1，v0.1.0 部分搬运 | 只有 `build_system_prompt`，v0.1.0 只取调用方的 `system_message`（见 §7.2）。它在 L1 边界内，v0.1.0 只用到一部分，所以先按部分搬运处理；v0.1.1 按 L1 裁剪补全（见 §8.1） |
 | `mertina/agent/message_content.py` | L2 部分搬运 | 只有 `flatten_message_text`：从多段内容里取出文本 |
 | `mertina/agent/think_scrubber.py` | L2 部分搬运 | 只有 `THINK_TAG_NAMES`；上游的流式 think 清洗随流式输出在 v0.1.1 |
 | `mertina/agent/context_compressor.py` | L2 部分搬运 | 只有 `MAX_ITERATIONS_SUMMARY_REQUEST` 这段请求文本；自动上下文压缩不在 v0.1 内 |
@@ -323,19 +323,103 @@ v0.1.0 只做预算和基本的 stop flag；重试与流式中断在 v0.1.1。
 
 ---
 
-## 8. 分刀
+## 8. v0.1.1 设计
+
+v0.1.1 在 v0.1.0 的循环上补齐 Roadmap v0.1 的三项：流式输出、最小重试、最小中断，以及分层的 system prompt。做法与 v0.1.0 相同：每一步先逐字搬运、再单独删减，用到的 L2 函数按需搬到同名文件。分支是 `feat/agent-streaming-retry-interrupt`。
+
+### 8.1 模块清单
+
+新增的文件：
+
+| 路径 | 来源 | 说明 |
+|---|---|---|
+| `mertina/agent/retry_utils.py` | L0 语义逐字抄 + 删减 | `jittered_backoff` 和 `Retry-After` 解析 |
+| `mertina/tools/interrupt.py` | L0 语义逐字抄 + 删减 | 按线程记录的中断位：`set_interrupt`、`is_interrupted`、`is_thread_interrupted`；去掉按线程代办和中断原因 |
+| `mertina/agent/prompt_builder.py` | L1 裁剪 | 默认身份和工具使用说明这几段文本 |
+| `mertina/agent/turn_api_error.py` | L1 裁剪 | 请求出错后的分类、计数和退避 |
+| `mertina/agent/api_error_summary.py` | L1 裁剪（mixin） | `_summarize_api_error`、`_clean_error_message`：重试日志和失败文案用的错误摘要 |
+| `mertina/agent/stream_delivery.py` | L1 裁剪（mixin） | 流式增量分发：think 清洗、工具之后换段、记录已输出的文本 |
+| `mertina/agent/error_classifier.py` | L2 部分搬运 | `classify_api_error`，只按状态码和连接错误分类 |
+| `mertina/agent/turn_recovery.py` | L2 部分搬运 | 失败尝试的日志、退避等待（可被中断）、重试耗尽或不可重试时的结束结果 |
+| `mertina/agent/chat_completion_nonstream.py` | L2 部分搬运 | `_NonStreamRequest`：非流式请求在 worker 线程上发出，调用方轮询中断 |
+| `mertina/agent/chat_completion_stream_monitor.py` | L2 部分搬运 | 流式请求的中断轮询 `_monitor_loop` |
+| `mertina/agent/errors.py` | L2 部分搬运 | 只有 `EmptyStreamError` |
+| `mertina/constants.py` | L2 部分搬运 | 来自 `hermes_constants.py`，只有部分输出兜底用的两个常量 |
+| `mertina/time.py` | L2 部分搬运 | 来自 `hermes_time.py`，只有 `now()` 及其时区解析：system prompt 里的时间行 |
+
+改动较大的既有文件：
+
+| 路径 | 来源 | v0.1.1 的变化 |
+|---|---|---|
+| `mertina/agent/system_prompt.py` | L1 裁剪 | 从 v0.1.0 的部分搬运（只有 `build_system_prompt`）扩成三层：身份、工具说明、调用方的 system message 加时间行 |
+| `mertina/agent/chat_completion_helpers.py` | L2 部分搬运 | `interruptible_api_call` 走 worker 线程；新增 `interruptible_streaming_api_call`、`_StreamingCall`、`_ToolCallAccumulator`、`_RequestClientRegistry` |
+| `mertina/agent/client_lifecycle.py` | L1 裁剪（mixin） | 请求专用客户端：每次请求单独建客户端，正常结束后复用，出错后关闭，被中止后作废 |
+| `mertina/agent/agent_runtime_helpers.py` | L2 部分搬运 | `force_close_tcp_sockets` 及连接池遍历：中止请求时只 `shutdown` 套接字，不跨线程 `close` |
+| `mertina/agent/interrupt_control.py` | L1 裁剪（mixin） | `interrupt()` 同时设置执行线程和并发工具线程的中断位，`clear_interrupt()` 一并清除 |
+| `mertina/agent/tool_executor.py` | L1 裁剪 | 登记工具 worker 线程，让中断能传到工具里；`tool_progress_callback` 的 started / completed |
+| `mertina/agent/display.py` | L2 部分搬运 | 加入 `build_tool_preview`：工具进度里的单行参数预览 |
+| `mertina/agent/think_scrubber.py` | L2，整文件 | `StreamingThinkScrubber`：跨分块的推理标签清洗 |
+| `mertina/agent/turn_api_call.py` | L1 裁剪 | `_should_stream` 和流式分支；请求被中断时保留已输出的半句 |
+| `mertina/agent/status_output.py`、`turn_failure_copy.py` | L1 裁剪（mixin） / L2 部分搬运 | 重试过程的状态缓冲，重试耗尽和不可重试的失败文案 |
+| `mertina/run_agent.py`、`mertina/agent/agent_init.py` | L1 裁剪 | 接入 `StreamDeliveryMixin`；构造参数加入 `stream_delta_callback`、`tool_gen_callback`、`tool_progress_callback` |
+
+`system_prompt.py` 一直在 L1 边界内（vendor 里有它）。v0.1.0 只需要 `build_system_prompt` 的一部分，所以当时按部分搬运处理、带 Partial 头；v0.1.1 用到了它的分层逻辑，按 L1 裁剪处理，Partial 头随之去掉。
+
+### 8.2 数据流
+
+```
+run_conversation()
+  → system prompt：身份 + 工具说明 + 调用方 system message 与时间行
+  → 每次请求：重置流式记录 → perform_api_call
+       默认 → _StreamingCall（worker 线程读流，调用方每 0.3s 检查中断）
+           文本增量 → think 清洗 → stream_delta_callback
+           工具名到达 → tool_gen_callback
+       客户端是 Mock 时（测试）→ _NonStreamRequest（worker 线程发请求，调用方轮询中断）
+  → 有工具调用：stream_delta_callback(None) 关闭输出框 → 执行工具
+       每个调用：tool_progress_callback("tool.started", …) → 派发 → 追加结果 → ("tool.completed", …)
+       下一段文字前加一个空行
+  → 无工具调用：收下最终回答
+```
+
+流式是默认路径：即使没有注册回调也走流式，与上游一致。`chat()` 和 `run_conversation()` 的返回值不变。
+
+### 8.3 错误、中断、预算
+
+- **重试**：请求出错后先分类。429、5xx 和连接错误按 `jittered_backoff` 退避重试，尊重 `Retry-After`，默认最多尝试 3 次；其他 4xx 不重试。退避等待期间可以被中断。重试耗尽或不可重试时，以一条说明原因的文案结束这一轮。
+- **流式内部的重试**：流还没输出文字就断开时，重新打开流（`MERTINA_STREAM_RETRIES`，默认 2 次）；端点拒绝 `stream_options` 时，不带它再请求一次。已经输出文字之后才断开，就返回已输出的部分，不重试，避免重复输出。例外是工具调用的参数没传完就断开：这时重试网络类错误。
+- **中断**：`interrupt()` 设置停止标志，同时设置执行线程和工具线程的中断位，工具可以自己检查。模型请求在 worker 线程上进行，调用方每 0.3 秒检查一次：发现停止，就中止请求专用的客户端，并立即抛出 `InterruptedError`。之所以用 worker 线程，是因为在 Windows 上跨线程 `shutdown()` 不能唤醒阻塞的读取。这一轮以中断结束：未完成的工具调用补上结果；流式中途停止时，已输出的半句作为 assistant 消息写入历史。下一轮可以在同一段历史上继续。
+- **预算**：与 v0.1.0 相同。
+
+### 8.4 测试
+
+全部用 fake client 或本地 HTTP 服务器，不访问外网：
+
+- 重试：限流后重试、`Retry-After` 决定等待时间、连接错误重试、5xx 重试耗尽、4xx 不重试、退避期间停止
+- 中断：工具执行中停止、工具在自己的线程上能看到停止（串行与并发）、等模型回应时停止（本地服务器挂住请求，要求 5 秒内返回）、流式输出到一半时停止（保留半句，下一轮继续）
+- 流式：增量依次到达、跨分块的 think 标签不露出、工具名回调、工具之后换段、断流重试、部分输出兜底、`stream_options` 被拒后重试
+- 工具进度：串行与并发都收到 started / completed、出错标记、回调异常不影响工具
+- system prompt 的分层和时间行
+
+### 8.5 验收标准
+
+- `uv run python -m scripts.fake_loop` 通过两个场景：一轮流式的工具往返（增量拼起来等于最终回答，工具进度依次收到 started / completed）；一轮在工具开始时停止，下一轮在同一段历史上继续，假模型校验每个工具调用都有结果
+- Roadmap v0.1 的「Done when」里，重试和「turn 中途 stop」两项由单元测试覆盖，停止后对话可以继续
+
+---
+
+## 9. 分刀
 
 | | 内容 | 产出 |
 |---|---|---|
-| **v0.1.0**（本分支） | L0 叶子 + transports + registry + loop + `AIAgent` | fake client 下跑通完整循环 |
-| v0.1.1 | 流式输出 + 重试 + 中断（`tools/interrupt.py`、`agent/prompt_builder.py`、`agent/system_prompt.py`） | Roadmap 的 stop 语义达标 |
+| **v0.1.0**（`feat/agent-core-loop`） | L0 叶子 + transports + registry + loop + `AIAgent` | fake client 下跑通完整循环 |
+| **v0.1.1**（`feat/agent-streaming-retry-interrupt`，见 §8） | 流式输出 + 重试 + 中断（`tools/interrupt.py`、`agent/prompt_builder.py`、`agent/system_prompt.py`） | Roadmap 的 stop 语义达标 |
 | v0.1.2 | `web_search` + `WebSearchProvider` 接口 + 配置层（`mertina/cli/config.py`） | 真实 endpoint 跑通 Roadmap 验收场景 |
 
 v0.1.2 完成时，Roadmap v0.1 的三条「Done when」全部满足。
 
 ---
 
-## 9. 遗留问题
+## 10. 遗留问题
 
 - **L2 的替代实现深度未定**：错误分类、脱敏、日志在 v0.1.0 用最简实现，P1 再评估要不要回头参考 Hermes 的对应模块。
 - **`mertina/` 内部是否需要再分层**：v0.1 只有 `agent/` 和 `tools/` 两个子包，规模小。等 gateway、state、cron 进来后，是否需要在 `mertina/` 下引入更多分层，到时再看。
