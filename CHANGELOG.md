@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-05
+
 The second cut of the v0.1 agent core: streaming, retry and interruption, still against a fake
 model.
 
@@ -46,5 +48,6 @@ The full loop runs against a fake model; real endpoints arrive in v0.1.2.
   with client construction and lifecycle
 - A per-turn iteration budget and a basic stop flag
 
-[Unreleased]: https://github.com/boring-mars/mertina-agent/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/boring-mars/mertina-agent/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/boring-mars/mertina-agent/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/boring-mars/mertina-agent/releases/tag/v0.1.0
