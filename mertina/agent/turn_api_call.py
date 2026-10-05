@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import time
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,42 +16,18 @@ from mertina.agent.message_metadata import append_message
 logger = logging.getLogger("mertina.agent.conversation_loop")
 
 
-def stop_thinking_spinner(agent: Any, thinking_spinner: Any) -> None:
-    """Stop the spinner silently and clear the thinking callback; returns ``None`` so
-    callers can rebind ``thinking_spinner = stop_thinking_spinner(agent, thinking_spinner)``."""
-    if thinking_spinner:
-        thinking_spinner.stop("")
-    if agent.thinking_callback:
-        agent.thinking_callback("")
-    return None
-
-
 @dataclass
 class ApiCallVerdict:
-    """``action``: ``"fallthrough"`` (``response`` is ready for verification) or ``"break"``
-    (a redirect crossed the response — rebuild armed on ``_retry`` or ``interrupted``)."""
+    """``action``: ``"fallthrough"`` (``response`` is ready for verification)."""
 
     action: str
     response: Any
-    thinking_spinner: Any
-    interrupted: Any
 
 
 def _should_stream(agent: Any) -> bool:
-    """Streaming is preferred even without consumers (stale-stream / read-timeout health
-    checks); disabled on provider signal, ACP providers (``acp://`` scheme or an
-    external-process provider profile), MoA without a display consumer, or Mock clients in
+    """Streaming is preferred even without consumers; disabled for Mock clients in
     tests (SimpleNamespace, not stream iterators)."""
-    if getattr(agent, "_disable_streaming", False):
-        return False
-    _base = str(agent.base_url or "").lower()
-    from mertina.cli.runtime_provider_backends import _is_external_process_provider
-
-    if _base.startswith(("acp://", "acp+tcp://")) or _is_external_process_provider(agent.provider):
-        return False
     if not agent._has_stream_consumers():
-        if agent.provider == "moa":
-            return False
         from unittest.mock import Mock
 
         if isinstance(getattr(agent, "client", None), Mock):
@@ -64,17 +39,6 @@ def perform_api_call(
     agent: Any,
     *,
     api_kwargs: Any,
-    _original_api_kwargs: Any,
-    _llm_middleware_trace: Any,
-    _moa_prepared_request: Any,
-    _retry: Any,
-    thinking_spinner: Any,
-    retry_count: Any,
-    api_call_count: Any,
-    api_request_id: Any,
-    effective_task_id: Any,
-    turn_id: Any,
-    interrupted: Any,
 ) -> ApiCallVerdict:
     """Issue the request (see ``_should_stream`` for the streaming decision)."""
     response = None
@@ -83,96 +47,16 @@ def perform_api_call(
         return ApiCallVerdict(
             action=action,
             response=response,
-            thinking_spinner=thinking_spinner,
-            interrupted=interrupted,
         )
-
-    def _stop_spinner():
-        nonlocal thinking_spinner
-        thinking_spinner = stop_thinking_spinner(agent, thinking_spinner)
 
     _use_streaming = _should_stream(agent)
 
     def _perform_api_call(next_api_kwargs):
-        if agent.api_mode == "codex_responses":
-            next_api_kwargs = agent._get_transport().preflight_kwargs(
-                next_api_kwargs,
-                allow_stream=False,
-                is_github_responses=agent._is_copilot_url(),
-                sanitize_harmony_tokens=agent._is_codex_backend(),
-            )
         if _use_streaming:
-            return agent._interruptible_streaming_api_call(
-                next_api_kwargs, on_first_delta=_stop_spinner
-            )
-        from mertina.agent import relay_llm
+            return agent._interruptible_streaming_api_call(next_api_kwargs)
+        return agent._interruptible_api_call(next_api_kwargs)
 
-        return relay_llm.execute(
-            next_api_kwargs,
-            agent._interruptible_api_call,
-            session_id=str(agent.session_id or ""),
-            name=str(agent.provider or "provider"),
-            model_name=str(agent.model or ""),
-            metadata={
-                "api_mode": agent.api_mode,
-                "api_request_id": api_request_id,
-                "call_role": (
-                    "delegated"
-                    if getattr(agent, "is_subagent", False)
-                    else "fallback"
-                    if int(getattr(agent, "_fallback_index", 0) or 0) > 0
-                    else "primary"
-                ),
-                "retry_count": retry_count,
-            },
-            defer_logical_completion=True,
-        )
-
-    from mertina.cli.middleware import run_llm_execution_middleware
-
-    # The ``_model_request_active`` bracket is taken under the redirect lock when one exists,
-    # so redirect() can't observe a half-toggled flag.
-    _model_request_active = getattr(agent, "_model_request_active", None)
-    _redirect_lock = getattr(agent, "_pending_redirect_lock", None)
-    _bracket = nullcontext() if _redirect_lock is None else _redirect_lock
-    with _bracket:
-        if _model_request_active is not None:
-            _model_request_active.set()
-    try:
-        response = run_llm_execution_middleware(
-            api_kwargs,
-            _perform_api_call,
-            original_request=_original_api_kwargs,
-            task_id=effective_task_id,
-            turn_id=turn_id,
-            api_request_id=api_request_id,
-            session_id=agent.session_id or "",
-            platform=agent.platform or "",
-            model=agent.model,
-            provider=agent.provider,
-            base_url=agent.base_url,
-            api_mode=agent.api_mode,
-            api_call_count=api_call_count,
-            middleware_trace=list(_llm_middleware_trace),
-        )
-    finally:
-        with _bracket:
-            if _model_request_active is not None:
-                _model_request_active.clear()
-            _redirect_crossed_response = (
-                bool(agent._pending_redirect)
-                if _redirect_lock is not None
-                else agent._has_pending_redirect()
-            )
-    if _redirect_crossed_response:
-        # Response and redirect can cross threads: discard the now-stale
-        # response and rebuild from the correction rather than lose it.
-        thinking_spinner = stop_thinking_spinner(agent, thinking_spinner)
-        if agent.clear_interrupt(preserve_redirect=True):
-            _retry.restart_with_redirected_messages = True
-        else:
-            interrupted = True
-        return _verdict("break")
+    response = _perform_api_call(api_kwargs)
     return _verdict("fallthrough")
 
 
