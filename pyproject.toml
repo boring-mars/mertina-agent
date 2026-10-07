@@ -27,6 +27,9 @@ dependencies = [
     "tzdata==2025.3; sys_platform == 'win32'",
     # config.yaml (mertina/cli/config.py); Hermes pins the same version.
     "pyyaml==6.0.3",
+    # The keyless web_search provider (mertina/plugins/web/ddgs). Hermes leaves it optional and
+    # unpinned; it is the only provider here, so it is a dependency, pinned to the version tested.
+    "ddgs==9.16.0",
 ]
 
 [dependency-groups]
