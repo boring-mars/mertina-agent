@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The third cut of the v0.1 agent core: the first built-in tool, `web_search`, and a config layer
+that points the agent at a real endpoint.
+
+### Added
+
+- `web_search`, the first built-in tool, behind the `WebSearchProvider` interface and the provider
+  registry. The one provider is the keyless DuckDuckGo plugin (ddgs): each search runs in a
+  disposable child process with a 30-second deadline, stops when the turn is stopped, and gets an
+  environment with provider keys stripped. A backend chosen in config.yaml that is not registered
+  is an error rather than a silent switch to another provider
+- Discovery of bundled plugins, gated by `plugins.enabled` and `plugins.disabled` in config.yaml
+- The config layer: `config.yaml` and `.env` in the Mertina home (`%LOCALAPPDATA%\mertina` on
+  Windows, `~/.mertina` elsewhere, or `MERTINA_HOME`). Defaults are merged in, `${VAR}`
+  references are expanded, and a broken file falls back to the defaults with a warning
+- `run_agent.main()` loads the `.env` into the process environment, then takes the model endpoint
+  from its arguments, config.yaml `model` (a model name, or `default`, `base_url` and `api_key`),
+  and `OPENAI_BASE_URL` / `OPENAI_API_KEY`, in that order
+- `scripts/real_loop.py`, the acceptance run against a real endpoint: a `web_search` round trip,
+  and a stop the next turn recovers from
+- Dependencies: `pyyaml`, `ddgs` and `python-dotenv`
+
+### Changed
+
+- The `agent` section of config.yaml sets the retry count and the tool-use guidance again, and
+  `timezone` sets the time zone when `MERTINA_TIMEZONE` is unset
+
 ## [0.1.1] - 2026-10-05
 
 The second cut of the v0.1 agent core: streaming, retry and interruption, still against a fake

@@ -2,9 +2,9 @@
 
 [English](../../en/design/2026-09-20-agent-core-loop.md) | **中文**
 
-**状态**：v0.1.0 已发布；v0.1.1 已实现（§8）
+**状态**：v0.1.0、v0.1.1 已发布；v0.1.2 已实现（§9）
 **对应 Roadmap 里程碑**：[v0.1 — Agent core](../../../ROADMAP.md#v01--agent-core)
-**分支**：`feat/agent-core-loop`（v0.1.0）、`feat/agent-streaming-retry-interrupt`（v0.1.1）
+**分支**：`feat/agent-core-loop`（v0.1.0）、`feat/agent-streaming-retry-interrupt`（v0.1.1）、`feat/web-search-config`（v0.1.2）
 **上游**：[Hermes Agent](https://github.com/NousResearch/hermes-agent)（MIT）。勘察基于本地检出的上游快照，具体 commit SHA 记录在[从 Hermes 移植](../development/porting-from-hermes.md)中
 
 ---
@@ -69,7 +69,7 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 | D3 | `vendor/` 不提交 git | 提交会带来 2.5 万行 diff；MIT 署名靠每文件版权头 + 开发规范中的[从 Hermes 移植](../development/porting-from-hermes.md)即可满足 |
 | D4 | 扁平布局（不用 `src/`），顶层只有一个具名包 `mertina`，其内部严格镜像 Hermes | 见 §5 |
 | D5 | 不发布 wheel，作为独立产品从 checkout / Docker 运行（`[tool.uv] package = false`） | 项目定位是应用不是库；也是不用 `src/` 布局的理由 |
-| D6 | v0.1 拆成 0.1.0 / 0.1.1 / 0.1.2 三刀，每刀一个分支 | 见 §9 |
+| D6 | v0.1 拆成 0.1.0 / 0.1.1 / 0.1.2 三刀，每刀一个分支 | 见 §10 |
 | D7 | v0.1.0 不带内置工具：工具路径由验收脚本和测试自己注册的工具跑通，第一个内置工具是 v0.1.2 从上游搬的 `web_search` | 让 v0.1.0 的测试完全不依赖网络，同时不在仓库里放一个上游没有对应物的工具 |
 
 ---
@@ -82,7 +82,7 @@ run_agent      → tools.delegate_tool → tools.delegate_tool_registry → tui_
 | **L1** 循环骨架 | `conversation_loop.py` + 15 个 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + `AIAgent` 的 14 个 mixin + `hermes_cli/config.py` + `plugins/web/` 的 ddgs provider 等，共 46 个文件 | 28,234 | **拷进 vendor 后裁剪**，这是需要读懂的部分 |
 | **L2** 平台层 | `agent_runtime_helpers.py`(3,509)、`model_metadata.py`(2,551)、`turn_recovery.py`(1,813)、`error_classifier.py`(1,394)、`redact.py`(1,335)、`display.py`(1,118)、`hermes_constants.py`(1,515)、`hermes_logging.py`(764) 等 | ~36,000 | **不整体拷**；循环用到某个函数时，只把它逐字搬到同名文件（见[从 Hermes 移植](../development/porting-from-hermes.md)规则 5） |
 
-L0/L1/L2 划分的是**拷贝边界**（哪些文件进 vendor、哪些不进），与 §9 的里程碑划分是两个维度。L0 的 6 个文件都在边界内，但落地时间不同：`transports/base.py`、`transports/types.py`、`iteration_budget.py` 在 v0.1.0，`retry_utils.py`、`tools/interrupt.py` 在 v0.1.1，`web_search_provider.py` 在 v0.1.2。
+L0/L1/L2 划分的是**拷贝边界**（哪些文件进 vendor、哪些不进），与 §10 的里程碑划分是两个维度。L0 的 6 个文件都在边界内，但落地时间不同：`transports/base.py`、`transports/types.py`、`iteration_budget.py` 在 v0.1.0，`retry_utils.py`、`tools/interrupt.py` 在 v0.1.1，`web_search_provider.py` 在 v0.1.2。
 
 L2 不是 agent loop，是模型元数据表、错误分类、脱敏、终端渲染、全局常量。举例：openai 客户端的构造在 `agent_runtime_helpers.create_openai_client` 里，v0.1.0 只把这一个函数（以及它用到的延迟加载代理 `process_bootstrap.OpenAI`）搬到同名文件，这两个文件其余的几千行不动。
 
@@ -214,8 +214,9 @@ Mertina 自己写的、上游没有对应物的文件，按自身合适的方式
 | `openai` | 客户端构造在 L2 的 `agent_runtime_helpers.create_openai_client`，按需部分搬运 | **v0.1.0 需要** |
 | `fire` | `run_agent.py` 的 `main()`，只在 `__main__` 里导入 | **v0.1.0 需要**，与上游同样锁 `0.7.1`（逐字保留入口，不改写成 `argparse`） |
 | `httpx` | `tools/web_tools.py` | openai SDK 自带，不单列 |
-| `ddgs` | `tools/web_tools.py` | v0.1.2（keyless search provider） |
-| `pyyaml` | `hermes_cli/config.py` | v0.1.2（配置文件） |
+| `ddgs` | `plugins/web/ddgs/provider.py` | **v0.1.2 需要**，免 key 的搜索 provider，锁 `9.16.0`（上游是可选依赖、不锁版本） |
+| `pyyaml` | `hermes_cli/config.py` | **v0.1.2 需要**，读 config.yaml，与上游同样锁 `6.0.3` |
+| `python-dotenv` | `hermes_cli/env_loader.py` | **v0.1.2 需要**，启动时载入 `.env`，与上游同样锁 `1.2.2` |
 
 Hermes 核心依赖 36 个（`rich`、`tenacity`、`pydantic`、`fastapi`、`Pillow`、`croniter`、`PyJWT` 等），**v0.1.0 一个都不需要，只依赖 `openai`**。注意 `tenacity` 在 Hermes 的重试路径上也没被使用——`retry_utils.py` 是手写退避。
 
@@ -407,22 +408,112 @@ run_conversation()
 
 ---
 
-## 9. 分刀
+## 9. v0.1.2 设计
+
+v0.1.2 补齐 Roadmap v0.1 剩下的部分：第一个内置工具 `web_search`、它背后的搜索 provider 接口，以及读取模型端点的配置层，让循环能对真实端点跑通验收场景。做法与前两刀相同：逐字搬运、单独删减、用到的 L2 定义按需部分搬运，删减中的改写都记在[从 Hermes 移植](../development/porting-from-hermes.md)的偏差表里。分支是 `feat/web-search-config`。
+
+### 9.1 模块清单
+
+新增的文件：
+
+| 路径 | 来源 | 说明 |
+|---|---|---|
+| `mertina/agent/web_search_provider.py` | L0 语义逐字抄 + 删减 | `WebSearchProvider` 接口，只保留 search 部分（见 §11） |
+| `mertina/agent/provider_base.py` | L2 部分搬运 | `ProviderBase`：各类 provider 共用的名字和可用性 |
+| `mertina/agent/provider_registry.py` | L2 部分搬运 | `ProviderRegistry`：按 Mertina home 分作用域的注册表，供插件卸载时还原 |
+| `mertina/agent/web_search_registry.py` | L2 部分搬运 | 当前搜索 provider 的解析：配置的 `web.search_backend` / `web.backend` 优先，其次唯一可用的、再按 ddgs 回退；被 `plugins.disabled` 禁用的插件可以在报错里点名 |
+| `mertina/agent/secret_scope.py` | L2 部分搬运 | `.env` 的分词器（`load_env_file`），`get_env_value` 和 env loader 共用 |
+| `mertina/registration_lifecycle.py` | L1，整文件 | 插件注册的租约和还原协调 |
+| `mertina/cli/config.py` | L1 裁剪 | 来自 `hermes_cli/config.py`：`load_config`（默认值 + config.yaml + `${VAR}` 展开，按文件签名缓存）、只读用户实际写下内容的 `read_raw_config_readonly`、`get_env_value`（进程环境，否则 `.env`） |
+| `mertina/cli/config_defaults.py` | L2 部分搬运 | `DEFAULT_CONFIG` 里 v0.1 读到的几节：`model`、`agent`、`web`、`plugins` |
+| `mertina/cli/env_loader.py` | L1 裁剪 | `load_mertina_dotenv`：启动时把 Mertina home 的 `.env` 载入进程环境 |
+| `mertina/cli/plugins.py`、`plugins_discovery.py`、`plugins_manifest.py`、`plugins_loader.py`、`plugins_ledger.py` | L2 部分搬运 | 插件发现：扫描内置插件目录、校验 `plugin.yaml`、按 `plugins.enabled` / `plugins.disabled` 放行、导入模块并调用 `register(ctx)`，记录每项注册以便还原 |
+| `mertina/plugins/web/_common.py` | L1 裁剪 | `BaseWebSearchProvider`，只保留 search 部分 |
+| `mertina/plugins/web/ddgs/`（`provider.py`、`_search_worker.py`、`plugin.yaml`） | L1，整目录 + 删减 | 免 key 的 DuckDuckGo provider。每次搜索在一次性子进程里跑，30 秒超时、可被中断，子进程的环境去掉凭据 |
+| `mertina/tools/environments/local.py`、`local_env_policy.py` | L2 部分搬运 | `_sanitize_subprocess_env`：给 ddgs 子进程去掉各家 provider 的 key 和内部密钥 |
+| `mertina/tools/web_tools.py` | L1 裁剪 | `web_search` 工具：后端选择、派发到当前 provider、`check_web_api_key` 门控和注册 |
+| `mertina/tools/tool_backend_helpers.py` | L2 部分搬运 | `read_selection`、`selection_exists`、`selection_error`：config.yaml 里是否存了后端选择，以及选了却不可用时的报错 |
+| `mertina/tools/web_tools_extract.py` | L2 部分搬运 | 只有搜索也用到的两个报错函数 |
+
+改动较大的既有文件：
+
+| 路径 | v0.1.2 的变化 |
+|---|---|
+| `mertina/run_agent.py` | `main()` 先载入 `.env`，再按 参数 → config.yaml `model` → `OPENAI_BASE_URL` / `OPENAI_API_KEY` 补齐端点（偏差表有记录；不搬 `runtime_provider`，见 §11） |
+| `mertina/agent/agent_init.py` | 恢复上游从 config 读 `agent` 一节（重试次数、工具使用和执行纪律提示） |
+| `mertina/time.py` | 恢复上游从 config.yaml 读 `timezone`，`MERTINA_TIMEZONE` 仍然优先 |
+| `mertina/constants.py`、`mertina/utils.py` | 部分搬运 Mertina home 的解析、`mertina_home_key`、`atomic_replace` 等 |
+
+### 9.2 数据流
+
+```
+run_agent.main()
+  → load_mertina_dotenv()：Mertina home 的 .env 载入 os.environ
+  → _endpoint_from_config()：参数 → config.yaml model → OPENAI_BASE_URL / OPENAI_API_KEY
+  → AIAgent(...)
+       get_tool_definitions → web_search 的 check_web_api_key
+           → 插件发现（第一次）：mertina/plugins/web/ddgs → register(ctx) → web_search_registry
+  → 模型调用 web_search
+       web_search_tool → 后端：web.search_backend > web.backend > 自动探测（ddgs）
+           → provider.search(query, limit)
+               → ddgs 子进程（凭据已去掉，30 秒超时，轮询中断）→ JSON 信封
+       → {"success": true, "data": {"web": [{title, url, description, position}, …]}}
+```
+
+配置文件在 Mertina home 下：Windows 是 `%LOCALAPPDATA%\mertina`，其他系统是 `~/.mertina`，`MERTINA_HOME` 可以改。`config.yaml` 放设置，`.env` 放 key；`.env` 载入后，config.yaml 里的 `${VAR}` 也能引用它。`AIAgent` 本身仍然不读端点配置，直接构造时与 v0.1.1 相同。
+
+### 9.3 错误、中断、预算
+
+- **没有可用的 provider**：返回 `{"success": false, "error": ...}`，指向 config.yaml 的 `web.search_backend`。插件被 `plugins.disabled` 禁用时，报错说明是哪个插件。
+- **严格选择**：config.yaml 里选了一个没注册的后端时，直接报错，不会悄悄换成别的 provider。
+- **provider 出错**：ddgs 超时、被限流或子进程异常，都变成工具结果里的错误，这一轮继续。
+- **中断**：搜索在子进程里跑，主进程每隔一小段时间检查中断；一旦停止就杀掉子进程，工具结果是「已中断」，下一轮照常继续。
+- **`.env` 的编码**：BOM、UTF-16 和 NUL 会先清理；UTF-32 与上游一致，不改写文件，加载时报错（见 §11）。
+- **预算**：与 v0.1.0 相同。
+
+### 9.4 测试
+
+单元测试都不访问外网，ddgs 用上游的测试钩子跑真实子进程：
+
+- 配置层：默认值合并、`${VAR}` 展开、解析失败时退回默认值、缓存失效、`.env` 读取、`model` 为字符串或映射
+- env loader：载入并覆盖 shell、`${VAR}` 重复载入不叠加、BOM / UTF-16 / NUL / UTF-32、凭据去掉非 ASCII、载入后 config 能引用
+- 插件发现：内置插件加载并注册、只发现一次、`plugins.enabled` / `plugins.disabled`、导入失败和没有 `register()` 被记录、安全模式、按 home 缓存
+- 注册表和 provider：按名字和作用域查找、快照与还原、当前 provider 的解析顺序、ddgs 结果整理、子进程超时和中断、信封解析
+- `web_search`：后端选择、limit 截断、中断、各类报错、门控和注册；子进程环境去凭据；`atomic_replace` 的各个回退分支
+- `run_agent.main()`：端点的来源和优先级、先载入 `.env` 再读 config
+
+### 9.5 验收标准
+
+- `uv run python -m scripts.real_loop` 对真实端点通过两个场景：模型调用 `web_search`、拿到结果并据此回答（流式增量拼起来等于最终回答）；一轮在工具开始时停止，下一轮在同一段历史上继续，真实 API 接受这段历史
+- `uv run python -m scripts.fake_loop` 照常通过
+- 至此 Roadmap v0.1 的三条「Done when」全部满足
+
+验收结果：2026-10-07 在 `8f5e6ec` 上，对 DeepSeek 的 OpenAI 兼容端点（`https://api.deepseek.com`，模型 `deepseek-flash`）运行 `scripts.real_loop`，两个场景都通过，退出码 0：
+
+- 搜索后回答：模型在同一步并发调用两次 `web_search`，据结果回答 Python 3.14.8，流式输出拼起来等于最终回答。其中一次搜索失败：ddgs 这次选中的 Brave 连接被重置（Windows `os error 10054`），失败作为工具结果里的错误返回，这一轮照常结束，模型用另一次的结果作答
+- 停止后继续：第一个工具开始时停止，工具结果为 `Interrupted`，这一轮以「Operation interrupted.」结束；下一轮在同一段历史上发出，真实 API 接受这段历史，模型重新搜索后作答
+- `scripts.fake_loop` 同时通过
+
+---
+
+## 10. 分刀
 
 | | 内容 | 产出 |
 |---|---|---|
 | **v0.1.0**（`feat/agent-core-loop`） | L0 叶子 + transports + registry + loop + `AIAgent` | fake client 下跑通完整循环 |
 | **v0.1.1**（`feat/agent-streaming-retry-interrupt`，见 §8） | 流式输出 + 重试 + 中断（`tools/interrupt.py`、`agent/prompt_builder.py`、`agent/system_prompt.py`） | Roadmap 的 stop 语义达标 |
-| v0.1.2 | `web_search` + `WebSearchProvider` 接口 + 配置层（`mertina/cli/config.py`） | 真实 endpoint 跑通 Roadmap 验收场景 |
+| **v0.1.2**（`feat/web-search-config`，见 §9） | `web_search` + `WebSearchProvider` 接口 + 插件发现 + 配置层（`mertina/cli/config.py`、`env_loader.py`） | 真实 endpoint 跑通 Roadmap 验收场景 |
 
 v0.1.2 完成时，Roadmap v0.1 的三条「Done when」全部满足。
 
 ---
 
-## 10. 遗留问题
+## 11. 遗留问题
 
 - **L2 的替代实现深度未定**：错误分类、脱敏、日志在 v0.1.0 用最简实现，P1 再评估要不要回头参考 Hermes 的对应模块。
 - **`mertina/` 内部是否需要再分层**：v0.1 只有 `agent/` 和 `tools/` 两个子包，规模小。等 gateway、state、cron 进来后，是否需要在 `mertina/` 下引入更多分层，到时再看。
 - **上游跟进机制未定**：`scripts/port_check.py` 保证已移植文件与文件头记录的上游 SHA 一致，但「上游在更新的 commit 上改了某个已移植文件」仍要靠人发现。给 port_check 加一个对比新 SHA 的模式是候选方案，留待 v0.1.2 之后评估。
+- **不搬 `runtime_provider`**：上游的 `hermes_cli/runtime_provider.py` 按配置和环境解析服务商、端点和 key，覆盖各家官方服务商、OAuth 和本地模型探测。v0.1.2 只在 `run_agent.main()` 里读 config.yaml 的 `model` 和 `OPENAI_BASE_URL` / `OPENAI_API_KEY`，只支持自定义的 OpenAI 兼容端点；`AIAgent` 本身不读配置。等 v0.2 gateway 需要从配置构造 agent 时再搬。
+- **UTF-32 编码的 `.env` 会让启动失败**：与上游一致，`load_mertina_dotenv` 不改写 UTF-32 文件，随后按 latin-1 解析出带 NUL 的变量名，写入 `os.environ` 时抛 `ValueError`。常见编辑器不会存出 UTF-32，暂不处理。
 - **不搬 `web_extract`**：v0.1.2 只搬 Roadmap 点名的 `web_search`。上游的 `web_extract` 会多出约 900–1,200 行：`tools/web_tools_extract.py`、`tools/web_tools_truncate.py`、`tools/url_safety.py` 的 SSRF 防护、`tools/website_policy.py`、`tools/web_result_cache.py` 的 extract 部分，以及一个能抽取正文的 provider。ddgs 只能搜索，所以这个 provider 要么是需要 key 的（tavily、exa、firecrawl 等），要么是 `plugins/web/keyless_mcp.py` 的免 key 轮换。`WebSearchProvider` 和 registry 里 extract 相关的部分随之删掉；等出现读网页正文的需求时（最早 P1），再从上游同名文件搬回来。
 - **搜索接口只覆盖 search**：抽象层都在（`ProviderBase` → `WebSearchProvider` → `BaseWebSearchProvider`、provider registry、插件发现），但只有 ddgs 一个 provider，接口里只服务于需要 key、免 key 或 extract 的 provider 的部分随之删掉了：`agent/web_search_provider.py` 的 `WebSearchProvider.supports_extract` / `extract` / `is_keyless_available` 和 `get_provider_env`；`plugins/web/_common.py` 里 `BaseWebSearchProvider` 的 `KEY_ENV` / `EXTRACT` / `KEYLESS` 开关、按 key 判断的 `is_available`、`is_keyless_available`、`supports_extract`，以及 `provider_env`；`agent/provider_base.py` 的 `ProviderBase.get_setup_schema`；`agent/web_search_registry.py` 的 `get_active_extract_provider` 和回退链里的免 key 一级。接入需要 key 的 provider（tavily、brave-free）、searxng（`SEARXNG_URL`）或任何 extract provider 之前，要先从上游同名文件把它们搬回来。

@@ -79,7 +79,8 @@ the tag and its GitHub Release are the release
 4. Nothing is published to PyPI: Mertina is an application run from a checkout or a Docker image,
    not a library (`[tool.uv] package = false`). Once the Docker image lands in P1, the tag will also
    build and push an image tagged with the version
-5. The maintainer checks that the tagged checkout runs (`uv run python -m scripts.fake_loop`)
+5. The maintainer checks that the tagged checkout runs: `uv run python -m scripts.fake_loop`, and
+   `uv run python -m scripts.real_loop` with a real endpoint configured
 
 Only the maintainer merges Release PRs.
 

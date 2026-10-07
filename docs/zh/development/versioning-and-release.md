@@ -78,7 +78,8 @@ tag 和对应的 GitHub Release 就是这次发布
 3. 合并 Release PR 后，自动创建 tag 和 GitHub Release
 4. 不发布到 PyPI：Mertina 是从 checkout 或 Docker 镜像运行的应用，不是库（`[tool.uv] package = false`）。
    P1 加入 Docker 镜像之后，tag 还会构建并推送以版本号为标签的镜像
-5. 维护者确认打 tag 的 checkout 可以正常运行（`uv run python -m scripts.fake_loop`）
+5. 维护者确认打 tag 的 checkout 可以正常运行：`uv run python -m scripts.fake_loop`，以及配置好真实端点后的
+   `uv run python -m scripts.real_loop`
 
 只有维护者可以合并 Release PR。
 

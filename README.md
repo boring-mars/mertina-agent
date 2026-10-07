@@ -2,8 +2,9 @@
 
 **A personal AI assistant that lives in the cloud and extends to your devices.**
 
-> **Status: pre-alpha.** The project is being built from scratch. Nothing is runnable yet.
-> See the [Roadmap](ROADMAP.md) for what is being built and in what order.
+> **Status: pre-alpha.** The v0.1 agent core runs from Python against an OpenAI-compatible
+> endpoint and can search the web. The gateway, web UI and everything after them are not built
+> yet. See the [Roadmap](ROADMAP.md) for what is being built and in what order.
 
 Mertina Agent is a general-purpose personal assistant. It runs as an always-on cloud service
 that you reach from a web page. Local clients (desktop app, CLI/TUI) will follow. They run the agent
@@ -78,11 +79,13 @@ Key decisions:
 ```
 mertina-agent/
 ├── mertina/            # the one import package; paths mirror Hermes (see the porting guide)
-│   ├── agent/          # conversation loop, turn phases, transports, AIAgent's mixins
-│   ├── tools/          # tool registry (built-in tools arrive with web_search in v0.1.2)
-│   ├── run_agent.py    # AIAgent
+│   ├── agent/          # conversation loop, turn phases, transports, AIAgent's mixins, provider registries
+│   ├── cli/            # config.yaml and .env loading, plugin discovery
+│   ├── plugins/        # bundled plugins: the ddgs web search provider
+│   ├── tools/          # tool registry and the web_search tool
+│   ├── run_agent.py    # AIAgent and its main()
 │   └── model_tools.py  # tool definitions and dispatch
-├── scripts/            # port check, fake-model acceptance run
+├── scripts/            # port check, acceptance runs (fake model, real endpoint)
 ├── tests/
 ├── docs/
 └── ROADMAP.md
@@ -92,17 +95,42 @@ The gateway, SessionDB and web frontend arrive in later milestones (see the [roa
 
 ## Getting started
 
-The agent loop runs against a fake model until real endpoints are wired up. The acceptance script
-runs a streamed turn with a tool call and its result sent back to the model, then stops a turn as
-its tool starts and continues the conversation on the same history:
+Mertina reads its settings from the Mertina home: `%LOCALAPPDATA%\mertina` on Windows,
+`~/.mertina` elsewhere, or the directory in `MERTINA_HOME`. Point it at any OpenAI-compatible
+endpoint whose model supports tool calling.
+
+`config.yaml`:
+
+```yaml
+model:
+  default: gpt-4o-mini
+  base_url: https://api.openai.com/v1
+```
+
+`.env`, saved as UTF-8:
+
+```
+OPENAI_API_KEY=sk-...
+```
+
+Then run one conversation, in which the model can call `web_search`:
+
+```bash
+uv run python -m mertina.run_agent --query "What is the latest stable Python release?"
+```
+
+Two acceptance scripts check the loop. `fake_loop` needs no network: it runs a streamed tool
+round trip against a scripted model, then stops a turn as its tool starts and continues on the
+same history. `real_loop` runs the same two scenarios with `web_search` against the configured
+endpoint, and talks to DuckDuckGo:
 
 ```bash
 uv run python -m scripts.fake_loop
+uv run python -m scripts.real_loop
 ```
 
-Real endpoints are wired up in v0.1.2. Until then, the
-[contributing guide](docs/en/development/contributing.md) describes the development environment
-and the workflow.
+The [contributing guide](docs/en/development/contributing.md) describes the development
+environment and the workflow.
 
 ## Documentation
 

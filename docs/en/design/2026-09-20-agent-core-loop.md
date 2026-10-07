@@ -2,9 +2,9 @@
 
 **English** | [中文](../../zh/design/2026-09-20-agent-core-loop.md)
 
-**Status**: v0.1.0 released; v0.1.1 implemented (§8)
+**Status**: v0.1.0 and v0.1.1 released; v0.1.2 implemented (§9)
 **Roadmap milestone**: [v0.1 — Agent core](../../../ROADMAP.md#v01--agent-core)
-**Branch**: `feat/agent-core-loop` (v0.1.0), `feat/agent-streaming-retry-interrupt` (v0.1.1)
+**Branch**: `feat/agent-core-loop` (v0.1.0), `feat/agent-streaming-retry-interrupt` (v0.1.1), `feat/web-search-config` (v0.1.2)
 **Upstream**: [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT). The survey below is based on a local checkout of upstream; the exact commit SHA is recorded in [Porting from Hermes](../development/porting-from-hermes.md).
 
 ---
@@ -69,7 +69,7 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 | D3 | `vendor/` is not committed | Committing it would add a 25,000-line diff. MIT attribution is satisfied by the per-file copyright headers plus [Porting from Hermes](../development/porting-from-hermes.md) in the development guidelines |
 | D4 | Flat layout (no `src/`) with exactly one top-level package, `mertina`, mirroring Hermes inside it | See §5 |
 | D5 | No wheel is published; the project ships as a standalone product run from a checkout or Docker (`[tool.uv] package = false`) | It is an application, not a library; this is also why there is no `src/` layout |
-| D6 | v0.1 is split into 0.1.0 / 0.1.1 / 0.1.2, one branch each | See §9 |
+| D6 | v0.1 is split into 0.1.0 / 0.1.1 / 0.1.2, one branch each | See §10 |
 | D7 | v0.1.0 ships no built-in tool: the acceptance script and the tests register their own, and the first built-in tool is `web_search`, ported in v0.1.2 | Keeps v0.1.0's tests free of any network dependency without adding a tool that has no upstream counterpart |
 
 ---
@@ -82,7 +82,7 @@ Three further reductions follow the first pass: cascading deletion (the survivin
 | **L1** loop skeleton | `conversation_loop.py` + 15 `turn_*.py` + `tool_executor.py` + `agent_init.py` + `registry.py` + `chat_completions.py` + `model_tools.py` + 14 `AIAgent` mixins + `hermes_cli/config.py` + the ddgs provider under `plugins/web/` and others, 46 files in all | 28,234 | **Copied into vendor, then trimmed** — this is the part that has to be understood |
 | **L2** platform layer | `agent_runtime_helpers.py` (3,509), `model_metadata.py` (2,551), `turn_recovery.py` (1,813), `error_classifier.py` (1,394), `redact.py` (1,335), `display.py` (1,118), `hermes_constants.py` (1,515), `hermes_logging.py` (764) and others | ~36,000 | **Not copied wholesale**; when the loop reaches a function, that function alone is copied verbatim into a file of the same path (rule 5 of [Porting from Hermes](../development/porting-from-hermes.md)) |
 
-L0/L1/L2 is the **copy boundary** (what goes into vendor and what does not); it is a different axis from the milestone split in §9. All six L0 files are inside the boundary but land at different times: `transports/base.py`, `transports/types.py` and `iteration_budget.py` in v0.1.0; `retry_utils.py` and `tools/interrupt.py` in v0.1.1; `web_search_provider.py` in v0.1.2.
+L0/L1/L2 is the **copy boundary** (what goes into vendor and what does not); it is a different axis from the milestone split in §10. All six L0 files are inside the boundary but land at different times: `transports/base.py`, `transports/types.py` and `iteration_budget.py` in v0.1.0; `retry_utils.py` and `tools/interrupt.py` in v0.1.1; `web_search_provider.py` in v0.1.2.
 
 L2 is not the agent loop. It is model metadata tables, error classification, redaction, terminal rendering and global constants. For example, the OpenAI client is constructed in `agent_runtime_helpers.create_openai_client`. v0.1.0 ports that one function, and the lazy `process_bootstrap.OpenAI` proxy it uses, into files of the same path, and leaves the thousands of other lines in those files alone.
 
@@ -221,8 +221,9 @@ Scanning the files inside the v0.1 copy boundary for third-party imports (includ
 | `openai` | Client construction lives in L2's `agent_runtime_helpers.create_openai_client`, ported partially | **Needed in v0.1.0** |
 | `fire` | `main()` in `run_agent.py`, imported only under `__main__` | **Needed in v0.1.0**, pinned to `0.7.1` as upstream (the entry point is kept verbatim, not rewritten to `argparse`) |
 | `httpx` | `tools/web_tools.py` | Ships with the openai SDK; not listed separately |
-| `ddgs` | `tools/web_tools.py` | v0.1.2 (keyless search provider) |
-| `pyyaml` | `hermes_cli/config.py` | v0.1.2 (config file) |
+| `ddgs` | `plugins/web/ddgs/provider.py` | **Needed in v0.1.2**, the keyless search provider, pinned to `9.16.0` (upstream leaves it optional and unpinned) |
+| `pyyaml` | `hermes_cli/config.py` | **Needed in v0.1.2** to read config.yaml, pinned to `6.0.3` as upstream |
+| `python-dotenv` | `hermes_cli/env_loader.py` | **Needed in v0.1.2** to load the `.env` at startup, pinned to `1.2.2` as upstream |
 
 Hermes lists 36 core dependencies (`rich`, `tenacity`, `pydantic`, `fastapi`, `Pillow`, `croniter`, `PyJWT` and others). **v0.1.0 needs none of them and depends only on `openai`.** Note that `tenacity` is not used on Hermes's retry path either — `retry_utils.py` is hand-written backoff.
 
@@ -414,22 +415,112 @@ All against a fake client or a local HTTP server, with no outside network:
 
 ---
 
-## 9. Milestone split
+## 9. v0.1.2 design
+
+v0.1.2 finishes what Roadmap v0.1 still lacks: the first built-in tool, `web_search`, the search provider interface behind it, and the config layer that reads the model endpoint, so the loop can run the acceptance scenario against a real endpoint. The method is the same as the first two cuts: verbatim copy, a separate cut, and partial ports of the L2 definitions that are reached. Every rewrite in a cut has a row in the deviations table in [Porting from Hermes](../development/porting-from-hermes.md). The branch is `feat/web-search-config`.
+
+### 9.1 Modules
+
+New files:
+
+| Path | Source | Notes |
+|---|---|---|
+| `mertina/agent/web_search_provider.py` | L0 verbatim + cut | The `WebSearchProvider` interface, search part only (see §11) |
+| `mertina/agent/provider_base.py` | L2 partial | `ProviderBase`: the name and availability every provider kind shares |
+| `mertina/agent/provider_registry.py` | L2 partial | `ProviderRegistry`: a registry scoped per Mertina home, with the snapshot and restore that unloading a plugin needs |
+| `mertina/agent/web_search_registry.py` | L2 partial | Resolving the active search provider: a configured `web.search_backend` / `web.backend` first, then the single available one, then the ddgs fallback; a plugin disabled by `plugins.disabled` can be named in the error |
+| `mertina/agent/secret_scope.py` | L2 partial | The `.env` tokenizer (`load_env_file`) shared by `get_env_value` and the env loader |
+| `mertina/registration_lifecycle.py` | L1, whole file | Leases and restore coordination for plugin registrations |
+| `mertina/cli/config.py` | L1 cut | From `hermes_cli/config.py`: `load_config` (defaults + config.yaml + `${VAR}` expansion, cached on the file signature), `read_raw_config_readonly` for what the user actually wrote, and `get_env_value` (process env, else `.env`) |
+| `mertina/cli/config_defaults.py` | L2 partial | The parts of `DEFAULT_CONFIG` v0.1 reads: `model`, `agent`, `web`, `plugins` |
+| `mertina/cli/env_loader.py` | L1 cut | `load_mertina_dotenv`: loads the Mertina home `.env` into the process environment at startup |
+| `mertina/cli/plugins.py`, `plugins_discovery.py`, `plugins_manifest.py`, `plugins_loader.py`, `plugins_ledger.py` | L2 partial | Plugin discovery: scan the bundled plugins directory, validate `plugin.yaml`, gate on `plugins.enabled` / `plugins.disabled`, import the module and call `register(ctx)`, and record each registration so it can be undone |
+| `mertina/plugins/web/_common.py` | L1 cut | `BaseWebSearchProvider`, search part only |
+| `mertina/plugins/web/ddgs/` (`provider.py`, `_search_worker.py`, `plugin.yaml`) | L1, whole directory + cut | The keyless DuckDuckGo provider. Each search runs in a disposable child process with a 30-second deadline, can be interrupted, and gets an environment without credentials |
+| `mertina/tools/environments/local.py`, `local_env_policy.py` | L2 partial | `_sanitize_subprocess_env`: strips provider keys and internal secrets from the ddgs child's environment |
+| `mertina/tools/web_tools.py` | L1 cut | The `web_search` tool: backend selection, dispatch to the active provider, the `check_web_api_key` gate and registration |
+| `mertina/tools/tool_backend_helpers.py` | L2 partial | `read_selection`, `selection_exists`, `selection_error`: whether config.yaml stores a backend selection, and the error when the selected one is unusable |
+| `mertina/tools/web_tools_extract.py` | L2 partial | Only the two error helpers search also uses |
+
+Existing files with larger changes:
+
+| Path | Change in v0.1.2 |
+|---|---|
+| `mertina/run_agent.py` | `main()` loads the `.env`, then fills the endpoint from the arguments, then config.yaml `model`, then `OPENAI_BASE_URL` / `OPENAI_API_KEY` (recorded in the deviations table; `runtime_provider` is not ported, see §11) |
+| `mertina/agent/agent_init.py` | Reads the `agent` section from config again, as upstream does (retry count, tool-use and execution-discipline guidance) |
+| `mertina/time.py` | Reads `timezone` from config.yaml again, as upstream does; `MERTINA_TIMEZONE` still wins |
+| `mertina/constants.py`, `mertina/utils.py` | Partial ports of Mertina home resolution, `mertina_home_key`, `atomic_replace` and others |
+
+### 9.2 Data flow
+
+```
+run_agent.main()
+  → load_mertina_dotenv(): the Mertina home .env into os.environ
+  → _endpoint_from_config(): arguments → config.yaml model → OPENAI_BASE_URL / OPENAI_API_KEY
+  → AIAgent(...)
+       get_tool_definitions → web_search's check_web_api_key
+           → plugin discovery (once): mertina/plugins/web/ddgs → register(ctx) → web_search_registry
+  → the model calls web_search
+       web_search_tool → backend: web.search_backend > web.backend > autodetect (ddgs)
+           → provider.search(query, limit)
+               → ddgs child process (credentials stripped, 30 s deadline, interrupt polling) → JSON envelope
+       → {"success": true, "data": {"web": [{title, url, description, position}, …]}}
+```
+
+The config files live in the Mertina home: `%LOCALAPPDATA%\mertina` on Windows, `~/.mertina` elsewhere, and `MERTINA_HOME` moves it. `config.yaml` holds settings and `.env` holds keys; once the `.env` is loaded, `${VAR}` references in config.yaml can use it. `AIAgent` itself still reads no endpoint config, so building it directly works as in v0.1.1.
+
+### 9.3 Errors, interruption, budget
+
+- **No provider available**: the tool returns `{"success": false, "error": ...}` pointing at `web.search_backend` in config.yaml. When `plugins.disabled` turned the plugin off, the error names it.
+- **Strict selection**: a backend chosen in config.yaml that is not registered is an error; the tool never silently switches to another provider.
+- **Provider errors**: a ddgs timeout, a rate limit or a broken child process becomes an error in the tool result, and the turn goes on.
+- **Interruption**: the search runs in a child process and the parent checks for a stop at short intervals; on a stop it kills the child, the tool result says interrupted, and the next turn continues normally.
+- **`.env` encoding**: a BOM, UTF-16 and NUL bytes are cleaned up first; a UTF-32 file is refused as upstream does, and loading it raises (see §11).
+- **Budget**: same as v0.1.0.
+
+### 9.4 Tests
+
+The unit tests stay off the network; ddgs runs its real child process through upstream's test hooks:
+
+- Config layer: merging defaults, `${VAR}` expansion, falling back to defaults on a parse failure, cache invalidation, reading `.env`, `model` as a string or a mapping
+- Env loader: loading over the shell, `${VAR}` not stacking across reloads, BOM / UTF-16 / NUL / UTF-32, stripping non-ASCII from credentials, config references after loading
+- Plugin discovery: a bundled plugin loads and registers, discovery runs once, `plugins.enabled` / `plugins.disabled`, recorded import failures and missing `register()`, safe mode, the per-home cache
+- Registry and provider: lookup by name and scope, snapshot and restore, the active provider's resolution order, ddgs result shapes, the child's deadline and interruption, envelope parsing
+- `web_search`: backend selection, the limit clamp, interruption, each error, the gate and registration; the credential scrub of child environments; each fallback of `atomic_replace`
+- `run_agent.main()`: where the endpoint comes from and in what order, and loading the `.env` before reading config
+
+### 9.5 Acceptance
+
+- `uv run python -m scripts.real_loop` passes two scenarios against a real endpoint: the model calls `web_search`, gets results and answers from them (the deltas join into the final answer); and a turn stopped as its tool starts, followed by a turn on the same history that the real API accepts
+- `uv run python -m scripts.fake_loop` still passes
+- With that, all three of Roadmap v0.1's "Done when" items are met
+
+Acceptance result: on 2026-10-07 at `8f5e6ec`, `scripts.real_loop` passed both scenarios with exit status 0 against DeepSeek's OpenAI-compatible endpoint (`https://api.deepseek.com`, model `deepseek-flash`):
+
+- Search and answer: the model called `web_search` twice in one step and answered Python 3.14.8 from the results; the deltas joined into the final answer. One of the two searches failed: the connection to Brave, the engine ddgs picked that time, was reset (Windows `os error 10054`). The failure came back as an error in the tool result, the turn ended normally, and the model answered from the other search
+- Stop and continue: the turn stopped as its first tool started, the tool result was `Interrupted`, and the turn ended with "Operation interrupted."; the next turn went out on the same history, the real API accepted it, and the model searched again and answered
+- `scripts.fake_loop` passed as well
+
+---
+
+## 10. Milestone split
 
 | | Contents | Result |
 |---|---|---|
 | **v0.1.0** (`feat/agent-core-loop`) | L0 leaves + transports + registry + loop + `AIAgent` | The full loop runs against a fake client |
 | **v0.1.1** (`feat/agent-streaming-retry-interrupt`, see §8) | Streaming + retry + interruption (`tools/interrupt.py`, `agent/prompt_builder.py`, `agent/system_prompt.py`) | The Roadmap's stop semantics are met |
-| v0.1.2 | `web_search` + the `WebSearchProvider` interface + the config layer (`mertina/cli/config.py`) | The Roadmap's acceptance scenario runs against a real endpoint |
+| **v0.1.2** (`feat/web-search-config`, see §9) | `web_search` + the `WebSearchProvider` interface + plugin discovery + the config layer (`mertina/cli/config.py`, `env_loader.py`) | The Roadmap's acceptance scenario runs against a real endpoint |
 
 When v0.1.2 lands, all three of the Roadmap's v0.1 "Done when" items are satisfied.
 
 ---
 
-## 10. Open questions
+## 11. Open questions
 
 - **How deep the L2 replacements go**: error classification, redaction and logging get minimal implementations in v0.1.0. Whether to revisit Hermes's counterparts is a P1 question.
 - **Whether `mertina/` needs more internal structure**: v0.1 has only the `agent/` and `tools/` subpackages, which is small. Revisit once the gateway, state and cron arrive.
 - **No mechanism for tracking upstream**: `scripts/port_check.py` keeps ported files matching the upstream SHA in their headers, but noticing that upstream changed an already-ported file in a newer commit is still manual. A mode of port_check that compares against a newer SHA is the candidate; it will be assessed after v0.1.2.
+- **`runtime_provider` is not ported**: upstream's `hermes_cli/runtime_provider.py` resolves the provider, endpoint and key from config and the environment, covering every official provider, OAuth and local model detection. v0.1.2 only reads config.yaml `model` and `OPENAI_BASE_URL` / `OPENAI_API_KEY` in `run_agent.main()`, which supports a custom OpenAI-compatible endpoint only; `AIAgent` itself reads no config. It comes over when the v0.2 gateway needs to build agents from config.
+- **A UTF-32 `.env` stops startup**: as upstream, `load_mertina_dotenv` will not rewrite a UTF-32 file, then parses it as latin-1 into names with NUL bytes, and writing those into `os.environ` raises `ValueError`. Common editors do not save UTF-32, so this is left as is.
 - **`web_extract` is not ported**: v0.1.2 ports only `web_search`, the one tool the Roadmap names. Upstream's `web_extract` would add roughly 900–1,200 lines: `tools/web_tools_extract.py`, `tools/web_tools_truncate.py`, the SSRF guard in `tools/url_safety.py`, `tools/website_policy.py`, the extract half of `tools/web_result_cache.py`, and a provider that can extract. ddgs only searches, so that provider is either a keyed one (tavily, exa, firecrawl, …) or the keyless ring in `plugins/web/keyless_mcp.py`. The extract parts of `WebSearchProvider` and the registry are cut with it and come back from the same upstream files when a use case for reading page content arrives, in P1 at the earliest.
 - **The web search interface is search-only**: the abstraction layers stay (`ProviderBase` → `WebSearchProvider` → `BaseWebSearchProvider`, the provider registry, plugin discovery), but the parts of the interface that only keyed, keyless or extract providers use were cut with ddgs as the only provider: `WebSearchProvider.supports_extract` / `extract` / `is_keyless_available` and `get_provider_env` (`agent/web_search_provider.py`); `BaseWebSearchProvider`'s `KEY_ENV` / `EXTRACT` / `KEYLESS` flags, its key-based `is_available`, `is_keyless_available`, `supports_extract`, and `provider_env` (`plugins/web/_common.py`); `ProviderBase.get_setup_schema` (`agent/provider_base.py`); and in `agent/web_search_registry.py`, `get_active_extract_provider` and the keyless tier of the fallback walk. A keyed provider (tavily, brave-free), searxng (`SEARXNG_URL`) or any extract provider needs them back first, from the same upstream files.
