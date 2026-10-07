@@ -16,14 +16,15 @@ def _disabled_plugin_error(capability: str, disabled_key: str) -> str:
     """Error text when the configured backend's bundled plugin is disabled in config."""
     vendor = disabled_key.split("/", 1)[-1]
     return (
-        f"web.{capability}_backend is set to '{vendor}', but its plugin ('{disabled_key}') is disabled "
+        f"web.{capability}_backend is set to '{vendor}', but its plugin ('{disabled_key}') is disabled "  # noqa: E501  # upstream's message
         f"in config. Re-enable it with `mertina plugins enable {disabled_key}` "
         "(or remove it from plugins.disabled)."
     )
 
 
 def _no_provider_error(capability: str, fallback: str) -> str:
-    """Error when no provider resolved: point at a disabled bundled plugin if that is the real cause."""
+    """Error when no provider resolved: point at a disabled bundled plugin if that is the real
+    cause."""
     from mertina.agent.web_search_registry import _disabled_web_plugin_for
 
     disabled_key = _disabled_web_plugin_for(capability=capability)
@@ -31,7 +32,7 @@ def _no_provider_error(capability: str, fallback: str) -> str:
 
 
 def _strict_selection_error(capability: str, backend: str) -> str:
-    """Error for a stored-but-unregistered backend: name the disabled plugin, else the bad selection.
-    Strict selection never silently switches to whatever the availability walk finds."""
+    """Error for a stored-but-unregistered backend: name the disabled plugin, else the bad
+    selection. Strict selection never silently switches to whatever the availability walk finds."""
     failure = f"no registered web {capability} provider has that name"
     return _no_provider_error(capability, selection_error("web", f"'{backend}'", failure))

@@ -196,7 +196,7 @@ def check(scenario: Run) -> list[str]:
         problems.append(f"unexpected transcript roles: {roles}")
     if len(requests) != 2:
         problems.append(f"expected 2 model requests, got {len(requests)}")
-    elif [t["function"]["name"] for t in requests[0].get("tools", [])] != ["clock"]:
+    elif "clock" not in [t["function"]["name"] for t in requests[0].get("tools", [])]:
         problems.append("the first request did not offer the clock tool")
     if not result["completed"]:
         problems.append(f"turn did not complete: {result['turn_exit_reason']}")

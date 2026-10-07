@@ -11,6 +11,7 @@ implementation lives in ``plugins/web/<vendor>/provider.py`` and registers with
 
 import json
 import logging
+from typing import TYPE_CHECKING, Any
 
 from mertina.tools.tool_backend_helpers import (
     NOUS_MANAGED_PROVIDER,
@@ -22,13 +23,16 @@ from mertina.tools.web_tools_extract import (
     _strict_selection_error,
 )
 
+if TYPE_CHECKING:  # pragma: no cover
+    from mertina.agent.web_search_provider import WebSearchProvider
+
 logger = logging.getLogger(__name__)
 
 
 # ─── Backend Selection ────────────────────────────────────────────────────────
 
 
-def _load_web_config() -> dict:
+def _load_web_config() -> dict[str, Any]:
     """Load the ``web:`` section from config.yaml; always a dict (a null section yields ``{}``)."""
     try:
         from mertina.cli.config import load_config
@@ -43,8 +47,9 @@ def _configured_backend(key: str = "backend") -> str:
     return (_load_web_config().get(key) or "").lower().strip()
 
 
-def _registry_call(func_name: str, default, *args):
-    """``agent.web_search_registry.<func_name>(*args)``, or *default* if it raised (registry never fatal)."""
+def _registry_call(func_name: str, default: Any, *args: Any) -> Any:
+    """``agent.web_search_registry.<func_name>(*args)``, or *default* if it raised (registry never
+    fatal)."""
     try:
         from mertina.agent import web_search_registry as registry_mod
 
@@ -54,19 +59,19 @@ def _registry_call(func_name: str, default, *args):
         return default
 
 
-def _registered_web_provider(backend: str):
+def _registered_web_provider(backend: str) -> "WebSearchProvider | None":
     """Plugin-registered web provider by name, or ``None``."""
     return _registry_call("get_provider", None, backend) if backend else None
 
 
-def _list_registered_web_providers():
+def _list_registered_web_providers() -> "list[WebSearchProvider]":
     """All plugin-registered web providers (empty list on failure)."""
-    return _registry_call("list_providers", [])
+    return _registry_call("list_providers", [])  # type: ignore[no-any-return]  # dispatched by name
 
 
-def _probe(provider, method: str, context: str = "") -> bool | None:
-    """``bool(provider.<method>())``, or ``None`` if it raised (a broken provider is unavailable; *context* is
-    appended to the debug log line, e.g. " during readiness check")."""
+def _probe(provider: object, method: str, context: str = "") -> bool | None:
+    """``bool(provider.<method>())``, or ``None`` if it raised (a broken provider is unavailable;
+    *context* is appended to the debug log line, e.g. " during readiness check")."""
     try:
         return bool(getattr(provider, method)())
     except Exception as exc:
@@ -76,14 +81,16 @@ def _probe(provider, method: str, context: str = "") -> bool | None:
 
 
 def _get_backend() -> str:
-    """Shared web backend name. A stored ``web.backend`` is returned as-is — no availability probe, no
-    fallback — so a broken selection surfaces the vendor's honest error rather than silently rerouting.
-    The managed ``use_gateway`` selection also resolves to firecrawl with no ladder. Autodetect runs
-    whenever no SHARED web selection was ever stored: per-capability keys (``web.search_backend``,
-    ``web.extract_backend``) name only their own capability and never reroute the other (#113017)."""
+    """Shared web backend name. A stored ``web.backend`` is returned as-is — no availability probe,
+    no fallback — so a broken selection surfaces the vendor's honest error rather than silently
+    rerouting. The managed ``use_gateway`` selection also resolves to firecrawl with no ladder.
+    Autodetect runs whenever no SHARED web selection was ever stored: per-capability keys
+    (``web.search_backend``, ``web.extract_backend``) name only their own capability and never
+    reroute the other (#113017)."""
     configured = _configured_backend()
     if configured:
-        # "nous" (managed subscription) is serviced by firecrawl, routed through the managed Tool Gateway.
+        # "nous" (managed subscription) is serviced by firecrawl, routed through the managed Tool
+        # Gateway.
         return "firecrawl" if configured == NOUS_MANAGED_PROVIDER else configured
     if read_selection("web") is not None:
         # Shared selection exists (use_gateway) but no shared name: firecrawl, no ladder.
@@ -104,7 +111,8 @@ def _get_backend() -> str:
 
 
 def _get_search_backend() -> str:
-    """Backend for web_search: ``web.search_backend`` (strict, no probe) > ``web.backend`` > autodetect."""
+    """Backend for web_search: ``web.search_backend`` (strict, no probe) > ``web.backend`` >
+    autodetect."""
     return _configured_backend("search_backend") or _get_backend()
 
 
@@ -118,9 +126,9 @@ def _ddgs_package_importable() -> bool:
         return False
 
 
-# Built-in backends -> cheap availability probes; any other name is a plugin provider resolved via the
-# registry's ``is_available()``. Lambdas so test patches of module-level helpers (_ddgs_package_importable)
-# are honored at call time.
+# Built-in backends -> cheap availability probes; any other name is a plugin provider resolved via
+# the registry's ``is_available()``. Lambdas so test patches of module-level helpers
+# (_ddgs_package_importable) are honored at call time.
 _BUILTIN_AVAILABILITY = {
     "ddgs": lambda: _ddgs_package_importable(),
 }
@@ -128,15 +136,16 @@ _LEGACY_WEB_BACKENDS = frozenset(_BUILTIN_AVAILABILITY)
 
 
 def _is_backend_available(backend: str) -> bool:
-    """True when *backend* is usable — the single availability chokepoint. Non-legacy names delegate to the
-    registered provider's ``is_available()`` (unregistered names fall through); built-ins use cheap probes.
+    """True when *backend* is usable — the single availability chokepoint. Non-legacy names delegate
+    to the registered provider's ``is_available()`` (unregistered names fall through); built-ins use
+    cheap probes.
 
     For plugin-registered backends (any name outside :data:`_LEGACY_WEB_BACKENDS`), availability is
     delegated to the provider's ``is_available()`` via the web_search_registry. This is the single
-    chokepoint through which ``_get_backend``, ``_get_capability_backend``, and ``check_web_api_key`` all
-    resolve availability — fixing custom-provider discovery for every caller at once (issues #28651, #31873,
-    #32698). Built-in backends keep their cheap hardcoded probes below.
-    """
+    chokepoint through which ``_get_backend``, ``_get_capability_backend``, and
+    ``check_web_api_key`` all resolve availability — fixing custom-provider discovery for every
+    caller at once (issues #28651, #31873, #32698). Built-in backends keep their cheap hardcoded
+    probes below."""
     backend = (backend or "").lower().strip()
     provider = None if backend in _LEGACY_WEB_BACKENDS else _registered_web_provider(backend)
     if provider is not None:
@@ -149,17 +158,16 @@ def _is_backend_available(backend: str) -> bool:
 
 
 def _ensure_web_plugins_loaded() -> None:
-    """Idempotently run plugin discovery so the web registry is populated. Dispatch is reachable from contexts
-    that never triggered discovery (subprocess agent runs, delegate children, scripts); without it a
-    configured backend yields a misleading "No web ... provider" error.
+    """Idempotently run plugin discovery so the web registry is populated. Dispatch is reachable
+    from contexts that never triggered discovery (subprocess agent runs, delegate children,
+    scripts); without it a configured backend yields a misleading "No web ... provider" error.
 
-    Every bundled web provider (brave-free, ddgs, searxng, exa, parallel, tavily, firecrawl, keenable)
-    registers itself via ``plugins/web/<vendor>/__init__.py`` during plugin discovery. Tool dispatch can be
-    reached from contexts that haven't already triggered discovery — subprocess agent runs, delegate
-    children, standalone scripts, certain test paths — and without it the registry is empty and
-    ``get_provider('firecrawl')`` returns ``None`` even when the user has ``web.extract_backend: firecrawl``
-    configured and ``FIRECRAWL_API_KEY`` set. See #27580.
-    """
+    Every bundled web provider (brave-free, ddgs, searxng, exa, parallel, tavily, firecrawl,
+    keenable) registers itself via ``plugins/web/<vendor>/__init__.py`` during plugin discovery.
+    Tool dispatch can be reached from contexts that haven't already triggered discovery — subprocess
+    agent runs, delegate children, standalone scripts, certain test paths — and without it the
+    registry is empty and ``get_provider('firecrawl')`` returns ``None`` even when the user has
+    ``web.extract_backend: firecrawl`` configured and ``FIRECRAWL_API_KEY`` set. See #27580."""
     try:
         from mertina.cli.plugins import _ensure_plugins_discovered
 
@@ -172,9 +180,8 @@ def _ensure_web_plugins_loaded() -> None:
 def web_search_tool(query: str, limit: int = 5) -> str:
     """Search the web via the configured backend.
 
-    Returns a JSON string ``{"success": bool, "data": {"web": [{"title", "url", "description", "position"},
-    ...]}}`` (metadata only) or ``{"success": false, "error": ...}``.
-    """
+    Returns a JSON string ``{"success": bool, "data": {"web": [{"title", "url", "description",
+    "position"}, ...]}}`` (metadata only) or ``{"success": false, "error": ...}``."""
     try:
         limit = min(max(int(limit), 1), 100)
     except (TypeError, ValueError):
@@ -187,7 +194,9 @@ def web_search_tool(query: str, limit: int = 5) -> str:
         # Sync only — every provider's search() is sync.
         _ensure_web_plugins_loaded()
         from mertina.agent.web_search_registry import get_active_search_provider
-        from mertina.agent.web_search_registry import get_provider as _wsp_get_provider
+        from mertina.agent.web_search_registry import (  # type: ignore[attr-defined]  # exported at runtime by _registry.export
+            get_provider as _wsp_get_provider,
+        )
 
         backend = _get_search_backend()
         provider = _wsp_get_provider(backend) if backend else None
@@ -213,15 +222,14 @@ def web_search_tool(query: str, limit: int = 5) -> str:
         return tool_error(f"Error searching web: {e!s}")
 
 
-def _provider_is_ready(provider) -> bool:
+def _provider_is_ready(provider: "WebSearchProvider | None") -> bool:
     """True when *provider* is available, without raising.
 
-    ``get_active_*_provider()`` returns an explicitly configured backend even when ``is_available()`` is
-    False (so dispatch can emit a precise error), so readiness gates (tool check_fn, ``mertina doctor``)
-    must probe for real.
+    ``get_active_*_provider()`` returns an explicitly configured backend even when
+    ``is_available()`` is False (so dispatch can emit a precise error), so readiness gates (tool
+    check_fn, ``mertina doctor``) must probe for real.
 
-    See #78412.
-    """
+    See #78412."""
     if provider is None:
         return False
     ready = _probe(provider, "is_available", " during readiness check")
@@ -251,7 +259,8 @@ def check_web_api_key() -> bool:
     ]
     if any(_is_backend_available(backend) for backend in candidates):
         return True
-    # Plugin path. Discovery must run first: check_fn fires at tool-registration time, before any dispatch.
+    # Plugin path. Discovery must run first: check_fn fires at tool-registration time, before any
+    # dispatch.
     try:
         _ensure_web_plugins_loaded()
         from mertina.agent.web_search_registry import (
@@ -268,17 +277,17 @@ def check_web_api_key() -> bool:
 
 
 # ─── Registry ─────────────────────────────────────────────────────────────────
-from mertina.tools.registry import registry, tool_error
+from mertina.tools.registry import registry, tool_error  # noqa: E402  # upstream's placement
 
 WEB_SEARCH_SCHEMA = {
     "name": "web_search",
-    "description": 'Search the web for information. Returns up to 5 results by default with titles, URLs, and descriptions. The query is passed through to the configured backend, so operators such as site:domain, filetype:pdf, intitle:word, -term, and "exact phrase" may work when the backend supports them.',
+    "description": 'Search the web for information. Returns up to 5 results by default with titles, URLs, and descriptions. The query is passed through to the configured backend, so operators such as site:domain, filetype:pdf, intitle:word, -term, and "exact phrase" may work when the backend supports them.',  # noqa: E501  # upstream's schema text
     "parameters": {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": 'The search query to look up on the web. You may include backend-supported operators such as site:example.com, filetype:pdf, intitle:word, -term, or "exact phrase".',
+                "description": 'The search query to look up on the web. You may include backend-supported operators such as site:example.com, filetype:pdf, intitle:word, -term, or "exact phrase".',  # noqa: E501  # upstream's schema text
             },
             "limit": {
                 "type": "integer",

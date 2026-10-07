@@ -96,8 +96,9 @@ _LAST_EXPANDED_CONFIG_BY_PATH: dict[str, Any] = {}
 # matches (skips safe_load + merge + normalize + expand, ~13 ms). The env snapshot invalidates
 # when a referenced ${VAR} changes value (in-process rotation). See #58514.
 _LOAD_CONFIG_CACHE: dict[str, tuple[Any, ...]] = {}
-# path -> (mtime_ns, size, ino, ctime_ns, raw yaml dict) for read_raw_config() (no defaults merged in).
-_RAW_CONFIG_CACHE: dict[str, tuple[int, ...]] = {}
+# path -> (mtime_ns, size, ino, ctime_ns, raw yaml dict) for read_raw_config() (no defaults merged
+# in).
+_RAW_CONFIG_CACHE: dict[str, tuple[Any, ...]] = {}
 
 
 def get_config_path() -> Path:
@@ -333,7 +334,7 @@ def _read_raw_config_impl(*, want_deepcopy: bool) -> dict[str, Any]:
             )
 
         try:
-            with open(config_path, encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:  # noqa: PTH123  # upstream's open()
                 data = fast_safe_load(f) or {}
         except Exception as e:
             _warn_config_parse_failure(config_path, e)
