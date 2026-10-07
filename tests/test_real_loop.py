@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from mertina.agent.tool_dispatch_helpers import _maybe_wrap_untrusted
 from scripts import real_loop
 from scripts.real_loop import Run
 
@@ -35,7 +36,9 @@ def _call(call_id: str) -> dict[str, Any]:
 
 
 def _tool(call_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return {"role": "tool", "tool_call_id": call_id, "content": json.dumps(payload)}
+    """A tool message as the agent stores it: long web_search output is wrapped as untrusted."""
+    content = _maybe_wrap_untrusted("web_search", json.dumps(payload, indent=2))
+    return {"role": "tool", "tool_call_id": call_id, "content": content}
 
 
 _HIT = {"success": True, "data": {"web": [{"title": "Python 3.14", "url": "https://python.test"}]}}
@@ -126,3 +129,20 @@ def test_an_empty_turn_after_the_stop_fails() -> None:
     problems = real_loop.check_stop(_stop_run(after_answer=""))
 
     assert problems == ["the turn after the stop failed: ''"]
+
+
+def test_a_failed_request_is_reported_on_its_own() -> None:
+    failed = {"completed": False, "failed": True, "error": "HTTP 403", "messages": []}
+
+    assert real_loop.check(Run(results=[failed])) == ["the model request failed: HTTP 403"]
+    assert real_loop.check_stop(Run(results=[failed, failed])) == [
+        "the model request failed: HTTP 403"
+    ]
+
+
+def test_a_wrapped_result_is_unwrapped_and_a_bare_one_kept() -> None:
+    wrapped = _tool("c1", _HIT)["content"]
+
+    assert wrapped.startswith("<untrusted_tool_result")
+    assert json.loads(real_loop._unwrap(wrapped)) == _HIT
+    assert real_loop._unwrap('{"error": "Interrupted"}') == '{"error": "Interrupted"}'

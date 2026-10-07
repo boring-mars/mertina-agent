@@ -22,6 +22,7 @@ Exit status 0 when every check passes, 1 when a check fails, 2 when no endpoint 
 from __future__ import annotations
 
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any
@@ -34,6 +35,10 @@ QUESTION = (
     "then answer in one sentence with its version number."
 )
 FOLLOW_UP = "Go on, and answer the question."
+# Header line, a blank line, the tool's output, the closing tag.
+_UNTRUSTED_BLOCK = re.compile(
+    r'<untrusted_tool_result source="[^"]*">\n.*?\n\n(.*)\n</untrusted_tool_result>\Z', re.DOTALL
+)
 
 
 @dataclass
@@ -97,6 +102,13 @@ def run_stop(target: Endpoint) -> Run:
     return scenario
 
 
+def _unwrap(content: str) -> str:
+    """The tool's own output inside the ``<untrusted_tool_result>`` block the agent wraps
+    ``web_search`` results in (``agent/tool_dispatch_helpers._maybe_wrap_untrusted``)."""
+    match = _UNTRUSTED_BLOCK.match(content)
+    return match.group(1) if match else content
+
+
 def _search_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The decoded ``web_search`` results in a turn's messages."""
     names = {c["id"]: c["function"]["name"] for m in messages for c in m.get("tool_calls") or []}
@@ -104,7 +116,7 @@ def _search_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for message in messages:
         if message["role"] == "tool" and names.get(message.get("tool_call_id")) == "web_search":
             try:
-                out.append(json.loads(message["content"]))
+                out.append(json.loads(_unwrap(message["content"])))
             except (TypeError, ValueError):
                 out.append({"success": False, "error": str(message["content"])})
     return out
@@ -112,9 +124,11 @@ def _search_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def check(scenario: Run) -> list[str]:
     """Problems with the search round trip; empty when it is complete."""
-    problems = []
     (result,) = scenario.results
-    if not result["completed"]:
+    if result.get("failed"):
+        return [f"the model request failed: {result.get('error')}"]
+    problems = []
+    if not result.get("completed"):
         problems.append(f"turn did not complete: {result.get('turn_exit_reason')}")
     searches = _search_results(result["messages"])
     if not searches:
@@ -134,15 +148,18 @@ def check(scenario: Run) -> list[str]:
 
 def check_stop(scenario: Run) -> list[str]:
     """Problems with the stop; empty when the real API accepted the history after it."""
-    problems = []
     stopped, after = scenario.results
-    if not stopped["interrupted"]:
+    failed = [r for r in (stopped, after) if r.get("failed")]
+    if failed:
+        return [f"the model request failed: {failed[0].get('error')}"]
+    problems = []
+    if not stopped.get("interrupted"):
         problems.append(f"the first turn was not interrupted: {stopped.get('turn_exit_reason')}")
     calls = [c["id"] for m in stopped["messages"] for c in m.get("tool_calls") or []]
     answered = [m["tool_call_id"] for m in stopped["messages"] if m["role"] == "tool"]
     if not calls or sorted(answered) != sorted(calls):
         problems.append(f"tool calls {calls} were answered by {answered}")
-    if not after["completed"] or not str(after.get("final_response") or "").strip():
+    if not after.get("completed") or not str(after.get("final_response") or "").strip():
         problems.append(f"the turn after the stop failed: {after.get('final_response')!r}")
     return problems
 
