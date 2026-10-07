@@ -3,8 +3,9 @@
 # Partial: only the parts ported so far. Upstream order is kept.
 """Timezone-aware clock for Mertina.
 
-``now()`` returns a tz-aware datetime in the IANA timezone named by the ``MERTINA_TIMEZONE`` env
-var, else server-local time. Invalid timezone values log a warning and fall back — never crash.
+``now()`` returns a tz-aware datetime in the user's configured IANA timezone. Resolution order:
+``MERTINA_TIMEZONE`` env var, then ``timezone`` in ``config.yaml`` under the Mertina home, else
+server-local time. Invalid timezone values log a warning and fall back — never crash.
 """
 
 import logging
@@ -12,6 +13,8 @@ import os
 import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+from mertina.constants import get_config_path
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +32,29 @@ def _env_timezone() -> str:
 
 def _timezone_cache_identity() -> tuple[str, str]:
     tz_env = _env_timezone()
-    return ("environment", tz_env)
+    return ("environment", tz_env) if tz_env else ("config", str(get_config_path()))
 
 
 def _resolve_timezone_name() -> str:
-    """Read the configured IANA timezone string (or ``""``)."""
+    """Read the configured IANA timezone string (or ``""``). Does file I/O — callers cache."""
     tz_env = _env_timezone()
     if tz_env:
         return tz_env
+    try:
+        import yaml
+
+        config_path = get_config_path()
+        cfg = (
+            (yaml.safe_load(config_path.read_text(encoding="utf-8")) or {})
+            if config_path.exists()
+            else {}
+        )
+        if cfg:
+            tz_cfg = cfg.get("timezone", "")
+            if isinstance(tz_cfg, str) and tz_cfg.strip():
+                return tz_cfg.strip()
+    except Exception:
+        pass
     return ""
 
 
@@ -47,7 +65,7 @@ def _timezone_entry() -> tuple[str, ZoneInfo | None]:
         entry = _tz_cache.get(cache_identity)
         if entry is not None:
             return entry
-    # Resolve outside the lock; first writer wins so concurrent resolvers of the
+    # Resolve outside the lock (config file I/O); first writer wins so concurrent resolvers of the
     # same identity converge on one ZoneInfo object.
     name = _resolve_timezone_name()
     tz = None

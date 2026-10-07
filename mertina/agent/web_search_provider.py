@@ -31,7 +31,7 @@ def get_provider_env(name: str) -> str:
     early import contexts). See #40190.
     """
     try:
-        from mertina.cli.config import get_env_value  # type: ignore[import-not-found]  # step 2
+        from mertina.cli.config import get_env_value
 
         val = get_env_value(name)
     except Exception:

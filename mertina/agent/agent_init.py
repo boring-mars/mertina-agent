@@ -241,8 +241,13 @@ def init_agent(
         session_id,
     )
 
-    # Config is not ported yet (v0.1.2): every section takes its default.
-    _agent_cfg: dict[str, Any] = {}
+    # Load config once for the agent section
+    try:
+        from mertina.cli.config import load_config_readonly as _load_agent_config
+
+        _agent_cfg = _load_agent_config()
+    except Exception:
+        _agent_cfg = {}
 
     _apply_agent_section(agent, _agent_cfg)
     _init_usage_state(agent)
