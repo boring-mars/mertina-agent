@@ -1,16 +1,8 @@
 # Ported from hermes-agent agent/secret_scope.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
 # Partial: only the parts ported so far. Upstream order is kept.
-"""Profile-scoped credential resolution for multi-profile gateway multiplexing.
-
-The multiplexing gateway serves many profiles from one process; each profile's
-``.env`` keys **cannot** be unioned into ``os.environ`` (profile A's keys would
-leak into profile B's turns and subprocesses). This module is a fail-closed,
-context-local secret scope: ``set_secret_scope(mapping)`` installs the active
-profile's secrets for the current task (a contextvar, so it propagates into the
-agent's worker thread via ``copy_context()``); ``get_secret(name)`` reads from
-it and, when multiplexing is active with no scope set, RAISES rather than
-falling back to ``os.environ``. Design: ``website/docs/developer-guide/multiplexing-gateway.md``.
+"""The ``.env`` tokenizer: :func:`load_env_file` parses a ``.env`` file into a dict without
+touching ``os.environ``.
 """
 
 from __future__ import annotations
@@ -66,9 +58,7 @@ def _parse_env_value(raw_value: str) -> str:
     return value
 
 
-# Per-path memo of parsed ``.env`` files. ``build_profile_secret_scope()`` runs on every gateway
-# turn, cron fire, MCP/browser adoption and housekeeping drain, and each call used to re-read and
-# re-parse the whole file.
+# Per-path memo of parsed ``.env`` files: ``get_env_value()`` reads the file on every lookup.
 #
 # FRESHNESS: every call still OPENS the file and keys on ``utils.file_signature`` of that
 # descriptor's ``fstat`` (mtime_ns, size, inode, ctime_ns — ctime can't be backdated, so a pinned-
@@ -76,11 +66,10 @@ def _parse_env_value(raw_value: str) -> str:
 # revalidation on NFS, a vanished/unreadable file fails the open and is never cached (a transient
 # EACCES must not become "this profile has no secrets"), and the descriptor pins one inode so a
 # symlink repointed mid-read can't file one file's contents under another's identity.
-# ``invalidate_env_file_cache()`` is the explicit knob; ``mertina_cli.config.invalidate_env_cache()``
-# calls it for Mertina's own .env writers.
+# ``invalidate_env_file_cache()`` is the explicit knob.
 _ENV_FILE_CACHE: OrderedDict[str, tuple[tuple, dict[str, str]]] = OrderedDict()
 _ENV_FILE_CACHE_LOCK = threading.Lock()
-_ENV_FILE_CACHE_MAX = 64  # one entry per profile home in practice
+_ENV_FILE_CACHE_MAX = 64
 
 
 def invalidate_env_file_cache(env_path: Path | None = None) -> None:
@@ -93,8 +82,7 @@ def invalidate_env_file_cache(env_path: Path | None = None) -> None:
 
 
 def _decode_env_bytes(raw: bytes) -> str:
-    """BOM stripped; invalid UTF-8 falls back to latin-1 exactly as
-    ``env_loader._load_dotenv_with_fallback`` installs it into ``os.environ``."""
+    """BOM stripped; invalid UTF-8 falls back to latin-1."""
     if raw.startswith(codecs.BOM_UTF8):
         raw = raw[len(codecs.BOM_UTF8) :]
     try:
@@ -120,20 +108,17 @@ def _parse_env_text(text: str) -> dict[str, str]:
 
 
 def load_env_file(env_path: Path) -> dict[str, str]:
-    """THE ``.env`` tokenizer: every reader (profile scope, ``mertina_cli.config.load_env``, the dashboard
-    scrub, skill secret capture, managed .env, setup prompts) parses through here so no two boundaries
-    disagree on which keys/values a file defines. Dict only — never touches ``os.environ``. ``export``
-    prefix, ``#`` comments, quote escapes reversed; a BOM is stripped so it doesn't prefix the first key.
-    Invalid UTF-8 decodes as latin-1, exactly like ``env_loader._load_dotenv_with_fallback`` installs it
-    into ``os.environ``. Absent/unreadable → ``{}``.
+    """THE ``.env`` tokenizer (``mertina.cli.config.load_env`` reads through here). Dict only —
+    never touches ``os.environ``. ``export`` prefix, ``#`` comments, quote escapes reversed; a BOM
+    is stripped so it doesn't prefix the first key. Invalid UTF-8 decodes as latin-1. Absent or
+    unreadable → ``{}``.
 
     Memoised per path on the open descriptor's stat identity (see the cache comment above). Always
-    returns a fresh dict: callers mutate what they get back (``build_profile_secret_scope`` layers
-    external secrets over it).
+    returns a fresh dict: callers may mutate what they get back.
     """
     key = str(env_path)
     try:
-        with open(env_path, "rb") as handle:
+        with open(env_path, "rb") as handle:  # noqa: PTH123  # upstream's open()
             fingerprint = file_signature(os.fstat(handle.fileno()))
             with _ENV_FILE_CACHE_LOCK:
                 cached = _ENV_FILE_CACHE.get(key)
@@ -141,8 +126,8 @@ def load_env_file(env_path: Path) -> dict[str, str]:
                     _ENV_FILE_CACHE.move_to_end(key)
                     return dict(cached[1])
             raw = handle.read()
-            # Same descriptor: a rewrite that landed between the fstat and the read is parsed but not
-            # stored under the pre-write fingerprint.
+            # Same descriptor: a rewrite that landed between the fstat and the read is parsed but
+            # not stored under the pre-write fingerprint.
             settled = file_signature(os.fstat(handle.fileno())) == fingerprint
     except OSError:
         # Gone or unreadable: drop any entry so a stale map cannot outlive the file.
