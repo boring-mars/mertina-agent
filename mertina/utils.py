@@ -9,6 +9,8 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 from urllib.parse import ParseResult, urlparse
 
+import yaml
+
 TRUTHY_STRINGS = frozenset({"1", "true", "yes", "on"})
 
 
@@ -26,12 +28,35 @@ def env_var_enabled(name: str, default: str = "") -> bool:
     return is_truthy_value(os.getenv(name, default), default=False)
 
 
+def file_signature(st: os.stat_result) -> "tuple[int, int, int, int]":
+    """Change-detection key for a stat result: ``(st_mtime_ns, st_size, st_ino, st_ctime_ns)``.
+
+    mtime + size alone miss a replacement that preserves both (``cp -p``, ``rsync -t``, a tar
+    restore, a script pinning the timestamp with ``os.utime``). The inode changes on an atomic
+    replace and ctime cannot be backdated from user space, so the pair catches those writers.
+    On Windows ``st_ino`` may be 0 and ``st_ctime_ns`` is the creation time — both stable across
+    an in-place rewrite, so the key degrades to mtime + size there rather than misfiring.
+    """
+    return (st.st_mtime_ns, st.st_size, st.st_ino, st.st_ctime_ns)
+
+
 def safe_json_loads(text: str, default: Any = None) -> Any:
     """Parse JSON, returning *default* on any parse error."""
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError, ValueError):
         return default
+
+
+# libyaml's CSafeLoader is ~8x faster than the pure-Python SafeLoader and a true drop-in for
+# ``safe_load`` (same restricted tag set); startup parses config.yaml and every plugin manifest,
+# so the slow path cost ~0.9 s of cold start.
+_fast_yaml_loader = getattr(yaml, "CSafeLoader", None) or yaml.SafeLoader
+
+
+def fast_safe_load(stream: Any) -> Any:
+    """``yaml.safe_load`` (same inputs, same result) using the libyaml C loader when available."""
+    return yaml.load(stream, Loader=_fast_yaml_loader)
 
 
 _N = TypeVar("_N", int, float)
