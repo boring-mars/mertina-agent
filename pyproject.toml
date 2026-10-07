@@ -30,6 +30,9 @@ dependencies = [
     # The keyless web_search provider (mertina/plugins/web/ddgs). Hermes leaves it optional and
     # unpinned; it is the only provider here, so it is a dependency, pinned to the version tested.
     "ddgs==9.16.0",
+    # Loads the Mertina .env into the process at startup (mertina/cli/env_loader.py); Hermes pins
+    # the same version.
+    "python-dotenv==1.2.2",
 ]
 
 [dependency-groups]
