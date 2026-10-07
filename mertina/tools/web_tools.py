@@ -1,76 +1,31 @@
 # Ported from hermes-agent tools/web_tools.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
 #!/usr/bin/env python3
-"""Generic web_search / web_extract tools over pluggable backends.
+"""Generic web_search tool over pluggable backends.
 
 Backend is selected during ``mertina tools`` (``web.backend`` in config.yaml; per
-capability via ``web.search_backend`` / ``web.extract_backend``). Every vendor
+capability via ``web.search_backend``). Every vendor
 implementation lives in ``plugins/web/<vendor>/provider.py`` and registers with
-``agent.web_search_registry``; this module owns selection, safety gates,
-caching, keyless rescue, and the truncate-and-store result pipeline.
-Debug: ``WEB_TOOLS_DEBUG=true`` writes ``logs/web_tools_debug_<UUID>.json``.
+``agent.web_search_registry``; this module owns selection.
 """
 
 import json
 import logging
-import os
-from typing import Any
 
-# Per-vendor client cache slots; plugins read/write these via tools.web_tools (tests reset them to None).
-_firecrawl_client = _firecrawl_client_config = _parallel_client = _async_parallel_client = (
-    _exa_client
-) = None
-
-from mertina.plugins.web.firecrawl.provider import _is_tool_gateway_ready, check_firecrawl_api_key
-from mertina.tools.debug_helpers import DebugSession
 from mertina.tools.tool_backend_helpers import (
     NOUS_MANAGED_PROVIDER,
     read_selection,
     selection_exists,
 )
-from mertina.tools.url_safety import async_is_safe_url
 from mertina.tools.web_tools_extract import (
-    _extract_safe_urls,
-    _merge_in_order,
     _no_provider_error,
-    _resolve_extract_provider,
-    _result_entry,
     _strict_selection_error,
-    _validate_extract_urls,
-)
-from mertina.tools.web_tools_rescue import _rescue_eligible, _rescue_search
-from mertina.tools.web_tools_truncate import (
-    _effective_char_limit,
-    _trim_results,
-    _truncate_results,
-    convert_base64_images_to_links,
 )
 
 logger = logging.getLogger(__name__)
 
 
 # ─── Backend Selection ────────────────────────────────────────────────────────
-
-
-def _env_value(name: str) -> str:
-    """Resolve ``name`` via the config-aware env layer (``mertina config set`` values), then process env.
-
-    Mirrors the SearXNG provider's ``_searxng_url()`` so that values set through Mertina' config/.env layer
-    (``mertina config set``, ``mertina tools``) are honored here too — not just raw process-env exports.
-    Without this, a config-only ``SEARXNG_URL`` (or any provider key) leaves the backend auto-detect cascade
-    and ``check_web_api_key()`` blind to it. See #34290.
-    """
-    try:
-        from mertina.cli.config import get_env_value
-
-        val = get_env_value(name)
-    except Exception:
-        val = None
-    return ((os.getenv(name, "") if val is None else val) or "").strip()
-
-
-def _has_env(name: str) -> bool:
-    return bool(_env_value(name))
 
 
 def _load_web_config() -> dict:
@@ -134,21 +89,8 @@ def _get_backend() -> str:
         # Shared selection exists (use_gateway) but no shared name: firecrawl, no ladder.
         return "firecrawl"
 
-    # Never-configured install. Explicit user credentials beat the managed-gateway probe (a Nous OAuth
-    # token's tier may not grant web access; the gateway then fails at runtime with no fallback).
-    # Free tiers trail paid.
-    backend_candidates = (
-        ("tavily", _has_env("TAVILY_API_KEY")),
-        ("perplexity", _has_env("PERPLEXITY_API_KEY")),
-        ("exa", _has_env("EXA_API_KEY")),
-        ("parallel", _has_env("PARALLEL_API_KEY")),
-        ("keenable", _has_env("KEENABLE_API_KEY")),
-        ("firecrawl", _has_env("FIRECRAWL_API_KEY") or _has_env("FIRECRAWL_API_URL")),
-        ("firecrawl", _is_tool_gateway_ready()),
-        ("searxng", _has_env("SEARXNG_URL")),
-        ("brave-free", _has_env("BRAVE_SEARCH_API_KEY")),
-        ("ddgs", _ddgs_package_importable()),
-    )
+    # Never-configured install.
+    backend_candidates = (("ddgs", _ddgs_package_importable()),)
     for backend, available in backend_candidates:
         if available:
             return backend
@@ -158,35 +100,12 @@ def _get_backend() -> str:
         if provider.name not in _LEGACY_WEB_BACKENDS and _probe(provider, "is_available"):
             return provider.name
 
-    return _keyless_backend() or "firecrawl"  # default (backward compat)
-
-
-def _keyless_backend() -> str | None:
-    """Keyless free-tier backend name, or None. Strictly the last autodetect rung so it never
-    pre-empts a keyed backend. Discovery must run first: reachable from contexts that haven't
-    loaded plugins (subprocess runs, delegate children)."""
-    try:
-        _ensure_web_plugins_loaded()
-        from mertina.agent.web_search_registry import _keyless_preference, _keyless_tier_enabled
-
-        if _keyless_tier_enabled():
-            for name in _keyless_preference():
-                provider = _registered_web_provider(name)
-                if provider is not None and _probe(provider, "is_keyless_available"):
-                    return name
-    except Exception as exc:
-        logger.debug("keyless fallback walk failed: %s", exc)
-    return None
+    return "firecrawl"  # default (backward compat)
 
 
 def _get_search_backend() -> str:
     """Backend for web_search: ``web.search_backend`` (strict, no probe) > ``web.backend`` > autodetect."""
     return _configured_backend("search_backend") or _get_backend()
-
-
-def _get_extract_backend() -> str:
-    """Backend for web_extract: ``web.extract_backend`` (strict, no probe) > ``web.backend`` > autodetect."""
-    return _configured_backend("extract_backend") or _get_backend()
 
 
 def _ddgs_package_importable() -> bool:
@@ -199,37 +118,11 @@ def _ddgs_package_importable() -> bool:
         return False
 
 
-def _xai_available() -> bool:
-    # Cheap probe only (env var OR auth.json OAuth): resolve_xai_http_credentials() may hit the network.
-    try:
-        from mertina.tools.xai_http import has_xai_credentials
-
-        return has_xai_credentials()
-    except Exception:
-        return False
-
-
 # Built-in backends -> cheap availability probes; any other name is a plugin provider resolved via the
-# registry's ``is_available()``. Lambdas so test patches of module-level helpers (_ddgs_package_importable,
-# check_firecrawl_api_key) are honored at call time. ``xai`` is probed via has_xai_credentials(), not a
-# registered provider, though the registry's _LEGACY_PREFERENCE omits it — drop it if xai ever registers.
+# registry's ``is_available()``. Lambdas so test patches of module-level helpers (_ddgs_package_importable)
+# are honored at call time.
 _BUILTIN_AVAILABILITY = {
-    "exa": lambda: _has_env("EXA_API_KEY"),
-    "parallel": lambda: _has_env("PARALLEL_API_KEY"),
-    "keenable": lambda: _has_env("KEENABLE_API_KEY"),
-    "firecrawl": lambda: check_firecrawl_api_key(),
-    "tavily": lambda: (
-        _has_env("TAVILY_API_KEY")
-        or any(
-            _configured_backend(k) == "tavily"
-            for k in ("backend", "search_backend", "extract_backend")
-        )
-    ),
-    "perplexity": lambda: _has_env("PERPLEXITY_API_KEY"),
-    "searxng": lambda: _has_env("SEARXNG_URL"),
-    "brave-free": lambda: _has_env("BRAVE_SEARCH_API_KEY"),
     "ddgs": lambda: _ddgs_package_importable(),
-    "xai": _xai_available,
 }
 _LEGACY_WEB_BACKENDS = frozenset(_BUILTIN_AVAILABILITY)
 
@@ -252,38 +145,9 @@ def _is_backend_available(backend: str) -> bool:
     return probe() if probe else False
 
 
-# ─── Firecrawl Client ──────────────────────────────────────────────────────── After PR #25182, the
-# firecrawl client, lazy SDK proxy, dual-auth config resolution, response normalizers, and
-# check_firecrawl_api_key() all live in plugins.web.firecrawl.provider.
-def _web_requires_env() -> list[str]:
-    """Tool-registry metadata env vars for the web backends. Gateway vars are always listed: gating them
-    on ``managed_nous_tools_enabled()`` cost a synchronous portal HTTP refresh at every CLI startup.
-    Contract: set var -> tool sees it; extras are harmless for the not-logged-in."""
-    return [
-        "EXA_API_KEY",
-        "PARALLEL_API_KEY",
-        "TAVILY_API_KEY",
-        "PERPLEXITY_API_KEY",
-        "KEENABLE_API_KEY",
-        "FIRECRAWL_API_KEY",
-        "FIRECRAWL_API_URL",
-        "FIRECRAWL_GATEWAY_URL",
-        "TOOL_GATEWAY_DOMAIN",
-        "TOOL_GATEWAY_SCHEME",
-        "TOOL_GATEWAY_USER_TOKEN",
-    ]
-
-
-_debug = DebugSession("web_tools", env_var="WEB_TOOLS_DEBUG")
-
-
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 
-# ─── Exa / Parallel inline helpers — moved into plugins ────────────────────── After PR #25182, the exa
-# client + search/extract and parallel client + search/extract helpers all live in their respective plugins:
-# - plugins/web/exa/provider.py - plugins/web/parallel/provider.py Both plugins register through
-# agent.web_search_registry and the dispatchers in this file resolve them via get_active_*_provider().
 def _ensure_web_plugins_loaded() -> None:
     """Idempotently run plugin discovery so the web registry is populated. Dispatch is reachable from contexts
     that never triggered discovery (subprocess agent runs, delegate children, scripts); without it a
@@ -305,36 +169,16 @@ def _ensure_web_plugins_loaded() -> None:
         logger.warning("Web plugin discovery failed (non-fatal): %s", exc)
 
 
-def _finish_debug(
-    call_name: str, debug_call_data: dict, error_msg: str | None = None
-) -> str | None:
-    """Log the call into the debug session; with *error_msg*, record it and return its ``tool_error`` envelope."""
-    if error_msg is not None:
-        logger.debug("%s", error_msg)
-        debug_call_data["error"] = error_msg
-    _debug.log_call(call_name, debug_call_data)
-    _debug.save()
-    return None if error_msg is None else tool_error(error_msg)
-
-
 def web_search_tool(query: str, limit: int = 5) -> str:
     """Search the web via the configured backend.
 
     Returns a JSON string ``{"success": bool, "data": {"web": [{"title", "url", "description", "position"},
-    ...]}}`` (metadata only — use web_extract_tool for page content) or ``{"success": false, "error": ...}``.
+    ...]}}`` (metadata only) or ``{"success": false, "error": ...}``.
     """
     try:
         limit = min(max(int(limit), 1), 100)
     except (TypeError, ValueError):
         limit = 5
-    debug_call_data = {
-        "parameters": {"query": query, "limit": limit},
-        "error": None,
-        "results_count": 0,
-        "original_response_size": 0,
-        "final_response_size": 0,
-    }
-
     try:
         from mertina.tools.interrupt import is_interrupted
 
@@ -349,8 +193,7 @@ def web_search_tool(query: str, limit: int = 5) -> str:
         provider = _wsp_get_provider(backend) if backend else None
         if provider is None or not provider.supports_search():
             if provider is None and backend and selection_exists("web"):
-                error_text = debug_call_data["error"] = _strict_selection_error("search", backend)
-                _finish_debug("web_search_tool", debug_call_data)
+                error_text = _strict_selection_error("search", backend)
                 return json.dumps(
                     {"success": False, "error": error_text}, indent=2, ensure_ascii=False
                 )
@@ -362,138 +205,29 @@ def web_search_tool(query: str, limit: int = 5) -> str:
             response_data = {"success": False, "error": _no_provider_error("search", fallback)}
         else:
             logger.info("Web search via %s: '%s' (limit: %d)", provider.name, query, limit)
-            response_data = _memoized_search(provider, query, limit)
+            response_data = provider.search(query, limit)
 
-        debug_call_data["results_count"] = len(response_data.get("data", {}).get("web", []))
         result_json = json.dumps(response_data, indent=2, ensure_ascii=False)
-        debug_call_data["final_response_size"] = len(result_json)
-        _finish_debug("web_search_tool", debug_call_data)
         return result_json
     except Exception as e:
-        return _finish_debug("web_search_tool", debug_call_data, f"Error searching web: {e!s}")
-
-
-def _memoized_search(provider, query: str, limit: int) -> dict:
-    """TTL memo + single-flight around the paid vendor call (tools/web_result_cache.py); sits after every
-    safety/config check. The provider is asked for the BUCKETED count so near-identical limits share an entry;
-    the caller's count is sliced out. Only successful, non-rescued responses are cached — caching a rescue
-    would make the one-shot ring fallback sticky for a whole TTL."""
-    from mertina.tools.web_result_cache import bucket_limit, search_memo, slice_search_response
-
-    def _paid_search() -> tuple[dict, bool]:
-        fetch_limit = bucket_limit(limit)
-        try:
-            resp = provider.search(query, fetch_limit)
-        except Exception as exc:
-            if not _rescue_eligible(provider):
-                raise
-            return _rescue_search(provider.name, str(exc), query, fetch_limit), True
-        if not resp.get("success") and _rescue_eligible(provider):
-            return _rescue_search(
-                provider.name, str(resp.get("error", "")), query, fetch_limit
-            ), True
-        return resp, False
-
-    response_data = search_memo.lookup(provider.name, query, limit)
-    if response_data is None:
-        with search_memo.flight_lock(provider.name, query, limit):
-            # Re-check inside the lock: a concurrent identical call may have stored.
-            response_data = search_memo.lookup(provider.name, query, limit)
-            if response_data is None:
-                response_data, was_rescued = _paid_search()
-                if not was_rescued:
-                    search_memo.store(provider.name, query, limit, response_data)
-    return slice_search_response(response_data, limit)
-
-
-async def web_extract_tool(
-    urls: list[Any], format: str = None, char_limit: int | None = None
-) -> str:
-    """Extract clean page content (no LLM) from URLs via the configured backend.
-
-    Pages over ``char_limit`` (default web.extract_char_limit or 15000) are head+tail truncated with a footer
-    pointing at the stored full text; inline base64 images become ``[IMAGE: alt]``. URLs carrying secrets are
-    refused before any fetch; private-network URLs are blocked per entry. Returns JSON ``{"results": [...]}``.
-    """
-    normalized_urls, normalized_indices, invalid_urls, blocked = _validate_extract_urls(urls)
-    if blocked is not None:
-        return blocked
-    debug_call_data = {
-        "parameters": {"urls": normalized_urls, "format": format, "char_limit": char_limit},
-        "error": None,
-        "pages_extracted": 0,
-        "pages_truncated": 0,
-        "original_response_size": 0,
-        "final_response_size": 0,
-        "truncation_metrics": [],
-        "processing_applied": [],
-    }
-
-    try:
-        logger.info("Extracting content from %d URL(s)", len(normalized_urls))
-        # SSRF protection — filter private/internal URLs before any backend.
-        safe_urls, safe_indices, ssrf_blocked = [], [], {}
-        for index, url in zip(normalized_indices, normalized_urls):
-            if await async_is_safe_url(url):
-                safe_urls.append(url)
-                safe_indices.append(index)
-            else:
-                ssrf_blocked[index] = _result_entry(
-                    url, "Blocked: URL targets a private or internal network address"
-                )
-
-        results = []
-        if safe_urls:
-            backend = _get_extract_backend()
-            _ensure_web_plugins_loaded()
-            provider, error_json = _resolve_extract_provider(backend)
-            if error_json is not None:
-                return error_json
-            results = await _extract_safe_urls(provider, safe_urls, format)
-        # Reconstruct input order across invalid, blocked, and provider entries (providers preserve
-        # the order of the safe URL list they receive).
-        if invalid_urls or ssrf_blocked:
-            fixed = {**ssrf_blocked, **invalid_urls}
-            results = _merge_in_order(len(urls), fixed, safe_indices, safe_urls, results)
-
-        logger.info("Extracted content from %d pages", len(results))
-        debug_call_data["pages_extracted"] = len(results)
-        debug_call_data["original_response_size"] = len(json.dumps({"results": results}))
-        debug_call_data["processing_applied"].append("truncate_and_store")
-        _truncate_results(results, _effective_char_limit(char_limit), debug_call_data)
-        trimmed = _trim_results(results)
-        result_json = (
-            json.dumps({"results": trimmed}, indent=2, ensure_ascii=False)
-            if trimmed
-            else tool_error("Content was inaccessible or not found")
-        )
-        # Belt-and-suspenders sweep of the serialized JSON: a provider may tuck a base64 blob in metadata.
-        cleaned_result = convert_base64_images_to_links(result_json)
-        debug_call_data["final_response_size"] = len(cleaned_result)
-        debug_call_data["processing_applied"].append("base64_image_conversion")
-        _finish_debug("web_extract_tool", debug_call_data)
-        return cleaned_result
-    except Exception as e:
-        return _finish_debug(
-            "web_extract_tool", debug_call_data, f"Error extracting content: {e!s}"
-        )
+        return tool_error(f"Error searching web: {e!s}")
 
 
 def _provider_is_ready(provider) -> bool:
-    """True when *provider* is keyed-available OR keyless-capable, without raising.
+    """True when *provider* is available, without raising.
 
     ``get_active_*_provider()`` returns an explicitly configured backend even when ``is_available()`` is
     False (so dispatch can emit a precise error), so readiness gates (tool check_fn, ``mertina doctor``)
-    must probe for real. Keyless mode (Exa/Parallel free tier) is a working state, not a misconfig.
+    must probe for real.
 
     See #78412.
     """
     if provider is None:
         return False
     ready = _probe(provider, "is_available", " during readiness check")
-    if ready is None:  # broken provider == not ready; don't try the keyless probe
+    if ready is None:  # broken provider == not ready
         return False
-    return bool(ready or _probe(provider, "is_keyless_available", " during readiness check"))
+    return bool(ready)
 
 
 # Credential probes that back other tools but serve no registered web backend: ``xai`` is
@@ -504,7 +238,7 @@ _WEB_CHECK_SKIP = frozenset({"xai"})
 
 
 def check_web_api_key() -> bool:
-    """``check_fn`` gate for web_search / web_extract: is any web backend available?
+    """``check_fn`` gate for web_search: is any web backend available?
 
     A plugin-registered provider reporting ``is_available()`` must light the tools up even with no
     built-in credentials; resolution funnels through :func:`_is_backend_available`.
@@ -521,18 +255,10 @@ def check_web_api_key() -> bool:
     try:
         _ensure_web_plugins_loaded()
         from mertina.agent.web_search_registry import (
-            get_active_extract_provider,
             get_active_search_provider,
         )
 
-        for provider in (get_active_search_provider(), get_active_extract_provider()):
-            if provider is not None and getattr(provider, "name", None) in _WEB_CHECK_SKIP:
-                # The registry's single-eligible / legacy walk picked a built-in that _get_backend
-                # never autodetects (the explicit-config case was handled above): the dispatcher
-                # would route to the keyless tier instead, so gate on exactly that.
-                if _keyless_backend() is not None:
-                    return True
-                continue
+        for provider in (get_active_search_provider(),):
             if _provider_is_ready(provider):
                 return True
         return False
@@ -566,105 +292,12 @@ WEB_SEARCH_SCHEMA = {
     },
 }
 
-WEB_EXTRACT_SCHEMA = {
-    "name": "web_extract",
-    "description": "Extract content from web page URLs. Returns clean page content in markdown/text (no LLM summarization — fast). Also works with PDF URLs (arxiv papers, documents) — pass the PDF link directly. Pages within the char budget (default 15000) return whole; larger pages return a head+tail window with a footer telling you the full text's saved file path and the read_file call to page through the omitted middle. Inline images appear as [IMAGE: alt] placeholders; real image URLs are kept as links. If a URL fails or times out, use the browser tool instead.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "urls": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of URLs to extract content from (max 5 URLs per call)",
-                "maxItems": 5,
-            },
-            "char_limit": {
-                "type": "integer",
-                "description": "Optional per-page character budget sent back (default 15000). Pages larger than this are head+tail truncated with the full text stored to disk. Raise it when you need more of a long page inline.",
-                "minimum": 2000,
-            },
-        },
-        "required": ["urls"],
-    },
-}
-
 registry.register(
     name="web_search",
     toolset="web",
     schema=WEB_SEARCH_SCHEMA,
     handler=lambda args, **kw: web_search_tool(args.get("query", ""), limit=args.get("limit", 5)),
     check_fn=check_web_api_key,
-    requires_env=_web_requires_env(),
     emoji="🔍",
     max_result_size_chars=100_000,
 )
-registry.register(
-    name="web_extract",
-    toolset="web",
-    schema=WEB_EXTRACT_SCHEMA,
-    handler=lambda args, **kw: web_extract_tool(
-        args.get("urls", [])[:5] if isinstance(args.get("urls"), list) else [],
-        "markdown",
-        char_limit=args.get("char_limit"),
-    ),
-    check_fn=check_web_api_key,
-    requires_env=_web_requires_env(),
-    is_async=True,
-    emoji="📄",
-    max_result_size_chars=100_000,
-)
-
-
-# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-# Names external plugins imported from this module before the Sep 2026 decomposition.
-# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
-# The whole block is removed by reverting the commit that added it.
-import asyncio  # noqa: F401,E402
-import re  # noqa: F401,E402
-import sys  # noqa: F401,E402
-from typing import (
-    TYPE_CHECKING,  # noqa: F401
-    Dict,  # noqa: F401
-)
-
-import httpx  # noqa: F401,E402
-
-_PLUGIN_COMPAT_LAZY = {
-    "DEFAULT_EXTRACT_CHAR_LIMIT": (
-        "mertina.tools.web_tools_truncate",
-        "DEFAULT_EXTRACT_CHAR_LIMIT",
-    ),
-    "Firecrawl": ("mertina.plugins.web.firecrawl.provider", "Firecrawl"),
-    "MAX_STORED_TEXT_CHARS": ("mertina.tools.web_tools_truncate", "MAX_STORED_TEXT_CHARS"),
-    "build_vendor_gateway_url": ("mertina.tools.managed_tool_gateway", "build_vendor_gateway_url"),
-    "managed_nous_tools_enabled": (
-        "mertina.tools.tool_backend_helpers",
-        "managed_nous_tools_enabled",
-    ),
-    "normalize_url_for_request": ("mertina.tools.url_safety", "normalize_url_for_request"),
-    "nous_tool_gateway_unavailable_message": (
-        "mertina.tools.tool_backend_helpers",
-        "nous_tool_gateway_unavailable_message",
-    ),
-    "prefers_gateway": ("mertina.tools.tool_backend_helpers", "prefers_gateway"),
-    "resolve_managed_tool_gateway": (
-        "mertina.tools.managed_tool_gateway",
-        "resolve_managed_tool_gateway",
-    ),
-    "sensitive_query_param_name": ("mertina.tools.url_safety", "sensitive_query_param_name"),
-}
-
-
-def __getattr__(name):  # PEP 562 — lazy so no import cycles
-    target = _PLUGIN_COMPAT_LAZY.get(name)
-    if target is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    import importlib
-
-    from mertina.cli.plugin_compat import warn_once
-
-    warn_once(__name__, name, *target)
-    return getattr(importlib.import_module(target[0]), target[1])
-
-
-# ---- END PLUGIN-COMPAT ----
