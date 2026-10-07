@@ -71,7 +71,7 @@ _KNOWN_MANIFEST_FIELDS: set[str] = {
 SUPPORTED_MANIFEST_VERSION = 2
 
 
-_CONFIG_SCHEMA_TYPES: dict[str, tuple] = {
+_CONFIG_SCHEMA_TYPES: dict[str, tuple[type, ...]] = {
     "str": (str,),
     "string": (str,),
     "int": (int,),
@@ -100,7 +100,9 @@ def _display_author(value: object) -> str:
     return "" if value is None else str(value)
 
 
-def _manifest_field_of_type(data: Mapping, key: str, field_name: str, typ, what: str):
+def _manifest_field_of_type(
+    data: Mapping[str, Any], key: str, field_name: str, typ: type, what: str
+) -> Any:
     """Return ``data[field_name]`` when absent or of ``typ``; warn and return None otherwise."""
     raw = data.get(field_name)
     if raw is not None and not isinstance(raw, typ):
@@ -110,8 +112,13 @@ def _manifest_field_of_type(data: Mapping, key: str, field_name: str, typ, what:
 
 
 def _manifest_list(
-    data: Mapping, key: str, field_name: str, what: str, coerce: Callable, warn: str
-) -> list:
+    data: Mapping[str, Any],
+    key: str,
+    field_name: str,
+    what: str,
+    coerce: Callable[[Any], Any],
+    warn: str,
+) -> list[Any]:
     """Coerce each item of list field ``field_name``; ``coerce`` returning None warns ``warn`` and
     skips."""
     out = []
@@ -139,13 +146,13 @@ def _manifest_int(raw: object, key: str, warn: str, fallback: int | None) -> int
     """``int(raw)``; a non-integer warns ``warn`` (formatted with key, raw) and yields
     ``fallback``."""
     try:
-        return int(raw)  # type: ignore[call-overload]
+        return int(raw)  # type: ignore[call-overload,no-any-return]  # raw is any YAML value
     except (TypeError, ValueError):
         logger.warning(warn, key, raw)
         return fallback
 
 
-def _parse_manifest_v2_fields(data: Mapping, key: str) -> dict[str, Any]:
+def _parse_manifest_v2_fields(data: Mapping[str, Any], key: str) -> dict[str, Any]:
     """Validate/normalize manifest v2 fields into PluginManifest kwargs (warnings, never failures).
 
     See #64165.
@@ -158,7 +165,7 @@ def _parse_manifest_v2_fields(data: Mapping, key: str) -> dict[str, Any]:
         "Plugin %s: manifest_version %r is not an integer; treating as 1",
         1,
     )
-    if mv > SUPPORTED_MANIFEST_VERSION:
+    if mv > SUPPORTED_MANIFEST_VERSION:  # type: ignore[operator]  # fallback 1: never None
         logger.warning(
             "Plugin %s: manifest_version %d is newer than this Mertina "
             "supports (%d); loading anyway and ignoring unknown fields",
@@ -218,7 +225,7 @@ def _parse_manifest_v2_fields(data: Mapping, key: str) -> dict[str, Any]:
     # Forward compat: unknown fields warn (never fail); v1 manifests only at debug.
     unknown = sorted(set(data.keys()) - _KNOWN_MANIFEST_FIELDS)
     if unknown:
-        (logger.warning if mv >= 2 else logger.debug)(
+        (logger.warning if mv >= 2 else logger.debug)(  # type: ignore[operator]  # fallback 1: never None
             "Plugin %s: unknown manifest field(s) ignored: %s "
             "(newer manifest schema or typo; plugin still loads)",
             key,
@@ -351,7 +358,7 @@ class PluginManifest:
     listens: list[str] = field(default_factory=list)
 
 
-def _manifest_kind(data: Mapping, key: str, plugin_dir: Path) -> str:
+def _manifest_kind(data: Mapping[str, Any], key: str, plugin_dir: Path) -> str:
     """Normalize ``kind``; undeclared memory/model providers are auto-detected from ``__init__.py``
     so they route to their own discovery instead of the general manager."""
     raw_kind = data.get("kind", "standalone")
@@ -383,7 +390,7 @@ def parse_manifest_file(
     """Parse one ``plugin.yaml`` into a :class:`PluginManifest`; ``None`` (warned) on failure."""
     try:
         if yaml is None:
-            logger.warning("PyYAML not installed – cannot load %s", manifest_file)  # noqa: RUF001  # upstream's dash
+            logger.warning("PyYAML not installed – cannot load %s", manifest_file)  # type: ignore[unreachable]  # noqa: RUF001  # yaml is a dependency; upstream's dash
             return None
         data = fast_safe_load(manifest_file.read_text(encoding="utf-8")) or {}
         name = data.get("name", plugin_dir.name)

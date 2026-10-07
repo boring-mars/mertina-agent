@@ -15,6 +15,8 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
+from typing import Any
 
 
 def _hold_gil(secs: int) -> None:
@@ -33,19 +35,19 @@ def _hold_gil(secs: int) -> None:
     sleep(int(secs))
 
 
-def _hang(block, name: str) -> dict:
+def _hang(block: Callable[[int], object], name: str) -> dict[str, Any]:
     block(30)
     return {"ok": False, "error": f"{name} hook returned unexpectedly"}
 
 
-_TEST_HOOKS = {
+_TEST_HOOKS: dict[str, Callable[[], dict[str, Any]]] = {
     "sleep": lambda: _hang(time.sleep, "sleep"),
     "gil": lambda: _hang(_hold_gil, "gil"),
     "empty": lambda: {"ok": True, "results": []},
 }
 
 
-def _write_envelope(envelope: dict) -> None:
+def _write_envelope(envelope: dict[str, Any]) -> None:
     json.dump(envelope, sys.stdout)
     sys.stdout.flush()
 

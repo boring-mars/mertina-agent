@@ -78,7 +78,7 @@ class ProviderRegistry(Generic[P]):
                 f"register_provider() expects {article} {self.provider_cls.__name__} "
                 f"instance, got {type(provider).__name__}"
             )
-        raw_name = provider.name
+        raw_name = provider.name  # type: ignore[attr-defined]  # every provider ABC has a name
         if not isinstance(raw_name, str) or not raw_name.strip():
             raise ValueError(f"{self.label} provider .name must be a non-empty string")
         key = self.normalize(raw_name)
@@ -113,19 +113,19 @@ class ProviderRegistry(Generic[P]):
 
     def list_providers(self, *, scope: str | None = None) -> list[P]:
         """Return all registered providers, sorted by name."""
-        return sorted(self.merged(scope).values(), key=lambda p: p.name)
+        return sorted(self.merged(scope).values(), key=lambda p: p.name)  # type: ignore[attr-defined]  # every provider ABC has a name
 
     def get_provider(self, name: str, *, scope: str | None = None) -> P | None:
         """Return the provider registered under *name* (scoped first), or None."""
         if not isinstance(name, str):
-            return None
+            return None  # type: ignore[unreachable]  # callers pass raw config values
         key = self.normalize(name)
         with self._lock:
             return self._scoped_providers.get(scope or mertina_home_key(), {}).get(
                 key
             ) or self._providers.get(key)
 
-    def registry_generation(self, *, scope: str | None = None) -> tuple:
+    def registry_generation(self, *, scope: str | None = None) -> tuple[int, int]:
         """Cache fingerprint ``(global_generation, scoped_generation)``."""
         active_scope = scope or mertina_home_key()
         with self._lock:

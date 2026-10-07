@@ -52,6 +52,11 @@ class PluginRegistration:
 
 
 class PluginLedgerMixin:
+    # Set by PluginManager; declared here so the mixin type-checks on its own.
+    scope_key: str
+    _ownership_ledger: dict[str, list[PluginRegistration]]
+    _registration_order: list[PluginRegistration]
+
     def _track_registration(
         self,
         manifest: PluginManifest,

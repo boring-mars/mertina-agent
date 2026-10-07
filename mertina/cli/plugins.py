@@ -184,14 +184,22 @@ _NAME_NORMALIZERS: dict[str | None, Callable[[str], str] | None] = {
 }
 
 
-def _make_scoped_provider_registrar(method_name, kind, registry_mod, base_ref, label, doc, options):
+def _make_scoped_provider_registrar(
+    method_name: str,
+    kind: str,
+    registry_mod: str,
+    base_ref: str,
+    label: str,
+    doc: str,
+    options: dict[str, Any],
+) -> Callable[..., PluginRegistration | None]:
     """Build one ``register_<category>_provider`` method from a ``_SCOPED_PROVIDER_REGISTRARS``
     row."""
     base_mod, base_attr = base_ref.split(":")
     normalize_fn = _NAME_NORMALIZERS[options.get("normalize", "strip")]
     register_name = options.get("register")
 
-    def register(self, provider) -> PluginRegistration | None:
+    def register(self: PluginContext, provider: Any) -> PluginRegistration | None:
         registry = importlib.import_module(registry_mod)
         return self._register_scoped_provider(
             provider,
@@ -205,7 +213,8 @@ def _make_scoped_provider_registrar(method_name, kind, registry_mod, base_ref, l
             reject_message=options.get("reject_message"),
         )
 
-    def register_source(self, source) -> PluginRegistration | None:  # secret sources: ``source``
+    # secret sources: ``source``
+    def register_source(self: PluginContext, source: Any) -> PluginRegistration | None:
         return register(self, source)
 
     method = register_source if options.get("param") == "source" else register

@@ -16,11 +16,16 @@ import logging
 import sys
 import threading
 import types
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from mertina.cli.plugins_manifest import PluginManifest, manifest_key
 from mertina.registration_lifecycle import replacement_coordinator
+
+if TYPE_CHECKING:  # pragma: no cover
+    from mertina.cli.plugins import LoadedPlugin
 
 logger = logging.getLogger("mertina.cli.plugins")
 
@@ -41,11 +46,11 @@ def _evict_modules(module_name: str) -> None:
         del sys.modules[name]
 
 
-def _serialized_replacement(method):
+def _serialized_replacement(method: Callable[..., Any]) -> Callable[..., Any]:
     """Make snapshot → write → lease attachment one atomic transaction."""
 
     @wraps(method)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
         with replacement_coordinator.transaction():
             return method(*args, **kwargs)
 
@@ -53,6 +58,11 @@ def _serialized_replacement(method):
 
 
 class PluginLoaderMixin:
+    # Set by PluginManager; declared here so the mixin type-checks on its own.
+    scope_key: str
+    _discovery_lock: threading.RLock
+    _plugins: dict[str, LoadedPlugin]
+
     def _load_plugin(self, manifest: PluginManifest) -> None:
         """Import a plugin module and call its ``register(ctx)`` function."""
         with self._discovery_lock:
@@ -80,7 +90,7 @@ class PluginLoaderMixin:
                 loaded.error = "no register() function"
                 logger.warning("Plugin '%s' has no register() function", manifest.name)
             else:
-                register_fn(PluginContext(manifest, self))
+                register_fn(PluginContext(manifest, self))  # type: ignore[arg-type]  # only PluginManager mixes this in
                 loaded.enabled = True
         except Exception as exc:
             loaded.error = str(exc)
@@ -114,7 +124,7 @@ class PluginLoaderMixin:
             raise FileNotFoundError(f"No __init__.py in {plugin_dir}")
         if _NS_PARENT not in sys.modules:
             ns_pkg = types.ModuleType(_NS_PARENT)
-            ns_pkg.__path__ = []  # type: ignore[attr-defined]
+            ns_pkg.__path__ = []
             ns_pkg.__package__ = _NS_PARENT
             sys.modules[_NS_PARENT] = ns_pkg
         module_name = module_name or self._directory_module_name(manifest)
@@ -130,7 +140,7 @@ class PluginLoaderMixin:
             raise ImportError(f"Cannot create module spec for {init_file}")
         module = importlib.util.module_from_spec(spec)
         module.__package__ = module_name
-        module.__path__ = [str(plugin_dir)]  # type: ignore[attr-defined]
+        module.__path__ = [str(plugin_dir)]
         sys.modules[module_name] = module
         try:
             spec.loader.exec_module(module)

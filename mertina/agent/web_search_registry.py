@@ -18,6 +18,7 @@ applies at every step):
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from mertina.agent.provider_registry import ProviderRegistry, is_available_safe
 from mertina.agent.web_search_provider import WebSearchProvider
@@ -40,7 +41,7 @@ def _read_config_key(*path: str) -> str | None:
     try:
         from mertina.cli.config import load_config_readonly
 
-        cur = load_config_readonly()
+        cur: Any = load_config_readonly()
         for segment in path:
             if not isinstance(cur, dict):
                 return None

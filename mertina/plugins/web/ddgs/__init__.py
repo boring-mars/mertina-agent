@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from mertina.plugins.web.ddgs.provider import DDGSWebSearchProvider
 
 
-def register(ctx) -> None:
+def register(ctx: Any) -> None:
     ctx.register_web_search_provider(DDGSWebSearchProvider())

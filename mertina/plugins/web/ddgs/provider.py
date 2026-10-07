@@ -35,7 +35,7 @@ _SEARCH_TIMEOUT_SECS = 30
 _POLL_INTERVAL_SECS = 0.1  # parent stdout / interrupt-flag poll cadence
 _TERMINATE_GRACE_SECS = 1.0  # wait after terminate() before escalating to kill()
 _test_hook: str | None = None  # test-only hook forwarded to the child (see _search_worker.py)
-_last_worker_proc: subprocess.Popen | None = None  # last worker Popen (test reap checks)
+_last_worker_proc: subprocess.Popen[str] | None = None  # last worker Popen (test reap checks)
 
 
 class _SearchInterrupted(Exception):  # noqa: N818  # upstream's name
@@ -49,7 +49,7 @@ def _run_ddgs_search(query: str, safe_limit: int) -> list[dict[str, Any]]:
     ``DDGS(timeout=…)`` bounds each individual HTTP request; the overall wall-clock cap is enforced
     by the parent via process timeout (#68096).
     """
-    from ddgs import DDGS  # type: ignore
+    from ddgs import DDGS
 
     results: list[dict[str, Any]] = []
     with DDGS(timeout=10) as client:
@@ -74,14 +74,14 @@ def _plugins_path_entry() -> str:
         from mertina import plugins as plugins_pkg
 
         if pkg_file := getattr(plugins_pkg, "__file__", None):
-            return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(pkg_file))))  # noqa: PTH100, PTH120  # upstream's os.path
+            return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(pkg_file))))  # type: ignore[no-any-return]  # noqa: PTH100, PTH120  # __file__ is Any; upstream's os.path
     except Exception:
         pass
     return os.path.abspath(os.path.join(__file__, *([os.pardir] * 5)))  # noqa: PTH100, PTH118  # upstream's os.path
 
 
 def _terminate_and_reap(
-    proc: subprocess.Popen | None, *, grace: float = _TERMINATE_GRACE_SECS
+    proc: subprocess.Popen[str] | None, *, grace: float = _TERMINATE_GRACE_SECS
 ) -> None:
     """Terminate a worker, escalate to kill, and wait so no orphan remains. Does not close
     the parent's pipe ends — closing stdout while another thread is blocked in ``read()``
@@ -107,7 +107,7 @@ def _terminate_and_reap(
         logger.debug("DDGS worker reap error: %s", exc)
 
 
-def _spawn_worker(env: dict[str, str]) -> subprocess.Popen:
+def _spawn_worker(env: dict[str, str]) -> subprocess.Popen[str]:
     """Start ``_search_worker.py`` as a script with ``mertina`` importable. Running as a
     script puts ``mertina/plugins/web/ddgs/`` on ``sys.path[0]``, breaking
     ``import mertina...``, so the real package location is prepended to PYTHONPATH."""
@@ -139,7 +139,7 @@ def _spawn_worker(env: dict[str, str]) -> subprocess.Popen:
     )
 
 
-def _parse_envelope(raw: str, proc: subprocess.Popen) -> list[dict[str, Any]]:
+def _parse_envelope(raw: str, proc: subprocess.Popen[str]) -> list[dict[str, Any]]:
     """Decode the worker's stdout envelope; raise ``RuntimeError`` on any malformed shape."""
     raw = raw.strip()
     if not raw:

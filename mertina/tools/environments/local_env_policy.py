@@ -94,7 +94,7 @@ _STATIC_PROVIDER_ENV_BLOCKLIST = frozenset(
 )
 
 
-def _build_provider_env_blocklist() -> frozenset:
+def _build_provider_env_blocklist() -> frozenset[str]:
     """Derive the blocklist from provider, tool, and gateway config."""
     blocked: set[str] = set(_STATIC_PROVIDER_ENV_BLOCKLIST)
     # CLAUDE_CODE_OAUTH_TOKEN (via the anthropic registry entry) belongs to the user's Claude Code
@@ -138,7 +138,7 @@ def _is_mertina_internal_secret(key: str) -> bool:
     return upper.startswith("GATEWAY_RELAY_") and upper.endswith(("_SECRET", "_KEY", "_TOKEN"))
 
 
-def _plugin_terminal_env_strip_keys() -> frozenset:
+def _plugin_terminal_env_strip_keys() -> frozenset[str]:
     """Credential env keys owned by plugin-registered terminal backends (Tier-1:
     stripped from every spawned subprocess). Computed at call time because plugins
     register after import; fail-soft to empty."""

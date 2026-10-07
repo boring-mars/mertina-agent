@@ -9,7 +9,7 @@ singleton may be registered again after an older ownership generation was unload
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -47,7 +47,7 @@ class ReplacementCoordinator:
         self._lock = threading.RLock()
 
     @contextmanager
-    def transaction(self):
+    def transaction(self) -> Iterator[None]:
         """Serialize a registry snapshot/write/acquire with lease disposal."""
         with self._lock:
             yield

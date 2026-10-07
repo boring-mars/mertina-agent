@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from mertina.cli.config import cfg_get
 from mertina.cli.plugins_manifest import (
@@ -23,7 +24,7 @@ from mertina.cli.plugins_manifest import (
 logger = logging.getLogger("mertina.cli.plugins")
 
 
-def _get_disabled_plugins() -> set:
+def _get_disabled_plugins() -> set[str]:
     """Read ``plugins.disabled`` — a deny-list that wins over ``plugins.enabled``."""
     try:
         from mertina.cli.config import load_config
@@ -34,7 +35,7 @@ def _get_disabled_plugins() -> set:
         return set()
 
 
-def _get_enabled_plugins() -> set | None:
+def _get_enabled_plugins() -> set[str] | None:
     """Read the ``plugins.enabled`` allow-list (plugins are opt-in). ``None`` = key
     missing/malformed ("nothing enabled yet"; the first ``migrate_config`` run grandfathers
     installed user plugins); ``set()`` = explicitly empty; else the allow-list."""
@@ -111,7 +112,7 @@ class ManifestGate:
     action: str  # "load" (dependency-ordered pass) | "placeholder" | "load_now"
     enabled: bool = False
     error: str | None = None
-    log: tuple | None = None  # (level, message, *args)
+    log: tuple[Any, ...] | None = None  # (level, message, *args)
 
 
 def gate_manifest(
@@ -123,7 +124,7 @@ def gate_manifest(
     names = {lookup_key, manifest.name}
 
     def _placeholder(
-        error: str | None, level: int, message: str, *args, enabled: bool = False
+        error: str | None, level: int, message: str, *args: Any, enabled: bool = False
     ) -> ManifestGate:
         return ManifestGate(
             "placeholder", enabled=enabled, error=error, log=(level, message, lookup_key, *args)
