@@ -134,6 +134,36 @@ class AIAgent(
     )
 
 
+def _endpoint_from_config(
+    model: str, base_url: str, api_key: str | None
+) -> tuple[str, str, str | None]:
+    """Fill the empty endpoint arguments from config.yaml ``model``, then the environment.
+
+    ``model`` may be a bare model name or a mapping with ``default`` (alias ``model``),
+    ``base_url`` and ``api_key``. ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY`` come from the process
+    environment or the Mertina ``.env``.
+    """
+    from mertina.cli.config import get_env_value, load_config
+
+    raw = load_config().get("model")
+    cfg: dict[str, Any] = (
+        {"default": raw} if isinstance(raw, str) else raw if isinstance(raw, dict) else {}
+    )
+    model = model or str(cfg.get("default") or cfg.get("model") or "").strip()
+    base_url = (
+        base_url
+        or str(cfg.get("base_url") or "").strip()
+        or (get_env_value("OPENAI_BASE_URL") or "").strip()
+    )
+    api_key = (
+        api_key
+        or str(cfg.get("api_key") or "").strip()
+        or (get_env_value("OPENAI_API_KEY") or "").strip()
+        or None
+    )
+    return model, base_url, api_key
+
+
 def main(
     query: str | None = None,
     model: str = "",
@@ -147,14 +177,17 @@ def main(
 
     Args:
         query (str): Natural language query for the agent. Defaults to Python 3.13 example.
-        model (str): Model name to use.
-        api_key (str): API key for authentication.
-        base_url (str): Base URL for the model API.
+        model (str): Model name to use. Defaults to config.yaml ``model``.
+        api_key (str): API key for authentication. Defaults to config.yaml ``model.api_key``, then
+        OPENAI_API_KEY.
+        base_url (str): Base URL for the model API. Defaults to config.yaml ``model.base_url``, then
+        OPENAI_BASE_URL.
         max_turns (int): Maximum number of API call iterations. Defaults to 10.
         verbose (bool): Enable verbose logging for debugging. Defaults to False.
     """
     print("🤖 AI Agent with Tool Calling")
     print("=" * 50)
+    model, base_url, api_key = _endpoint_from_config(model, base_url, api_key)
 
     try:
         agent = AIAgent(
