@@ -471,6 +471,19 @@ def load_env() -> dict[str, str]:
     return load_env_file(get_env_path())
 
 
+def _sanitize_env_lines(lines: list) -> list:
+    """Normalize .env line endings/whitespace without changing assignment semantics.
+    Content after the first ``=`` is opaque value data: a known variable name embedded in a value
+    must never be reinterpreted as another assignment, so concatenated lines stay on one line."""
+    sanitized: list[str] = []
+    for line in lines:
+        raw = line.rstrip("\r\n")
+        stripped = raw.strip()
+        # Blank lines and comments are preserved verbatim.
+        sanitized.append((raw if not stripped or stripped.startswith("#") else stripped) + "\n")
+    return sanitized
+
+
 def _scoped_environ_get(key: str) -> str | None:
     """Read ``key`` from ``os.environ``."""
     return os.environ.get(key)
