@@ -5,6 +5,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -133,6 +134,24 @@ def test_construction_records_the_settings_the_loop_reads(reg: ToolRegistry) -> 
     assert agent.pass_session_id is False
     assert agent._tool_use_enforcement == agent._execution_guidance == "auto"
     assert agent.session_start is not None
+
+
+def test_construction_reads_the_agent_section_of_config_yaml(
+    reg: ToolRegistry, mertina_home: Path
+) -> None:
+    (mertina_home / "config.yaml").write_text(
+        "agent:\n"
+        "  api_max_retries: 1\n"
+        "  tool_use_enforcement: true\n"
+        "  execution_guidance: [qwen]\n",
+        encoding="utf-8",
+    )
+
+    agent: Any = AIAgent(base_url="http://fake.test/v1", api_key="k", model="m", quiet_mode=True)
+
+    assert agent._api_max_retries == 1
+    assert agent._tool_use_enforcement is True
+    assert agent._execution_guidance == ["qwen"]
 
 
 # --- one turn -------------------------------------------------------------------------------------

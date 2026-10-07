@@ -95,7 +95,7 @@ _LAST_EXPANDED_CONFIG_BY_PATH: dict[str, Any] = {}
 # env_ref_snapshot). load_config() returns a deepcopy of the cached value while the signature
 # matches (skips safe_load + merge + normalize + expand, ~13 ms). The env snapshot invalidates
 # when a referenced ${VAR} changes value (in-process rotation). See #58514.
-_LOAD_CONFIG_CACHE: dict[str, tuple[int, ...]] = {}
+_LOAD_CONFIG_CACHE: dict[str, tuple[Any, ...]] = {}
 
 
 def get_config_path() -> Path:
@@ -111,7 +111,7 @@ def get_env_path() -> Path:
 from mertina.cli.config_defaults import DEFAULT_CONFIG  # noqa: E402
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge *override* into *base*: dict-over-dict recurses (so overriding one leaf
     keeps sibling defaults), and ``None`` over a dict section is ignored.
 
@@ -137,13 +137,13 @@ def _env_ref_lookup(name: str) -> str | None:
     return os.environ.get(name)
 
 
-def _env_expand_match(m: re.Match) -> str:
+def _env_expand_match(m: re.Match[str]) -> str:
     """Expand one ``${VAR}`` (legacy bare name) or ``${env:VAR}`` (Cursor-style SecretRef).
     Other SecretRef sources (``file:``, ``bitwarden:``, ``vault:``...) are NOT resolved here:
     external backends inject their values into the environment at startup (the ``secrets:``
     block), so a config ref only ever needs the env shape. Unresolved refs stay verbatim so
     callers can detect them."""
-    raw = m.group(0)
+    raw: str = m.group(0)
     inner = m.group(1).strip()
     name = _env_ref_var_name(inner)
     if name is None:
@@ -183,7 +183,7 @@ def _env_ref_var_name(ref: str) -> str | None:
     return ref
 
 
-def _expand_env_vars(obj):
+def _expand_env_vars(obj: Any) -> Any:
     """Recursively expand ``${VAR}`` / ``${env:VAR}`` in string values (keys/non-strings
     untouched)."""
     if isinstance(obj, str):
@@ -195,7 +195,9 @@ def _expand_env_vars(obj):
     return obj
 
 
-def _env_ref_snapshot(obj, snapshot=None):
+def _env_ref_snapshot(
+    obj: Any, snapshot: dict[str, str | None] | None = None
+) -> dict[str, str | None]:
     """Map each env-sourced ``${...}`` ref in *obj* to its current value.
     Stored with cached ``load_config()`` results so a cache hit can detect that the expansion was
     made against a different environment (in-process rotation) — file mtime/size alone cannot
@@ -325,11 +327,11 @@ def _load_config_cache_sig(
     managed_sig = (0, 0, 0, 0)
     if user_sig is None:
         return None, None
-    return user_sig, (*(user_sig or (0, 0, 0, 0)), *managed_sig)
+    return user_sig, (*(user_sig or (0, 0, 0, 0)), *managed_sig)  # type: ignore[unreachable]  # set here once the managed scope is cut
 
 
 def _last_known_good_fallback(
-    config_path: Path, path_key: str, cache_sig, exc: Exception
+    config_path: Path, path_key: str, cache_sig: tuple[int, ...] | None, exc: Exception
 ) -> dict[str, Any] | None:
     """Warn about a parse failure and return the last-known-good config, or None (-> defaults).
     A parse failure must not silently replace the effective config with defaults — that drops
@@ -387,7 +389,7 @@ def _load_config_impl(*, want_deepcopy: bool) -> dict[str, Any]:
                     return copy.deepcopy(lkg_copy) if want_deepcopy else lkg_copy
 
         normalized = _canonicalize_config(config)
-        expanded = _expand_env_vars(normalized)
+        expanded: dict[str, Any] = _expand_env_vars(normalized)
         _LAST_EXPANDED_CONFIG_BY_PATH[path_key] = copy.deepcopy(expanded)
         if cache_sig is not None:
             # The cache stores its own deepcopy so load_config() callers can mutate freely while

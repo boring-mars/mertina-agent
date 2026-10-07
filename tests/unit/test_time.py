@@ -1,6 +1,7 @@
-"""The clock the timestamp line reads: MERTINA_TIMEZONE, else server-local time."""
+"""The clock the timestamp line reads: MERTINA_TIMEZONE, then config.yaml, else server-local."""
 
 import logging
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -43,3 +44,24 @@ def test_each_zone_is_resolved_once(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mertina_time, "_resolve_timezone_name", lambda: "Europe/Oslo")
 
     assert mertina_time.get_timezone() is first
+
+
+def test_config_yaml_names_the_zone_when_the_env_var_is_unset(mertina_home: Path) -> None:
+    (mertina_home / "config.yaml").write_text("timezone: ' Europe/Oslo '\n", encoding="utf-8")
+
+    assert mertina_time.get_timezone() == ZoneInfo("Europe/Oslo")
+
+
+def test_the_env_var_wins_over_config_yaml(
+    mertina_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (mertina_home / "config.yaml").write_text("timezone: Europe/Oslo\n", encoding="utf-8")
+    monkeypatch.setenv("MERTINA_TIMEZONE", "Asia/Tokyo")
+
+    assert mertina_time.get_timezone() == ZoneInfo("Asia/Tokyo")
+
+
+def test_an_unreadable_config_yaml_means_server_local(mertina_home: Path) -> None:
+    (mertina_home / "config.yaml").write_text("timezone: [unclosed\n", encoding="utf-8")
+
+    assert mertina_time.get_timezone() is None

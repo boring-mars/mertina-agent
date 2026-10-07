@@ -22,7 +22,7 @@ def _get_platform_default_mertina_home() -> Path:
         local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
         base = Path(local_appdata) if local_appdata else Path.home() / "AppData" / "Local"
         return base / "mertina"
-    return Path.home() / ".mertina"
+    return Path.home() / ".mertina"  # type: ignore[unreachable,unused-ignore]  # per-OS branch
 
 
 def get_mertina_home() -> Path:
