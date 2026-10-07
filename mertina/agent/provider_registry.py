@@ -1,16 +1,15 @@
 # Ported from hermes-agent agent/provider_registry.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
 # Partial: only the parts ported so far. Upstream order is kept.
-"""Shared engine behind the ``agent.*_registry`` provider registries.
+"""Shared engine behind the ``mertina.agent.*_registry`` provider registries.
 
-Every pluggable-backend registry has the same shape: a global name->provider map
-plus per-profile *scoped* maps (multiplexed gateways), a lock, registration with
-re-registration logging, and the snapshot/restore pair :mod:`mertina.cli.plugins`
-uses to unwind a plugin. Each ``*_registry`` module instantiates one
-:class:`ProviderRegistry` and re-exports its bound methods under the historical
-module-level names via :meth:`ProviderRegistry.export`, so ``patch("mertina.agent.x_registry.get_provider")``
-targets and the ``_providers`` / ``_scoped_providers`` / ``_lock`` test hooks are unchanged.
-"""
+Every pluggable-backend registry has the same shape: a global name->provider map plus per-profile
+*scoped* maps (multiplexed gateways), a lock, registration with re-registration logging, and the
+snapshot/restore pair :mod:`mertina.cli.plugins` uses to unwind a plugin. Each ``*_registry`` module
+instantiates one :class:`ProviderRegistry` and re-exports its bound methods under the historical
+module-level names via :meth:`ProviderRegistry.export`, so
+``patch("mertina.agent.x_registry.get_provider")`` targets and the ``_providers`` /
+``_scoped_providers`` / ``_lock`` test hooks are unchanged."""
 
 from __future__ import annotations
 

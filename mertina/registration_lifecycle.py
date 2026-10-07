@@ -18,7 +18,7 @@ from typing import Any
 def same_registration(left: Any, right: Any) -> bool:
     """Compare opaque registry snapshots using identity only (element-wise for tuples)."""
     if isinstance(left, tuple) and isinstance(right, tuple):
-        return len(left) == len(right) and all(same_registration(a, b) for a, b in zip(left, right))
+        return len(left) == len(right) and all(same_registration(a, b) for a, b in zip(left, right))  # noqa: B905  # lengths compared first
     return left is right
 
 
@@ -92,7 +92,8 @@ class ReplacementCoordinator:
             try:
                 try:
                     if latest is lease:
-                        # Restore the nearest still-live predecessor, else the last dead generation's previous.
+                        # Restore the nearest still-live predecessor, else the last dead
+                        # generation's previous.
                         replacement, predecessor = lease.previous, lease.predecessor
                         while predecessor is not None and not predecessor.active:
                             replacement, predecessor = predecessor.previous, predecessor.predecessor

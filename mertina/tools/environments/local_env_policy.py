@@ -5,8 +5,6 @@
 names are Mertina-managed credentials. The env *builders* applying it (``_make_run_env``,
 ``_sanitize_subprocess_env``, ``mertina_subprocess_env``) live in ``tools.environments.local``."""
 
-import os
-
 # Prefix a caller uses in ``extra_env`` to force a blocklisted var through.
 _MERTINA_PROVIDER_ENV_FORCE_PREFIX = "_MERTINA_FORCE_"
 
@@ -99,41 +97,18 @@ _STATIC_PROVIDER_ENV_BLOCKLIST = frozenset(
 def _build_provider_env_blocklist() -> frozenset:
     """Derive the blocklist from provider, tool, and gateway config."""
     blocked: set[str] = set(_STATIC_PROVIDER_ENV_BLOCKLIST)
-    try:
-        from mertina.cli.auth import PROVIDER_REGISTRY
-
-        for pconfig in PROVIDER_REGISTRY.values():
-            blocked.update(pconfig.api_key_env_vars)
-            if pconfig.auth_type == "aws_sdk":
-                blocked.update(_AWS_SDK_CREDENTIAL_ENV_VARS)
-            if pconfig.base_url_env_var:
-                blocked.add(pconfig.base_url_env_var)
-    except ImportError:
-        pass
-    try:
-        from mertina.cli.config import OPTIONAL_ENV_VARS
-
-        for name, metadata in OPTIONAL_ENV_VARS.items():
-            category = metadata.get("category")
-            if category in {"tool", "messaging"} or (
-                category == "setting" and metadata.get("password")
-            ):
-                blocked.add(name)
-    except ImportError:
-        pass
-    # CLAUDE_CODE_OAUTH_TOKEN (via the anthropic registry entry) belongs to the user's
-    # Claude Code install, not Mertina: stripping it made agent-spawned ``claude`` CLIs
-    # fall through to the shared Keychain / ~/.claude store and, on auth failure, wipe
-    # it — logging the user out. BUZZ_* is deliberately NOT discarded: this list feeds
-    # every scrub surface, so an import-time discard would leak BUZZ_PRIVATE_KEY into
-    # non-terminal children; the Buzz carve-out is terminal-only and context-gated
-    # (``_is_terminal_first_party_env``).
-    # It is set and owned by the user's Claude Code install (subscription OAuth), not a Mertina-managed
-    # inference credential — Claude subscription auth is not a working Mertina provider path. It arrives via
-    # the registry loop above (anthropic api_key_env_vars), so remove it explicitly. See #55878.
+    # CLAUDE_CODE_OAUTH_TOKEN (via the anthropic registry entry) belongs to the user's Claude Code
+    # install, not Mertina: stripping it made agent-spawned ``claude`` CLIs fall through to the
+    # shared Keychain / ~/.claude store and, on auth failure, wipe it — logging the user out. BUZZ_*
+    # is deliberately NOT discarded: this list feeds every scrub surface, so an import-time discard
+    # would leak BUZZ_PRIVATE_KEY into non-terminal children; the Buzz carve-out is terminal-only
+    # and context-gated (``_is_terminal_first_party_env``). It is set and owned by the user's Claude
+    # Code install (subscription OAuth), not a Mertina-managed inference credential — Claude
+    # subscription auth is not a working Mertina provider path. It arrives via the registry loop
+    # above (anthropic api_key_env_vars), so remove it explicitly. See #55878.
     blocked.discard("CLAUDE_CODE_OAUTH_TOKEN")
-    # BUZZ_* is deliberately NOT discarded here, even for Buzz-managed agents (BUZZ_MANAGED_AGENT set by the
-    # buzz-acp harness). See #76243, #78026, #78065, #78511.
+    # BUZZ_* is deliberately NOT discarded here, even for Buzz-managed agents (BUZZ_MANAGED_AGENT
+    # set by the buzz-acp harness). See #76243, #78026, #78065, #78511.
     return frozenset(blocked)
 
 
@@ -149,78 +124,6 @@ def _is_provider_env_blocklisted(name: str) -> bool:
     return (
         name in _MERTINA_PROVIDER_ENV_BLOCKLIST or name.upper() in _MERTINA_PROVIDER_ENV_BLOCKLIST
     )
-
-
-# First-party platform credentials (``BUZZ_*``, driving the platform-mandated ``buzz``
-# CLI) carved out of the TERMINAL scrub only (``_make_run_env``,
-# ``_sanitize_subprocess_env``); execute_code, mertina_subprocess_env, docker and
-# env_passthrough registration stay sealed (GHSA-rhgp-j443-p4rf). CONTEXT-GATED via
-# ``_buzz_terminal_context_active``: a Telegram/CLI/cron session on a host that also
-# runs a Buzz gateway must not get the signing key. Values are used directly, never
-# scope-resolved (UnscopedSecretError under multiplex); the snapshot treats them as
-# profile-scoped. Prefix-based so future BUZZ_* names need no code change.
-# First-party platform credentials the agent's own platform adapters need in terminal children (e.g. the
-# ``BUZZ_*`` vars for the Buzz messaging platform, which drive the platform-mandated ``buzz`` CLI:
-# BUZZ_PRIVATE_KEY, BUZZ_AUTH_TAG, BUZZ_RELAY_URL, and the other BUZZ_* names). These are the agent's OWN
-# credentials — a Buzz community agent is expected to operate the ``buzz`` CLI — so they are carved out of
-# the terminal scrub. CONTEXT-GATED: the carve-out applies ONLY when this process/session is actually
-# operating as a Buzz agent — either the process is a Buzz-ACP managed agent (``BUZZ_MANAGED_AGENT`` is set,
-# only by Buzz Desktop's buzz-acp harness; see #76243 / #78511) or the current session's platform is
-# ``buzz`` (the gateway's ``MERTINA_SESSION_PLATFORM`` ContextVar; concurrency safe under a multi-session
-# host). A Telegram/CLI/cron session on a host that also runs a Buzz gateway does NOT get BUZZ_PRIVATE_KEY
-# in its terminal children — blanket passthrough of a signing key to every terminal child on the host would
-# be wrong (maintainer triage note on #76243: don't expose the key to unrelated shell commands).
-# ``_sanitize_subprocess_env`` is also consumed by search workers (e.g. the ddgs web-search subprocess), the
-# computer-use driver binary, and user-script runners (bang ``!`` commands, quick commands, cron scripts,
-# webhook-filter scripts), so those children receive the vars too — matching the approved background/PTY
-# scope. Every other surface stays sealed — execute_code scrubbing, :func:`mertina_subprocess_env` (browser /
-# TUI host / copilot-executor spawns), docker children, and ``env_passthrough`` registration (skills/config
-# still cannot register these names). The GHSA-rhgp-j443-p4rf seal is preserved because no registration path
-# is opened; this is a scrub-path exemption, not an allowlist addition. First-party matches use the merged
-# env value directly — they are the process's own env values and are never scope-resolved (a profile secret
-# scope under multiplex would otherwise raise UnscopedSecretError at passthrough-resolution call sites);
-# only skill/config passthrough names resolve through the profile secret scope. The snapshot mechanism
-# treats these names like profile-scoped passthrough names (see
-# ``LocalEnvironment._additional_profile_scoped_passthrough_names``) so they never persist in the shared
-# terminal snapshot across profiles. Contrast with CLAUDE_CODE_OAUTH_TOKEN above, which is discarded from
-# the blocklist entirely because it is NOT a Mertina credential; these ARE Mertina-managed first-party
-# platform credentials, so they stay IN the blocklist for every non-terminal surface. See issue #78026 (Buzz
-# agents could not use ``buzz`` from the terminal tool) and #76243 (Buzz Desktop managed agent wakes but
-# cannot reply).
-_TERMINAL_FIRST_PARTY_ENV_PREFIXES = ("BUZZ_",)
-
-
-def _matches_terminal_first_party_prefix(name: str) -> bool:
-    """Pure name check (``BUZZ_*``), regardless of session context — the snapshot
-    exclusion must stay conservative even when the carve-out is inactive.
-    Case-folded: on Windows the env block is case-insensitive, so a
-    lowercase-stored ``buzz_private_key`` IS the credential; it needs the
-    carve-out (and the snapshot exclusion) just like the canonical name."""
-    return name.upper().startswith(_TERMINAL_FIRST_PARTY_ENV_PREFIXES)
-
-
-def _buzz_terminal_context_active() -> bool:
-    """True when this process/session operates as a Buzz agent: ``BUZZ_MANAGED_AGENT`` in
-    the process env (set only by Buzz Desktop's buzz-acp harness), or the live session's
-    platform is ``buzz`` via the gateway ContextVar — authoritative under a concurrent
-    multi-session host, so a sibling Telegram session resolves its OWN platform.
-
-    Gateway / CLI / cron / kanban processes never carry it. See #76243.
-    """
-    if os.environ.get("BUZZ_MANAGED_AGENT"):
-        return True
-    try:
-        from mertina.gateway.session_context import get_session_env
-
-        return get_session_env("MERTINA_SESSION_PLATFORM", "").strip().lower() == "buzz"
-    except Exception:
-        return False
-
-
-def _is_terminal_first_party_env(name: str) -> bool:
-    """``name`` is a first-party platform credential (``BUZZ_*``) AND the current
-    process/session context entitles it to reach terminal children."""
-    return _matches_terminal_first_party_prefix(name) and _buzz_terminal_context_active()
 
 
 def _is_mertina_internal_secret(key: str) -> bool:
@@ -239,9 +142,4 @@ def _plugin_terminal_env_strip_keys() -> frozenset:
     """Credential env keys owned by plugin-registered terminal backends (Tier-1:
     stripped from every spawned subprocess). Computed at call time because plugins
     register after import; fail-soft to empty."""
-    try:
-        from mertina.agent.terminal_env_registry import plugin_strip_env_keys
-
-        return plugin_strip_env_keys()
-    except Exception:
-        return frozenset()
+    return frozenset()

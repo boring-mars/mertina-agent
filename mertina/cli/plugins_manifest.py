@@ -1,7 +1,7 @@
 # Ported from hermes-agent hermes_cli/plugins_manifest.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
 # Partial: only the parts ported so far. Upstream order is kept.
-"""Plugin manifest model and parsing (``plugin.yaml`` v1/v2, portable ``plugin.json``).
+"""Plugin manifest model and parsing (``plugin.yaml`` v1/v2).
 
 Split out of :mod:`mertina.cli.plugins`; validation warns and never fails a load.
 """
@@ -15,14 +15,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from mertina.cli.plugin_capabilities import (
-    parse_declared_capabilities as _parse_declared_capabilities,
-)
 from mertina.utils import fast_safe_load
 
 try:
     import yaml
-except ImportError:  # pragma: no cover – yaml is optional at import time
+except ImportError:  # pragma: no cover - yaml is optional at import time
     yaml = None  # type: ignore[assignment]
 
 
@@ -115,7 +112,8 @@ def _manifest_field_of_type(data: Mapping, key: str, field_name: str, typ, what:
 def _manifest_list(
     data: Mapping, key: str, field_name: str, what: str, coerce: Callable, warn: str
 ) -> list:
-    """Coerce each item of list field ``field_name``; ``coerce`` returning None warns ``warn`` and skips."""
+    """Coerce each item of list field ``field_name``; ``coerce`` returning None warns ``warn`` and
+    skips."""
     out = []
     for item in _manifest_field_of_type(data, key, field_name, list, what) or []:
         coerced = coerce(item)
@@ -127,7 +125,8 @@ def _manifest_list(
 
 
 def _dependency_entry(item: object) -> dict[str, Any] | None:
-    """``{id, version_range}`` from a requires_plugins item (str shorthand ok); None when malformed."""
+    """``{id, version_range}`` from a requires_plugins item (str shorthand ok); None when
+    malformed."""
     if isinstance(item, str):
         return {"id": item, "version_range": None}
     if isinstance(item, Mapping) and isinstance(item.get("id"), str) and item["id"]:
@@ -137,7 +136,8 @@ def _dependency_entry(item: object) -> dict[str, Any] | None:
 
 
 def _manifest_int(raw: object, key: str, warn: str, fallback: int | None) -> int | None:
-    """``int(raw)``; a non-integer warns ``warn`` (formatted with key, raw) and yields ``fallback``."""
+    """``int(raw)``; a non-integer warns ``warn`` (formatted with key, raw) and yields
+    ``fallback``."""
     try:
         return int(raw)  # type: ignore[call-overload]
     except (TypeError, ValueError):
@@ -150,7 +150,8 @@ def _parse_manifest_v2_fields(data: Mapping, key: str) -> dict[str, Any]:
 
     See #64165.
     """
-    # manifest_version — absent means v1 (supported forever); api_version is the independent API generation.
+    # manifest_version — absent means v1 (supported forever); api_version is the independent API
+    # generation.
     mv = _manifest_int(
         data.get("manifest_version", 1),
         key,
@@ -236,12 +237,11 @@ def _parse_manifest_v2_fields(data: Mapping, key: str) -> dict[str, Any]:
 
 
 def resolve_plugin_load_order(manifests: Mapping[str, PluginManifest]) -> list[str]:
-    """Return plugin keys in dependency order: B before A when A requires B; alphabetical ties. A cycle warns
-    and falls back to alphabetical order for all; a missing dependency warns once but never removes the
-    dependent plugin (loads never hard-fail on advisory deps).
+    """Return plugin keys in dependency order: B before A when A requires B; alphabetical ties. A
+    cycle warns and falls back to alphabetical order for all; a missing dependency warns once but
+    never removes the dependent plugin (loads never hard-fail on advisory deps).
 
-    See #64165.
-    """
+    See #64165."""
     import graphlib
 
     keys = sorted(manifests.keys())
@@ -289,9 +289,10 @@ def resolve_plugin_load_order(manifests: Mapping[str, PluginManifest]) -> list[s
 
 
 def _detect_kind_from_source(source_text: str) -> str | None:
-    """Kind implied by source markers (mirrors plugins/memory ``_is_memory_provider_dir``): memory-provider
-    markers -> ``exclusive``; ``register_provider`` + ``ProviderProfile`` -> ``model-provider``; else
-    ``None``. Keeps both kinds out of the general manager's eager import."""
+    """Kind implied by source markers (mirrors plugins/memory ``_is_memory_provider_dir``):
+    memory-provider markers -> ``exclusive``; ``register_provider`` + ``ProviderProfile`` ->
+    ``model-provider``; else ``None``. Keeps both kinds out of the general manager's eager import.
+    """
     if "register_memory_provider" in source_text or "MemoryProvider" in source_text:
         return "exclusive"
     if "register_provider" in source_text and "ProviderProfile" in source_text:
@@ -317,33 +318,27 @@ class PluginManifest:
     provides_hooks: list[str] = field(default_factory=list)
     source: str = ""  # "bundled", "user", "project", or "entrypoint"
     path: str | None = None
-    # ``standalone`` (default; opt-in via plugins.enabled) | ``backend`` (pluggable backend for a core tool;
-    # bundled auto-load, user-installed gated) | ``exclusive`` (one active provider, selected via
-    # <category>.provider; own discovery, general scanner skips) | ``platform`` (gateway adapter; bundled
-    # auto-load, user-installed gated as untrusted code).
+    # ``standalone`` (default; opt-in via plugins.enabled) | ``backend`` (pluggable backend for a
+    # core tool; bundled auto-load, user-installed gated) | ``exclusive`` (one active provider,
+    # selected via <category>.provider; own discovery, general scanner skips) | ``platform``
+    # (gateway adapter; bundled auto-load, user-installed gated as untrusted code).
     kind: str = "standalone"
-    # Path-derived registry key used by plugins.enabled/disabled and `mertina plugins list`: ``disk-cleanup``
-    # for a flat plugin, ``image_gen/openai`` for a category plugin. Empty -> name.
+    # Path-derived registry key used by plugins.enabled/disabled and `mertina plugins list`:
+    # ``disk-cleanup`` for a flat plugin, ``image_gen/openai`` for a category plugin. Empty -> name.
     key: str = ""
-    # Mertina version requirement (``">=0.19"``, comma-separated clauses allowed). Unsatisfied plugins are
-    # recorded with an error and skipped before import — see ``requires_mertina_error``.
+    # Mertina version requirement (``">=0.19"``, comma-separated clauses allowed). Unsatisfied
+    # plugins are recorded with an error and skipped before import — see ``requires_mertina_error``.
     requires_mertina: str = ""
-    portable: bool = False
-    skill_namespace: str = ""
-    # Declared capability ids, normalized to KNOWN ids. Declaration is consent metadata, NOT a grant: live
-    # only via plugins.entries.<id>.granted_capabilities or the legacy allow_* key.
-    # See #64228.
-    capabilities: list[str] = field(default_factory=list)
-    # Manifest v2 fields — all optional and additive. manifest_version versions the FILE FORMAT (v1 supported
-    # forever); api_version is the runtime plugin API generation (None = current).
-    # Absent (v1) manifests are fully supported forever. See #64165.
+    # Manifest v2 fields — all optional and additive. manifest_version versions the FILE FORMAT (v1
+    # supported forever); api_version is the runtime plugin API generation (None = current). Absent
+    # (v1) manifests are fully supported forever. See #64165.
     manifest_version: int = 1
     api_version: int | None = None
     # Advisory deps [{"id", "version_range"}]: missing ones warn but load; they order the load.
     requires_plugins: list[dict[str, Any]] = field(default_factory=list)
-    # Declared pip deps — VALIDATED AND SURFACED ONLY, never auto-installed.
-    # VALIDATED AND SURFACED ONLY — Mertina never auto-installs these (isolation design for the install seam
-    # is a deferred follow-up; see #64165 round-2 review and #15220).
+    # Declared pip deps — VALIDATED AND SURFACED ONLY, never auto-installed. VALIDATED AND SURFACED
+    # ONLY — Mertina never auto-installs these (isolation design for the install seam is a deferred
+    # follow-up; see #64165 round-2 review and #15220).
     python_dependencies: list[str] = field(default_factory=list)
     # Schema for plugins.entries.<id>.settings; mismatches warn, never fail.
     config_schema: dict[str, Any] = field(default_factory=dict)
@@ -357,8 +352,8 @@ class PluginManifest:
 
 
 def _manifest_kind(data: Mapping, key: str, plugin_dir: Path) -> str:
-    """Normalize ``kind``; undeclared memory/model providers are auto-detected from ``__init__.py`` so they
-    route to their own discovery instead of the general manager."""
+    """Normalize ``kind``; undeclared memory/model providers are auto-detected from ``__init__.py``
+    so they route to their own discovery instead of the general manager."""
     raw_kind = data.get("kind", "standalone")
     kind = raw_kind.strip().lower() if isinstance(raw_kind, str) else "standalone"
     if kind not in _VALID_PLUGIN_KINDS:
@@ -388,7 +383,7 @@ def parse_manifest_file(
     """Parse one ``plugin.yaml`` into a :class:`PluginManifest`; ``None`` (warned) on failure."""
     try:
         if yaml is None:
-            logger.warning("PyYAML not installed – cannot load %s", manifest_file)
+            logger.warning("PyYAML not installed – cannot load %s", manifest_file)  # noqa: RUF001  # upstream's dash
             return None
         data = fast_safe_load(manifest_file.read_text(encoding="utf-8")) or {}
         name = data.get("name", plugin_dir.name)
@@ -415,7 +410,6 @@ def parse_manifest_file(
             kind=kind,
             key=key,
             requires_mertina=str(data.get("requires_mertina") or "").strip(),
-            capabilities=_parse_declared_capabilities(data.get("capabilities"), name),
             **_parse_manifest_v2_fields(data, key),
             emits=data.get("emits") or [],
             listens=data.get("listens") or [],
