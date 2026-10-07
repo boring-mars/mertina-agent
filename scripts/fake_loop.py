@@ -1,8 +1,8 @@
 """Run agent turns against a fake model: the v0.1 acceptance check.
 
-A real ``AIAgent`` talks to a scripted chat-completions client instead of the network. v0.1 has no
-built-in tool yet (the first one is ``web_search`` in v0.1.2), so this script registers its own
-``clock`` tool in the real registry. Two scenarios:
+A real ``AIAgent`` talks to a scripted chat-completions client instead of the network. The script
+registers its own ``clock`` tool in the real registry; the built-in ``web_search`` is offered too,
+but the scripted model only ever calls ``clock``. Two scenarios:
 
 - **Round trip.** The model asks for ``clock`` and builds its second reply from the tool result it
   was sent back: request, tool call, dispatch, tool result, final answer. The answer streams to
