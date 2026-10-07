@@ -17,8 +17,7 @@ def _disabled_plugin_error(capability: str, disabled_key: str) -> str:
     vendor = disabled_key.split("/", 1)[-1]
     return (
         f"web.{capability}_backend is set to '{vendor}', but its plugin ('{disabled_key}') is disabled "  # noqa: E501  # upstream's message
-        f"in config. Re-enable it with `mertina plugins enable {disabled_key}` "
-        "(or remove it from plugins.disabled)."
+        "in config. Re-enable it by removing it from plugins.disabled."
     )
 
 

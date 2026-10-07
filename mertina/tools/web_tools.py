@@ -3,7 +3,7 @@
 #!/usr/bin/env python3
 """Generic web_search tool over pluggable backends.
 
-Backend is selected during ``mertina tools`` (``web.backend`` in config.yaml; per
+Backend is selected in config.yaml (``web.backend``; per
 capability via ``web.search_backend``). Every vendor
 implementation lives in ``plugins/web/<vendor>/provider.py`` and registers with
 ``agent.web_search_registry``; this module owns selection.
@@ -210,7 +210,7 @@ def web_search_tool(query: str, limit: int = 5) -> str:
             provider = get_active_search_provider()
 
         if provider is None:
-            fallback = "No web search provider configured. Run `mertina tools` to set one up."
+            fallback = "No web search provider configured. Set web.search_backend in config.yaml."
             response_data = {"success": False, "error": _no_provider_error("search", fallback)}
         else:
             logger.info("Web search via %s: '%s' (limit: %d)", provider.name, query, limit)

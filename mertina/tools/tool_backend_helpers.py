@@ -39,7 +39,7 @@ def _raw_section(section: str) -> dict[str, Any] | None:
 
 
 def read_selection(section: str) -> str | None:
-    """THE single runtime read of the persisted `mertina tools` selection: ``"nous"`` (managed
+    """THE single runtime read of the persisted config.yaml selection: ``"nous"`` (managed
     gateway row), a vendor name (direct, own credentials), or ``None`` (never configured ->
     legacy autodetect allowed). Reads the RAW config.yaml so key presence means "actually
     written", not "schema default"; a raw ``local`` is therefore a real user selection.
@@ -94,6 +94,6 @@ def selection_error(section: str, selection_name: str, failure: str) -> str:
     """The uniform honest-error contract for a selected-but-broken provider."""
     failure = removed_backend_note(section, selection_name) or failure
     return (
-        f"{section} is configured to use {selection_name} (set via mertina "
-        f"tools), but {failure}. Run 'mertina tools' to change it."
+        f"{section} is configured to use {selection_name} (set in config.yaml), "
+        f"but {failure}. Change it in config.yaml."
     )

@@ -63,8 +63,7 @@ def test_the_raw_read_is_cached_until_the_file_changes(mertina_home: Path) -> No
 
 def test_selection_error_and_removed_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     assert helpers.selection_error("web", "'x'", "it broke") == (
-        "web is configured to use 'x' (set via mertina tools), but it broke. "
-        "Run 'mertina tools' to change it."
+        "web is configured to use 'x' (set in config.yaml), but it broke. Change it in config.yaml."
     )
 
     monkeypatch.setitem(helpers.REMOVED_BACKENDS, "web", {"x": "x was removed"})

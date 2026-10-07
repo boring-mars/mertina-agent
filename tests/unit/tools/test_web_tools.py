@@ -132,7 +132,9 @@ def test_without_any_provider_the_error_says_so() -> None:
     result = _search()
 
     assert result["success"] is False
-    assert result["error"].startswith("No web search provider configured.")
+    assert result["error"] == (
+        "No web search provider configured. Set web.search_backend in config.yaml."
+    )
 
 
 def test_an_unregistered_selection_is_not_silently_replaced(mertina_home: Path) -> None:
@@ -159,7 +161,10 @@ def test_a_disabled_bundled_plugin_is_named(
     result = _search()
 
     assert result["success"] is False
-    assert "its plugin ('web/ddgs') is disabled in config" in result["error"]
+    assert result["error"] == (
+        "web.search_backend is set to 'ddgs', but its plugin ('web/ddgs') is disabled in config. "
+        "Re-enable it by removing it from plugins.disabled."
+    )
 
 
 def test_a_raising_provider_becomes_a_tool_error() -> None:

@@ -122,6 +122,9 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 | `plugins/web/ddgs/provider._plugins_path_entry`：`os.path.dirname(os.path.dirname(...plugins/__init__.py))`，否则从 `provider.py` 往上 `[os.pardir] * 4` | 多一层 `dirname`，以及 `[os.pardir] * 5` | 规则 1 把 `plugins/` 放到了 `mertina/` 下，搜索子进程的 `PYTHONPATH` 需要的目录（顶层包所在的目录）比上游高一级 |
 | `web_tools.web_search_tool`：`response_data = _memoized_search(provider, query, limit)`，按分桶后的条数调 `provider.search`，TTL 缓存加 single-flight，失败时走 keyless 兜底 | `response_data = provider.search(query, limit)` | **行为改变：** v0.1 不搬结果缓存（`tools/web_result_cache.py`）和 keyless 兜底（`tools/web_tools_rescue.py`），每次调用都直接问 provider |
 | `web_tools.web_search_tool` 的 except 分支：`return _finish_debug("web_search_tool", debug_call_data, f"Error searching web: {e!s}")`，记一条 debug 日志、写进 `WEB_TOOLS_DEBUG` 会话再返回 `tool_error` | `return tool_error(f"Error searching web: {e!s}")` | **行为改变：** v0.1 不搬 `WEB_TOOLS_DEBUG` 调试会话（`tools/debug_helpers.py`），返回的错误不变 |
+| `tool_backend_helpers.selection_error`：`"{section} is configured to use {selection_name} (set via mertina tools), but {failure}. Run 'mertina tools' to change it."` | `"{section} is configured to use {selection_name} (set in config.yaml), but {failure}. Change it in config.yaml."` | **行为改变：** 返回给模型的报错文案。v0.1 没有 `mertina tools` 命令，后端只在 config.yaml 里配置 |
+| `web_tools.web_search_tool` 的兜底报错：`` "No web search provider configured. Run `mertina tools` to set one up." `` | `"No web search provider configured. Set web.search_backend in config.yaml."` | **行为改变：** 返回给模型的报错文案。v0.1 没有 `mertina tools` 命令 |
+| `web_tools_extract._disabled_plugin_error` 的后半句：`` "in config. Re-enable it with `mertina plugins enable {disabled_key}` (or remove it from plugins.disabled)." `` | `"in config. Re-enable it by removing it from plugins.disabled."`，前半句不变 | **行为改变：** 返回给模型的报错文案。v0.1 没有 `mertina plugins` 命令 |
 
 ## 与上游对照
 
