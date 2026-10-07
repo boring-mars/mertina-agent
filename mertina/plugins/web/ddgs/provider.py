@@ -1,10 +1,10 @@
 # Ported from hermes-agent plugins/web/ddgs/provider.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
-"""DuckDuckGo search via the optional ``ddgs`` package (search only, no key). ``is_available()``
-reflects package importability; the plugin registers either way so ``mertina tools`` can offer to
-install it. Isolation: ``ddgs``/``primp`` can block inside native code while holding the GIL, so a
-thread-pool ``future.result(timeout=…)`` cap can never fire and Ctrl+C/SIGTERM freeze the process —
-each search runs in a disposable child process the parent can terminate/kill.
+"""DuckDuckGo search via the ``ddgs`` package (search only, no key). ``is_available()`` reflects
+package importability. Isolation: ``ddgs``/``primp`` can block inside native code while holding
+the GIL, so a thread-pool ``future.result(timeout=…)`` cap can never fire and Ctrl+C/SIGTERM
+freeze the process — each search runs in a disposable child process the parent can
+terminate/kill.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from mertina.plugins.web._common import (
     BaseWebSearchProvider,
     search_fail,
     search_ok,
-    setup_schema,
     title_hit,
 )
 
@@ -39,7 +38,7 @@ _test_hook: str | None = None  # test-only hook forwarded to the child (see _sea
 _last_worker_proc: subprocess.Popen | None = None  # last worker Popen (test reap checks)
 
 
-class _SearchInterrupted(Exception):
+class _SearchInterrupted(Exception):  # noqa: N818  # upstream's name
     """Raised when tools.interrupt.is_interrupted() trips during a search wait."""
 
 
@@ -47,8 +46,8 @@ def _run_ddgs_search(query: str, safe_limit: int) -> list[dict[str, Any]]:
     """Blocking ddgs query → normalized hits (module-level: the child worker imports it,
     tests patch it for in-process runs).
 
-    ``DDGS(timeout=…)`` bounds each individual HTTP request; the overall wall-clock cap is enforced by the
-    parent via process timeout (#68096).
+    ``DDGS(timeout=…)`` bounds each individual HTTP request; the overall wall-clock cap is enforced
+    by the parent via process timeout (#68096).
     """
     from ddgs import DDGS  # type: ignore
 
@@ -69,16 +68,16 @@ def _run_ddgs_search(query: str, safe_limit: int) -> list[dict[str, Any]]:
 
 
 def _plugins_path_entry() -> str:
-    """``sys.path`` entry that makes ``import plugins`` work in the child (live package
-    location first; correct for source checkouts and site-packages)."""
+    """``sys.path`` entry that makes ``import mertina.plugins`` work in the child (live package
+    location first, then a path walk from this file)."""
     try:
         from mertina import plugins as plugins_pkg
 
         if pkg_file := getattr(plugins_pkg, "__file__", None):
-            return os.path.dirname(os.path.dirname(os.path.abspath(pkg_file)))
+            return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(pkg_file))))  # noqa: PTH100, PTH120  # upstream's os.path
     except Exception:
         pass
-    return os.path.abspath(os.path.join(__file__, *([os.pardir] * 4)))
+    return os.path.abspath(os.path.join(__file__, *([os.pardir] * 5)))  # noqa: PTH100, PTH118  # upstream's os.path
 
 
 def _terminate_and_reap(
@@ -109,24 +108,24 @@ def _terminate_and_reap(
 
 
 def _spawn_worker(env: dict[str, str]) -> subprocess.Popen:
-    """Start ``_search_worker.py`` as a script with ``plugins`` importable. Running as a
-    script puts ``plugins/web/ddgs/`` on ``sys.path[0]``, breaking ``import plugins...``,
-    so the real package location is prepended to PYTHONPATH."""
+    """Start ``_search_worker.py`` as a script with ``mertina`` importable. Running as a
+    script puts ``mertina/plugins/web/ddgs/`` on ``sys.path[0]``, breaking
+    ``import mertina...``, so the real package location is prepended to PYTHONPATH."""
     child_pythonpath = env.get("PYTHONPATH", "")
     path_entry = _plugins_path_entry()
     if path_entry and path_entry not in child_pythonpath.split(os.pathsep):
         env["PYTHONPATH"] = (
             path_entry + os.pathsep + child_pythonpath if child_pythonpath else path_entry
         )
-    worker_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_search_worker.py")
+    worker_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_search_worker.py")  # noqa: PTH100, PTH118, PTH120  # upstream's os.path
     # Own process group/session so terminate/kill also reach a hung primp grandchild.
     extra_kwargs: dict[str, Any] = (
         {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         if sys.platform == "win32"
         else {"start_new_session": True}
     )
-    # stdin/stdout/stderr stay explicit keyword args so scripts/check_subprocess_stdin.py sees them
-    # (TUI gateway inherits stdin). stderr=DEVNULL: a chatty child would deadlock a stdout-only drain.
+    # stdin/stdout/stderr stay explicit keyword args. stderr=DEVNULL: a chatty child would
+    # deadlock a stdout-only drain.
     return subprocess.Popen(
         [sys.executable, worker_path],
         stdin=subprocess.PIPE,
@@ -215,7 +214,7 @@ class DDGSWebSearchProvider(BaseWebSearchProvider):
 
     def is_available(self) -> bool:
         """True when ``ddgs`` is importable. Must NOT do network I/O — runs at
-        tool-registration time and on every ``mertina tools`` paint."""
+        tool-registration time."""
         try:
             import ddgs  # noqa: F401
 
@@ -240,7 +239,7 @@ class DDGSWebSearchProvider(BaseWebSearchProvider):
             )
             return search_fail(
                 f"DuckDuckGo search timed out after {_SEARCH_TIMEOUT_SECS}s — "
-                "DuckDuckGo may be rate-limiting or slow. Try again later or switch to a different search provider."
+                "DuckDuckGo may be rate-limiting or slow. Try again later or switch to a different search provider."  # noqa: E501  # upstream's message
             )
         except _SearchInterrupted:
             logger.info("DDGS search interrupted for query: %r", query)
@@ -250,38 +249,3 @@ class DDGSWebSearchProvider(BaseWebSearchProvider):
             return search_fail(f"DuckDuckGo search failed: {exc}")
         logger.info("DDGS search '%s': %d results (limit %d)", query, len(web_results), limit)
         return search_ok(web_results)
-
-    def get_setup_schema(self) -> dict[str, Any]:
-        # post_setup triggers `_run_post_setup("ddgs")` so the package gets pip-installed on first pick.
-        return setup_schema(
-            "DuckDuckGo (ddgs)",
-            "free · no key · search only",
-            "Search via the ddgs Python package — no API key (pair with any extract provider)",
-            post_setup="ddgs",
-        )
-
-
-# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-# Names external plugins imported from this module before the Sep 2026 decomposition.
-# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
-# The whole block is removed by reverting the commit that added it.
-
-
-_PLUGIN_COMPAT_LAZY = {
-    "WebSearchProvider": ("mertina.agent.web_search_provider", "WebSearchProvider"),
-}
-
-
-def __getattr__(name):  # PEP 562 — lazy so no import cycles
-    target = _PLUGIN_COMPAT_LAZY.get(name)
-    if target is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    import importlib
-
-    from mertina.cli.plugin_compat import warn_once
-
-    warn_once(__name__, name, *target)
-    return getattr(importlib.import_module(target[0]), target[1])
-
-
-# ---- END PLUGIN-COMPAT ----

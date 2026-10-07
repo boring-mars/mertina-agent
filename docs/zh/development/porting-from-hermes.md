@@ -119,6 +119,7 @@ L2 平台层不整体拷贝。循环确实调用到某个 L2 函数时，把这�
 | `turn_failure_copy._NONRETRYABLE_COPY[format_error]`：`` "... Start a clean session with /new or switch models with /model; if it keeps happening, run `mertina doctor`." `` | `"... Check the model name and the request settings, then try again."`，前半句不变 | **行为改变：** 用户可见文案。v0.1 没有 `/new`、`/model`、`mertina doctor` |
 | `turn_failure_copy._NONRETRYABLE_DEFAULT_COPY`：`` "... Pick another model with /model, or check the details in `{home}/logs/agent.log`." `` | `"... Check the model name, the endpoint and the API key."`，前半句不变 | **行为改变：** 用户可见文案。v0.1 没有 `/model`，也不写 Mertina home 下的 `agent.log`；鉴权分支删除后 401/403 也走这条，所以点明 API key |
 | `config._PARSE_FAILURE_REPAIR_MSG`：`` "Open it with `mertina config edit`, fix {where}, then run `mertina config check`." `` | `"Open it in an editor and fix {where}."` | **行为改变：** 用户可见文案。v0.1 没有 `mertina config` 命令 |
+| `plugins/web/ddgs/provider._plugins_path_entry`：`os.path.dirname(os.path.dirname(...plugins/__init__.py))`，否则从 `provider.py` 往上 `[os.pardir] * 4` | 多一层 `dirname`，以及 `[os.pardir] * 5` | 规则 1 把 `plugins/` 放到了 `mertina/` 下，搜索子进程的 `PYTHONPATH` 需要的目录（顶层包所在的目录）比上游高一级 |
 
 ## 与上游对照
 

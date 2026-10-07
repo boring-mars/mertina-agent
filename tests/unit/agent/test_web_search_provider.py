@@ -1,9 +1,9 @@
-"""The web search provider interface and its env lookup."""
+"""The web search provider interface."""
 
 import pytest
 
 from mertina.agent.provider_base import ProviderBase
-from mertina.agent.web_search_provider import WebSearchProvider, get_provider_env
+from mertina.agent.web_search_provider import WebSearchProvider
 
 
 class _Provider(WebSearchProvider):
@@ -13,16 +13,6 @@ class _Provider(WebSearchProvider):
 
     def is_available(self) -> bool:
         return True
-
-
-def test_get_provider_env_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MERTINA_TEST_SEARCH_KEY", "  secret \n")
-    assert get_provider_env("MERTINA_TEST_SEARCH_KEY") == "secret"
-
-
-def test_get_provider_env_is_empty_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MERTINA_TEST_SEARCH_KEY", raising=False)
-    assert get_provider_env("MERTINA_TEST_SEARCH_KEY") == ""
 
 
 def test_name_and_is_available_are_abstract() -> None:

@@ -132,6 +132,7 @@ Every rewrite in a cut commit (a line `port_check --cut-from` reports as `rewrit
 | `turn_failure_copy._NONRETRYABLE_COPY[format_error]`: `` "... Start a clean session with /new or switch models with /model; if it keeps happening, run `mertina doctor`." `` | `"... Check the model name and the request settings, then try again."`, the first sentence unchanged | **Behavior change:** user-facing copy. v0.1 has no `/new`, `/model` or `mertina doctor` |
 | `turn_failure_copy._NONRETRYABLE_DEFAULT_COPY`: `` "... Pick another model with /model, or check the details in `{home}/logs/agent.log`." `` | `"... Check the model name, the endpoint and the API key."`, the first sentence unchanged | **Behavior change:** user-facing copy. v0.1 has no `/model` and writes no `agent.log` under a Mertina home; with the auth branch cut, 401/403 take this copy too, so it names the API key |
 | `config._PARSE_FAILURE_REPAIR_MSG`: `` "Open it with `mertina config edit`, fix {where}, then run `mertina config check`." `` | `"Open it in an editor and fix {where}."` | **Behavior change:** user-facing copy. v0.1 has no `mertina config` command |
+| `plugins/web/ddgs/provider._plugins_path_entry`: `os.path.dirname(os.path.dirname(...plugins/__init__.py))`, else `[os.pardir] * 4` from `provider.py` | One `dirname` more, and `[os.pardir] * 5` | Rule 1 moves `plugins/` under `mertina/`, so the directory the search worker needs on its `PYTHONPATH` (the one holding the top-level package) is one level higher than upstream's |
 
 ## Comparing against upstream
 

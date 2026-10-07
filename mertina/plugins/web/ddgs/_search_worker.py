@@ -1,6 +1,7 @@
 # Ported from hermes-agent plugins/web/ddgs/_search_worker.py @ fbc4ea8b96
 # Copyright (c) 2025 Nous Research. MIT License, see LICENSE.
-"""DDGS search child-process entrypoint, run as ``python plugins/web/ddgs/_search_worker.py``.
+"""DDGS search child-process entrypoint, run as
+``python mertina/plugins/web/ddgs/_search_worker.py``.
 
 Reads one JSON request ``{"query": str, "safe_limit": int}`` from stdin, writes one
 envelope ``{"ok": true, "results": [...]}`` / ``{"ok": false, "error": str}`` to
