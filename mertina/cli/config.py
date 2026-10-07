@@ -96,6 +96,8 @@ _LAST_EXPANDED_CONFIG_BY_PATH: dict[str, Any] = {}
 # matches (skips safe_load + merge + normalize + expand, ~13 ms). The env snapshot invalidates
 # when a referenced ${VAR} changes value (in-process rotation). See #58514.
 _LOAD_CONFIG_CACHE: dict[str, tuple[Any, ...]] = {}
+# path -> (mtime_ns, size, ino, ctime_ns, raw yaml dict) for read_raw_config() (no defaults merged in).
+_RAW_CONFIG_CACHE: dict[str, tuple[int, ...]] = {}
 
 
 def get_config_path() -> Path:
@@ -312,6 +314,45 @@ def cfg_get(cfg: dict[str, Any] | None, *keys: str, default: Any = None) -> Any:
             return default
         node = node[key]
     return node
+
+
+def _read_raw_config_impl(*, want_deepcopy: bool) -> dict[str, Any]:
+    with _CONFIG_LOCK:
+        try:
+            config_path = get_config_path()
+            st = config_path.stat()
+            cache_key = file_signature(st)
+        except (FileNotFoundError, OSError):
+            return {}
+
+        path_key = str(config_path)
+        cached = _RAW_CONFIG_CACHE.get(path_key)
+        if cached is not None and cached[: len(cache_key)] == cache_key:
+            return (
+                copy.deepcopy(cached[len(cache_key)]) if want_deepcopy else cached[len(cache_key)]
+            )
+
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                data = fast_safe_load(f) or {}
+        except Exception as e:
+            _warn_config_parse_failure(config_path, e)
+            return {}
+
+        if not isinstance(data, dict):
+            data = {}
+        # The cache stores its own deepcopy. The readonly path returns THAT object (identity
+        # invariant: later cache hits return the same dict); the mutable path returns the parse.
+        cached_copy = copy.deepcopy(data)
+        _RAW_CONFIG_CACHE[path_key] = (*cache_key, cached_copy)
+        return data if want_deepcopy else cached_copy
+
+
+def read_raw_config_readonly() -> dict[str, Any]:
+    """``read_raw_config()`` without the per-call deepcopy, for callers that ONLY READ.
+    **Mutating the result corrupts the in-process cache for every subsequent caller.** Meant for
+    per-turn policy checks that were paying a full config deepcopy 2-3x per agent turn."""
+    return _read_raw_config_impl(want_deepcopy=False)
 
 
 def load_config() -> dict[str, Any]:

@@ -103,6 +103,52 @@ def _resolve(configured: str | None, *, capability: str) -> WebSearchProvider | 
     return None
 
 
+def _disabled_web_plugin_for(
+    configured: str | None = None, *, capability: str | None = None
+) -> str | None:
+    """Plugin key of a *disabled* bundled web plugin that would have provided
+    the configured backend (``web.<capability>_backend`` → ``web.backend``), or None.
+
+    Lets the dispatcher say "re-enable web-firecrawl" instead of "No web extract
+    provider configured". Resolved from config.yaml rather than the resolved
+    backend because a disabled provider fails the availability gate and silently
+    drops to the default. Bundled web plugins live under ``web/<vendor>`` with
+    the provider name differing only by hyphen/underscore, so both are normalized.
+
+    When a user sets ``web.extract_backend: firecrawl`` (or the search equivalent) but also lists
+    ``web-firecrawl`` in ``plugins.disabled``, the provider never registers and the dispatcher would
+    otherwise emit a misleading "No web extract provider configured. Set web.extract_backend to ..." error —
+    even though the backend IS configured correctly. This helper detects that case so the dispatcher can
+    point the user at the actual cause (issue #40190 follow-up: pi314's disabled-plugin symptom).
+    """
+
+    def _norm(s: str) -> str:
+        return s.strip().lower().replace("-", "_")
+
+    if not configured and capability in ("search", "extract"):
+        configured = _configured_backend(capability)
+    if not configured:
+        return None
+
+    want = _norm(configured)
+    try:
+        from mertina.cli.plugins import get_plugin_manager
+
+        pm = get_plugin_manager()
+        for key, loaded in pm._plugins.items():
+            if (
+                isinstance(key, str)
+                and key.startswith("web/")
+                and not loaded.enabled
+                and loaded.error == "disabled via config"
+                and _norm(key.split("/", 1)[1]) == want
+            ):
+                return key
+    except Exception as exc:
+        logger.debug("disabled-web-plugin lookup failed: %s", exc)
+    return None
+
+
 def get_active_search_provider() -> WebSearchProvider | None:
     """Resolve the currently-active web search provider."""
     return _resolve(_configured_backend("search"), capability="search")
