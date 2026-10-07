@@ -424,3 +424,4 @@ v0.1.2 完成时，Roadmap v0.1 的三条「Done when」全部满足。
 - **L2 的替代实现深度未定**：错误分类、脱敏、日志在 v0.1.0 用最简实现，P1 再评估要不要回头参考 Hermes 的对应模块。
 - **`mertina/` 内部是否需要再分层**：v0.1 只有 `agent/` 和 `tools/` 两个子包，规模小。等 gateway、state、cron 进来后，是否需要在 `mertina/` 下引入更多分层，到时再看。
 - **上游跟进机制未定**：`scripts/port_check.py` 保证已移植文件与文件头记录的上游 SHA 一致，但「上游在更新的 commit 上改了某个已移植文件」仍要靠人发现。给 port_check 加一个对比新 SHA 的模式是候选方案，留待 v0.1.2 之后评估。
+- **不搬 `web_extract`**：v0.1.2 只搬 Roadmap 点名的 `web_search`。上游的 `web_extract` 会多出约 900–1,200 行：`tools/web_tools_extract.py`、`tools/web_tools_truncate.py`、`tools/url_safety.py` 的 SSRF 防护、`tools/website_policy.py`、`tools/web_result_cache.py` 的 extract 部分，以及一个能抽取正文的 provider。ddgs 只能搜索，所以这个 provider 要么是需要 key 的（tavily、exa、firecrawl 等），要么是 `plugins/web/keyless_mcp.py` 的免 key 轮换。`WebSearchProvider` 和 registry 里 extract 相关的部分随之删掉；等出现读网页正文的需求时（最早 P1），再从上游同名文件搬回来。
