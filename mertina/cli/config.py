@@ -471,7 +471,7 @@ def load_env() -> dict[str, str]:
     return load_env_file(get_env_path())
 
 
-def _sanitize_env_lines(lines: list) -> list:
+def _sanitize_env_lines(lines: list[str]) -> list[str]:
     """Normalize .env line endings/whitespace without changing assignment semantics.
     Content after the first ``=`` is opaque value data: a known variable name embedded in a value
     must never be reinterpreted as another assignment, so concatenated lines stay on one line."""

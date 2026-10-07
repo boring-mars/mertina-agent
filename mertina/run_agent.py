@@ -187,6 +187,9 @@ def main(
     """
     print("🤖 AI Agent with Tool Calling")
     print("=" * 50)
+    from mertina.cli.env_loader import load_mertina_dotenv
+
+    load_mertina_dotenv()
     model, base_url, api_key = _endpoint_from_config(model, base_url, api_key)
 
     try:

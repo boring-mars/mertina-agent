@@ -13,34 +13,35 @@ import sys
 import threading
 from pathlib import Path
 
-# Kept at module level on purpose: importing this module must fail when the dotenv install is
-# wiped (#57828) so early recovery provably runs before third-party imports (test_early_recovery).
-# The parser internals are imported lazily below because gateway tests stub ``sys.modules["dotenv"]``.
+# Kept at module level on purpose: importing this module must fail when the dotenv install is wiped
+# (#57828) so early recovery provably runs before third-party imports (test_early_recovery). The
+# parser internals are imported lazily below because gateway tests stub ``sys.modules["dotenv"]``.
 import dotenv  # noqa: F401
 
 from mertina.utils import atomic_replace
 
 logger = logging.getLogger(__name__)
 
-# The ONLY env vars sanitized on load: credentials must be pure ASCII (they become HTTP header values);
-# arbitrary user env vars are never silently altered.
+# The ONLY env vars sanitized on load: credentials must be pure ASCII (they become HTTP header
+# values); arbitrary user env vars are never silently altered.
 _CREDENTIAL_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_KEY")
 
-# Once-per-process guards: load_mertina_dotenv() may run repeatedly (tests) so warnings fire once per
-# key/path.
+# Once-per-process guards: load_mertina_dotenv() may run repeatedly (tests) so warnings fire once
+# per key/path.
 _WARNED_KEYS: set[str] = set()  # credential names already given the non-ASCII warning
 _WARNED_UTF32_PATHS: set[str] = (
     set()
 )  # .env paths already given the UTF-32 refuse-to-mangle warning
 
-# What THIS process has published from dotenv files, per variable: (value before our first publish, or
-# None if absent; last value we published; load pass that published it). Reloads run per gateway turn and
-# per cron fire, and a line like ``PATH=/x:${PATH}`` interpolated against an environ that already holds the
-# previous reload's output grows by ``/x:`` every time until child spawns fail with E2BIG (#109902). A new
-# pass resolves against the baseline instead — but only where the environ still holds exactly what we
-# published, so a value the shell changed since is not frozen.
+# What THIS process has published from dotenv files, per variable: (value before our first publish,
+# or None if absent; last value we published; load pass that published it). Reloads run per gateway
+# turn and per cron fire, and a line like ``PATH=/x:${PATH}`` interpolated against an environ that
+# already holds the previous reload's output grows by ``/x:`` every time until child spawns fail
+# with E2BIG (#109902). A new pass resolves against the baseline instead — but only where the
+# environ still holds exactly what we published, so a value the shell changed since is not frozen.
 # One process-wide record (not per home/project scope): the environ is process-wide, so alternating
-# callers (gateway with a project .env, cron without; home A then B) must peel each other's output too.
+# callers (gateway with a project .env, cron without; home A then B) must peel each other's output
+# too.
 _DOTENV_PUBLISHED: dict[str, tuple[str | None, str, int]] = {}
 _DOTENV_PASSES = itertools.count()
 _DOTENV_LOCK = threading.RLock()
@@ -62,12 +63,12 @@ def _format_offending_chars(value: str, limit: int = 3) -> str:
 
 
 def _sanitize_loaded_credentials() -> None:
-    """Strip non-ASCII from credential env vars (``_CREDENTIAL_SUFFIXES``) so the codebase never sees them.
+    """Strip non-ASCII from credential env vars (``_CREDENTIAL_SUFFIXES``) so the codebase never
+    sees them.
 
-    Emits a one-line warning to stderr when characters are stripped. Silent stripping would mask copy-paste
-    corruption (Unicode lookalike glyphs from PDFs / rich-text editors, ZWSP from web pages) as opaque
-    provider-side "invalid API key" errors (see #6843).
-    """
+    Emits a one-line warning to stderr when characters are stripped. Silent stripping would mask
+    copy-paste corruption (Unicode lookalike glyphs from PDFs / rich-text editors, ZWSP from web
+    pages) as opaque provider-side "invalid API key" errors (see #6843)."""
     for key, value in list(os.environ.items()):
         if not any(key.endswith(suffix) for suffix in _CREDENTIAL_SUFFIXES):
             continue
@@ -91,24 +92,25 @@ def _sanitize_loaded_credentials() -> None:
             "rich-text editor, or web page that substituted lookalike\n"
             "  Unicode glyphs for ASCII letters. If authentication fails "
             '(e.g. "API key not valid"), re-copy the key from the\n'
-            "  provider's dashboard and run `mertina setup` (or edit the "
-            ".env file in a plain-text editor).",
+            "  provider's dashboard into the .env file (edit it in a "
+            "plain-text editor).",
             file=sys.stderr,
         )
 
 
 def _load_dotenv_with_fallback(path: Path, *, override: bool, load_pass: int | None = None) -> None:
     """Load one dotenv file into ``os.environ`` like ``dotenv.load_dotenv`` — same parser, same
-    ``${VAR}`` / ``${VAR:-default}`` / precedence rules — except that ``${VAR}`` resolves against the value
-    VAR had before this process's earlier passes published it (see ``_DOTENV_PUBLISHED``).
+    ``${VAR}`` / ``${VAR:-default}`` / precedence rules — except that ``${VAR}`` resolves against
+    the value VAR had before this process's earlier passes published it (see ``_DOTENV_PUBLISHED``).
 
-    ``load_pass`` groups the layered files of one ``load_mertina_dotenv`` call: within a pass a later layer
-    (project, managed) still sees the earlier layer's output, as it always did; only OTHER passes' output
-    is peeled. A bare call (``mertina send``'s direct reload) is its own pass."""
+    ``load_pass`` groups the layered files of one ``load_mertina_dotenv`` call: within a pass a
+    later layer (project, managed) still sees the earlier layer's output, as it always did; only
+    OTHER passes' output is peeled. A bare call (``mertina send``'s direct reload) is its own pass.
+    """
     raw = path.read_bytes()
     try:
-        # utf-8-sig strips a leading BOM (PowerShell 5.1 / Notepad); plain utf-8 would keep U+FEFF on the
-        # first key name and silently drop it from os.environ under its canonical name.
+        # utf-8-sig strips a leading BOM (PowerShell 5.1 / Notepad); plain utf-8 would keep U+FEFF
+        # on the first key name and silently drop it from os.environ under its canonical name.
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         if raw.startswith(
@@ -116,8 +118,8 @@ def _load_dotenv_with_fallback(path: Path, *, override: bool, load_pass: int | N
         ):  # strip the BOM by hand: utf-8-sig can't once we decode latin-1
             raw = raw[len(codecs.BOM_UTF8) :]
         text = raw.decode("latin-1")
-    # Imported here, not at module level: gateway tests stub ``sys.modules["dotenv"]`` with a bare module
-    # exposing only ``load_dotenv``, and ``gateway.run`` imports this module at import time.
+    # Imported here, not at module level: gateway tests stub ``sys.modules["dotenv"]`` with a bare
+    # module exposing only ``load_dotenv``, and ``gateway.run`` imports this module at import time.
     from dotenv.main import DotEnv
     from dotenv.variables import parse_variables
 
@@ -149,17 +151,18 @@ def _load_dotenv_with_fallback(path: Path, *, override: bool, load_pass: int | N
             current = os.environ.get(name)
             record = _DOTENV_PUBLISHED.get(name)
             ours = record is not None and current == record[1]
-            # Ours and untouched since → keep the original baseline; anything else is a newer outside value.
-            baseline = record[0] if ours else current
+            # Ours and untouched since → keep the original baseline; anything else is a newer
+            # outside value.
+            baseline = record[0] if ours else current  # type: ignore[index]  # ours implies a record
             os.environ[name] = value
             _DOTENV_PUBLISHED[name] = (baseline, value, load_pass)
     _sanitize_loaded_credentials()  # httpx encodes headers as ASCII
 
 
 def _sanitize_env_file_if_needed(path: Path) -> None:
-    """Pre-sanitize a .env file before python-dotenv reads it. Sniffs a leading BOM *before* any text
-    decode: UTF-16 (Notepad "Unicode") is rewritten as clean UTF-8; UTF-32 is refused (left untouched) so
-    we never fall through to the errors=replace corruption path."""
+    """Pre-sanitize a .env file before python-dotenv reads it. Sniffs a leading BOM *before* any
+    text decode: UTF-16 (Notepad "Unicode") is rewritten as clean UTF-8; UTF-32 is refused (left
+    untouched) so we never fall through to the errors=replace corruption path."""
     if not path.exists():
         return
     try:
@@ -172,11 +175,12 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
     except Exception:
         return
 
-    # ORDER MATTERS: BOM_UTF32_LE (FF FE 00 00) startswith BOM_UTF16_LE (FF FE); UTF-16 first would mangle it.
+    # ORDER MATTERS: BOM_UTF32_LE (FF FE 00 00) startswith BOM_UTF16_LE (FF FE); UTF-16 first would
+    # mangle it.
     force_utf8_rewrite = False
     if raw.startswith(codecs.BOM_UTF32_LE) or raw.startswith(codecs.BOM_UTF32_BE):
-        # Lazy import keeps the module import block identical to #65124's codecs/io additions so the two PRs
-        # auto-merge either order.
+        # Lazy import keeps the module import block identical to #65124's codecs/io additions so the
+        # two PRs auto-merge either order.
         path_key = str(path.resolve())
         if path_key not in _WARNED_UTF32_PATHS:
             _WARNED_UTF32_PATHS.add(path_key)
@@ -187,8 +191,9 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
             )
         return
     if raw.startswith(codecs.BOM_UTF16_LE) or raw.startswith(codecs.BOM_UTF16_BE):
-        # "utf-16" uses the BOM for endianness and strips it; newline=None matches open()'s universal
-        # newlines (not splitlines()'s extra boundaries like U+2028) so sanitize sees the same lines.
+        # "utf-16" uses the BOM for endianness and strips it; newline=None matches open()'s
+        # universal newlines (not splitlines()'s extra boundaries like U+2028) so sanitize sees the
+        # same lines.
         try:
             with io.TextIOWrapper(io.BytesIO(raw), encoding="utf-16", newline=None) as f:
                 original = f.readlines()
@@ -200,17 +205,18 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
     else:
         # utf-8-sig strips a UTF-8 BOM; errors=replace so embedded NULs can be stripped below.
         try:
-            with open(path, encoding="utf-8-sig", errors="replace") as f:
+            with open(path, encoding="utf-8-sig", errors="replace") as f:  # noqa: PTH123  # upstream's open()
                 original = f.readlines()
         except Exception:
             return
-        # errors=replace turns undecodable leading bytes into U+FFFD; persisting would glue them onto
-        # the first key name permanently — leave the file untouched instead.
+        # errors=replace turns undecodable leading bytes into U+FFFD; persisting would glue them
+        # onto the first key name permanently — leave the file untouched instead.
         if original and original[0].startswith("\ufffd"):
             return
 
     try:
-        # Strip NULs (os.environ raises ValueError on them); also repairs BOM-less UTF-16 (NUL-padded ASCII).
+        # Strip NULs (os.environ raises ValueError on them); also repairs BOM-less UTF-16
+        # (NUL-padded ASCII).
         stripped = [line.replace("\x00", "") for line in original]
         sanitized = _sanitize_env_lines(stripped)
         if sanitized != original or force_utf8_rewrite:
@@ -225,7 +231,7 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
                 atomic_replace(tmp, path)
             except BaseException:
                 try:
-                    os.unlink(tmp)
+                    os.unlink(tmp)  # noqa: PTH108  # upstream's os.unlink()
                 except OSError:
                     pass
                 raise
@@ -235,11 +241,11 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
 
 def load_mertina_dotenv(
     *,
-    mertina_home: str | os.PathLike | None = None,
+    mertina_home: str | os.PathLike[str] | None = None,
 ) -> list[Path]:
     """Load the Mertina env file: ``~/.mertina/.env`` overrides stale shell exports."""
-    # Process home on purpose (never the per-turn override): a startup .env load must not follow a routed
-    # profile.
+    # Process home on purpose (never the per-turn override): a startup .env load must not follow a
+    # routed profile.
     from mertina.constants import get_process_mertina_home
 
     home_path = Path(mertina_home) if mertina_home else get_process_mertina_home()

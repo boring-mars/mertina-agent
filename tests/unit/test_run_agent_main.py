@@ -100,3 +100,31 @@ def test_main_builds_the_agent_on_the_configured_endpoint(
         "k",
     )
     assert "hi" in capsys.readouterr().out
+
+
+def test_main_loads_the_dotenv_before_reading_config(
+    mertina_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mertina.cli import env_loader
+
+    monkeypatch.setattr(env_loader, "_DOTENV_PUBLISHED", {})
+    monkeypatch.setenv("MERTINA_T_KEY", "placeholder")  # restored after the test
+    (mertina_home / ".env").write_text("MERTINA_T_KEY=sk-dotenv\n", encoding="utf-8")
+    _write_config(
+        mertina_home,
+        "model:\n  default: gpt-x\n  base_url: http://llm.test/v1\n  api_key: ${MERTINA_T_KEY}\n",
+    )
+    seen: dict[str, Any] = {}
+
+    class _Agent:
+        def __init__(self, **kwargs: Any) -> None:
+            seen.update(kwargs)
+
+        def run_conversation(self, query: str) -> dict[str, Any]:
+            return {"completed": True, "api_calls": 1, "messages": [], "final_response": ""}
+
+    monkeypatch.setattr(run_agent, "AIAgent", _Agent)
+
+    run_agent.main("hello")
+
+    assert seen["api_key"] == "sk-dotenv"

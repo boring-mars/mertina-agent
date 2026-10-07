@@ -53,11 +53,12 @@ _IS_WINDOWS = os.name == "nt"
 
 
 # Windows rename failures possibly caused by another handle on the target. CPython opens files
-# without FILE_SHARE_DELETE, so ``os.replace`` onto an open file is denied with 5 ERROR_ACCESS_DENIED
-# (what a held *target* handle actually reports — measured: a plain reader yields 5, NOT 32),
-# 32 ERROR_SHARING_VIOLATION (the *source* temp file is held) or 33 ERROR_LOCK_VIOLATION (byte-range
-# lock on the target). Ambiguous (a real ACL denial is also 5), so recovery is bounded and a
-# still-failing write is re-raised unchanged rather than classified up front.
+# without FILE_SHARE_DELETE, so ``os.replace`` onto an open file is denied with 5
+# ERROR_ACCESS_DENIED (what a held *target* handle actually reports — measured: a plain reader
+# yields 5, NOT 32), 32 ERROR_SHARING_VIOLATION (the *source* temp file is held) or 33
+# ERROR_LOCK_VIOLATION (byte-range lock on the target). Ambiguous (a real ACL denial is also 5), so
+# recovery is bounded and a still-failing write is re-raised unchanged rather than classified up
+# front.
 _WINDOWS_CONTENDED_REPLACE_ERRORS = frozenset({5, 32, 33})
 
 
@@ -90,7 +91,7 @@ def _rewrite_in_place(tmp_str: str, real_path: str) -> None:
     genuinely failed. Writing through the target also preserves its ACL, which ``os.replace``
     does not (the temp file's inherited ACL wins there).
     """
-    with open(tmp_str, "rb") as src:
+    with open(tmp_str, "rb") as src:  # noqa: PTH123  # upstream's open()
         data = src.read()
     fd = os.open(real_path, os.O_WRONLY | getattr(os, "O_BINARY", 0))
     try:
@@ -102,7 +103,7 @@ def _rewrite_in_place(tmp_str: str, real_path: str) -> None:
             os.fsync(fd)
     finally:
         os.close(fd)
-    os.unlink(tmp_str)
+    os.unlink(tmp_str)  # noqa: PTH108  # upstream's os.unlink()
 
 
 def _copy_fallback(tmp_str: str, real_path: str) -> None:
@@ -110,9 +111,9 @@ def _copy_fallback(tmp_str: str, real_path: str) -> None:
     shutil.copyfile(tmp_str, real_path)
     with suppress(OSError):
         shutil.copystat(tmp_str, real_path)
-    with suppress(OSError), open(real_path, "rb") as f:
+    with suppress(OSError), open(real_path, "rb") as f:  # noqa: PTH123  # upstream's open()
         os.fsync(f.fileno())
-    os.unlink(tmp_str)
+    os.unlink(tmp_str)  # noqa: PTH108  # upstream's os.unlink()
 
 
 def atomic_replace(tmp_path: str | Path, target: str | Path) -> str:
@@ -125,10 +126,10 @@ def atomic_replace(tmp_path: str | Path, target: str | Path) -> str:
     then in-place rewrite).
     """
     target_str = str(target)
-    real_path = os.path.realpath(target_str) if os.path.islink(target_str) else target_str
+    real_path = os.path.realpath(target_str) if os.path.islink(target_str) else target_str  # noqa: PTH114  # upstream's os.path
     tmp_str = str(tmp_path)
     try:
-        os.replace(tmp_str, real_path)
+        os.replace(tmp_str, real_path)  # noqa: PTH105  # upstream's os.replace()
         return real_path
     except OSError as exc:
         contended = _is_contended_windows_replace_error(exc)
@@ -147,7 +148,7 @@ def atomic_replace(tmp_path: str | Path, target: str | Path) -> str:
                     )
                 )
                 try:
-                    os.replace(tmp_str, real_path)
+                    os.replace(tmp_str, real_path)  # noqa: PTH105  # upstream's os.replace()
                     return real_path
                 except OSError as retry_exc:
                     exc = retry_exc
@@ -163,7 +164,8 @@ def atomic_replace(tmp_path: str | Path, target: str | Path) -> str:
             getattr(exc, "winerror", None) or errno.errorcode.get(exc.errno or 0, exc.errno),
             "in-place rewrite" if contended else "copy",
         )
-        # The rewrite re-raises its own error, so an ACL denial is reported as such, not as contention.
+        # The rewrite re-raises its own error, so an ACL denial is reported as such, not as
+        # contention.
         (_rewrite_in_place if contended else _copy_fallback)(tmp_str, real_path)
     return real_path
 
