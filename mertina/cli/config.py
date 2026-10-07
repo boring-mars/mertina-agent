@@ -300,6 +300,20 @@ def _canonicalize_config(config: dict[str, Any]) -> dict[str, Any]:
     return _normalize_root_model_keys(_normalize_max_turns_config(config))
 
 
+def cfg_get(cfg: dict[str, Any] | None, *keys: str, default: Any = None) -> Any:
+    """Traverse nested dict keys safely, returning ``default`` on any miss.
+    Explicit ``None`` values are returned as-is (``dict.get`` semantics: ``default`` only when the
+    key is absent). Named ``cfg_get`` to avoid shadowing the ubiquitous ``cfg_path`` local."""
+    if not isinstance(cfg, dict):
+        return default
+    node: Any = cfg
+    for key in keys:
+        if not isinstance(node, dict) or key not in node:
+            return default
+        node = node[key]
+    return node
+
+
 def load_config() -> dict[str, Any]:
     """Load the merged configuration (DEFAULT_CONFIG + config.yaml, env-expanded).
     Cached on the file signature; returns a deepcopy since most call sites mutate the result.

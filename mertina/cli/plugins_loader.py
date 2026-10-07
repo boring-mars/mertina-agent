@@ -8,6 +8,7 @@ lazily through ``mertina.cli.plugins`` so tests that patch them on the origin ke
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.metadata
 import importlib.util
@@ -87,6 +88,17 @@ class PluginLoaderMixin:
                 "Failed to load plugin '%s': %s", manifest.name, exc, exc_info=_PLUGINS_DEBUG
             )
         self._plugins[plugin_key] = loaded
+
+    def _directory_module_name(self, manifest: PluginManifest) -> str:
+        """Profile-safe import namespace for a directory plugin: the bare ``mertina_plugins.<slug>``
+        for the first scope that claims it, a ``__home_<digest>`` suffix for any other scope."""
+        slug = manifest_key(manifest).replace("/", "__").replace("-", "_")
+        bare_name = f"{_NS_PARENT}.{slug}"
+        with _MODULE_NAMESPACE_LOCK:
+            if _BARE_MODULE_SCOPE.setdefault(bare_name, self.scope_key) == self.scope_key:
+                return bare_name
+            digest = hashlib.sha256(self.scope_key.encode("utf-8")).hexdigest()[:12]
+            return f"{bare_name}__home_{digest}"
 
     def _load_directory_module(
         self,
