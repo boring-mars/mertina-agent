@@ -2,7 +2,7 @@
 
 **English** | [中文](../../zh/design/2026-09-20-agent-core-loop.md)
 
-**Status**: v0.1.0 and v0.1.1 released; v0.1.2 implemented (§9)
+**Status**: v0.1.0, v0.1.1 and v0.1.2 released; Roadmap v0.1 is done
 **Roadmap milestone**: [v0.1 — Agent core](../../../ROADMAP.md#v01--agent-core)
 **Branch**: `feat/agent-core-loop` (v0.1.0), `feat/agent-streaming-retry-interrupt` (v0.1.1), `feat/web-search-config` (v0.1.2)
 **Upstream**: [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT). The survey below is based on a local checkout of upstream; the exact commit SHA is recorded in [Porting from Hermes](../development/porting-from-hermes.md).

@@ -2,7 +2,7 @@
 
 [English](../../en/design/2026-09-20-agent-core-loop.md) | **中文**
 
-**状态**：v0.1.0、v0.1.1 已发布；v0.1.2 已实现（§9）
+**状态**：v0.1.0、v0.1.1、v0.1.2 已发布，Roadmap v0.1 完成
 **对应 Roadmap 里程碑**：[v0.1 — Agent core](../../../ROADMAP.md#v01--agent-core)
 **分支**：`feat/agent-core-loop`（v0.1.0）、`feat/agent-streaming-retry-interrupt`（v0.1.1）、`feat/web-search-config`（v0.1.2）
 **上游**：[Hermes Agent](https://github.com/NousResearch/hermes-agent)（MIT）。勘察基于本地检出的上游快照，具体 commit SHA 记录在[从 Hermes 移植](../development/porting-from-hermes.md)中
