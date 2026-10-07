@@ -25,6 +25,8 @@ dependencies = [
     # Windows ships no IANA tz database, so zoneinfo cannot resolve MERTINA_TIMEZONE there
     # without this data package. No-op elsewhere; Hermes pins the same version.
     "tzdata==2025.3; sys_platform == 'win32'",
+    # config.yaml (mertina/cli/config.py); Hermes pins the same version.
+    "pyyaml==6.0.3",
 ]
 
 [dependency-groups]
