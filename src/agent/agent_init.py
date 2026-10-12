@@ -21,7 +21,6 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 from agent.iteration_budget import IterationBudget, normalize_budget_warning_ratio
-from agent.memory_manager import StreamingContextScrubber
 from agent.session_activity import ActivityProvenance
 from agent.process_bootstrap import _install_safe_stdio
 from agent.think_scrubber import StreamingThinkScrubber
@@ -188,7 +187,7 @@ _STREAM_STATE: Dict[str, Any] = {
     "_stream_needs_break": False,  # one "\n\n" before the next real text delta after tools
     # Stateful scrubbers: <memory-context> / thinking spans split across deltas defeat
     # per-delta regexes (both tags must be in one string).
-    "_stream_context_scrubber": StreamingContextScrubber,
+    "_stream_context_scrubber": None,
     "_stream_think_scrubber": StreamingThinkScrubber,
     "_current_streamed_assistant_text": "",  # so a later completed interim isn't re-sent
     "_delivered_interim_texts": set,  # interims this user turn (spans Codex continuations)
