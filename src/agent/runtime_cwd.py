@@ -27,18 +27,10 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 
 
-def set_session_cwd(cwd: str | None) -> Token:
-    """Pin the logical cwd for the current context."""
-    return _SESSION_CWD.set((cwd or "").strip())
 
 
-def clear_session_cwd() -> None:
-    _SESSION_CWD.set("")
 
 
-def reset_session_cwd(token: Token) -> None:
-    """Restore the logical cwd that was active before the matching ``set_session_cwd``."""
-    _SESSION_CWD.reset(token)
 
 
 def scope_terminal_cwd() -> str:
@@ -82,10 +74,3 @@ def _resolve_configured_cwd(*, override_is_final: bool) -> Path | None:
 def resolve_agent_cwd() -> Path:
     """Configured cwd, else the launch dir (os.getcwd()'s OSError on a deleted cwd deliberately propagates)."""
     return _resolve_configured_cwd(override_is_final=False) or Path(os.getcwd())
-
-
-def resolve_context_cwd() -> Path | None:
-    """Configured cwd for context-file discovery, or None (build_context_files_prompt then falls back to the
-    launch dir). An existing configured path is honored verbatim — including the Hermes source tree, a
-    legitimate workspace when developing Hermes; fallback-directory policy lives in the caller."""
-    return _resolve_configured_cwd(override_is_final=True)

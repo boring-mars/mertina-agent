@@ -14,7 +14,6 @@ import re
 from functools import partial
 from typing import Any, Callable
 
-from agent.vision_message_prep import _provider_model_key
 
 logger = logging.getLogger(__name__)
 
@@ -317,112 +316,22 @@ def normalize_finish_reason(raw: Any) -> Any:
     return _FINISH_REASON_ALIASES.get(lowered, lowered)
 
 
-def serialized_messages_bytes(messages: list) -> int:
-    """Exact serialized byte size of ``messages`` (HTTP 413 is a BYTE-size error the token
-    estimator, pricing images flat, cannot score). Non-serializable values fall back to
-    ``str()`` so a malformed message can never crash recovery."""
-    if not isinstance(messages, list) or not messages:
-        return 0
-    try:
-        return len(json.dumps(messages, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8"))
-    except (TypeError, ValueError):
-        return sum(len(str(m)) for m in messages)
 
 
 _IMAGE_PART_TYPES = {"image_url", "image", "input_image"}
 
 
-def _strip_images_from_messages(messages: list) -> bool:
-    """Remove image content parts from all messages in-place (server rejected images).
-
-    ``tool`` / ``tool_calls`` messages left empty get a placeholder, NOT deleted (deleting
-    orphans the paired ``tool_call_id`` → HTTP 400); other now-empty messages are dropped.
-    Rewritten messages lose their ``api_content`` sidecar (it carries the removed images):
-    a caller rewriting a persisted row must not leave bytes that replay them next turn. The
-    current callers pass per-call clones, where this is a no-op.
-    """
-    from agent.context_compressor import _DB_PERSISTED_MARKER
-    from agent.turn_context import drop_stale_api_content
-
-    found = False
-    to_delete = []
-    for i, msg in enumerate(messages):
-        content = msg.get("content") if isinstance(msg, dict) else None
-        if not isinstance(content, list):
-            continue
-        new_parts = [p for p in content if not (isinstance(p, dict) and p.get("type") in _IMAGE_PART_TYPES)]
-        if len(new_parts) < len(content):
-            found = True
-            if new_parts:
-                msg["content"] = new_parts
-                # Rewriting a stamped live dict stales its persisted row; pop the marker.
-                msg.pop(_DB_PERSISTED_MARKER, None)
-            elif msg.get("role") == "tool" or msg.get("tool_calls"):
-                msg["content"] = "[image content removed — server does not support images]"
-                msg.pop(_DB_PERSISTED_MARKER, None)
-            else:
-                to_delete.append(i)
-            drop_stale_api_content(msg)
-    for i in reversed(to_delete):
-        del messages[i]
-    return found
 
 
 # Provider error bodies (lowercased substring match) meaning "image/multimodal input
 # unsupported" — the loop then strips images and retries text-only instead of cascading
 # into compression / context-too-large recovery or wedging on retries.
-_IMAGE_REJECTION_PHRASES = (
-    "only 'text' content type is supported", "only text content type is supported",
-    "image_url is not supported", "image content is not supported",
-    "multimodal is not supported", "multimodal content is not supported", "multimodal input is not supported",
-    "vision is not supported", "vision input is not supported",
-    "does not support images", "does not support image input", "does not support multimodal",
-    "does not support vision", "model does not support image",
-    # DashScope-style gateways reject non-text blocks with this generic body.
-    # Some OpenAI-compatible endpoints (e.g. (issue #57948)
-    "unexpected item type in content",
-    # ChatGPT-account Codex backend rejects data:image URLs in input_image; keyed on the
-    # field-path apostrophe so other URL errors don't false-trip.
-    "image_url'. expected",
-    # DeepSeek's text-only request-body variant error.
-    "unknown variant `image_url`, expected `text`", "unknown variant image_url, expected text",
-    # OpenRouter HTTP 404 when no upstream endpoint accepts image input (passes the 4xx
-    # gate; without this the gateway queue wedges behind the stuck turn).
-    # Without this phrase the agent never strips the images, the retry loop re-sends the same rejected
-    # request until exhaustion, and the gateway leaves every subsequent message queued behind the stuck turn
-    # — the P1 in issue #21160.
-    "no endpoints found that support image input",
-)
 
 # Provider error bodies meaning "this particular image payload is bad" — the model CAN see, it
 # just could not decode what it was sent. Disjoint from ``_IMAGE_REJECTION_PHRASES``: the turn
 # recovers the same way (strip and retry) but must NOT remember the model as image-rejecting,
 # or the next request with a good image would be needlessly stripped for the rest of the session.
-_IMAGE_CORRUPT_PHRASES = (
-    # ChatGPT-account Codex backend's wording for corrupt/unsupported native image payloads.
-    "image data you provided does not represent a valid image",
-    # Kimi/Moonshot et al. reject truncated/corrupt image bytes baked into history.
-    # Kimi / Moonshot / other OpenAI-compatible Chinese providers reject truncated or corrupt image bytes
-    # with HTTP 400 "Invalid request: prepare image failed ... failed to decode image: invalid or
-    # unsupported image format". Like the Codex case above, the bad bytes are baked into immutable
-    # conversation history and re-sent on every retry, wedging the session. Strip the images so the turn
-    # recovers instead of exhausting retries. (issue #76884; complements the proactive full-decode
-    # validation in tools/vision_tools._normalize_to_supported_image)
-    "failed to decode image",
-)
 
-def strip_images_for_rejecting_model(agent: Any, api_messages: Any) -> bool:
-    """Send-path image strip for a model that rejected image content (see turn_recovery).
-
-    Runs on the per-call ``api_messages`` copy in Hermes's own message format, BEFORE the
-    provider-specific conversion: the part types this stripper knows are that format's, and a
-    converted payload (Bedrock Converse ``{"image": ...}`` blocks carry no ``type``) would slip
-    past it. History is never touched. Keyed on each rejecting (provider, model), so a model
-    that accepts images gets them again.
-    """
-    if _provider_model_key(agent) not in agent._image_rejecting_models:
-        return False
-    return isinstance(api_messages, list) and _strip_images_from_messages(api_messages)
 
 
 
@@ -435,8 +344,7 @@ __all__ = [
     "coerce_tool_name",
     "_escape_invalid_chars_in_json_strings", "_repair_tool_call_arguments",
     "_strip_non_ascii", "_sanitize_messages_non_ascii", "_sanitize_tools_non_ascii",
-    "_strip_images_from_messages", "_sanitize_structure_non_ascii", "sanitize_outbound_kwargs",
-    "strip_images_for_rejecting_model",
+    "_sanitize_structure_non_ascii", "sanitize_outbound_kwargs",
     # call_id policy owners
     "deterministic_call_id", "coalesce_tool_call_id", "tool_call_id_variants",
     "tool_result_id_variants", "uniquify_tool_call_ids",

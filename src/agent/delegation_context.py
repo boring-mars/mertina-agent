@@ -25,19 +25,6 @@ KANBAN_ENV_KEYS: tuple[str, ...] = (
 )
 
 
-@contextmanager
-def delegated_child_context(session_id: str | None = None) -> Iterator[None]:
-    """Mark child execution and isolate its task-local session identity. Even a context
-    entered without an id must restore the parent's session ContextVar (child
-    construction calls ``set_current_session_id``)."""
-    token = _DELEGATED_CHILD_CONTEXT.set(True)
-    try:
-        from gateway.session_context import scoped_current_session_id  # lazy: it calls is_delegated_child_context()
-
-        with scoped_current_session_id(session_id):
-            yield
-    finally:
-        _DELEGATED_CHILD_CONTEXT.reset(token)
 
 
 def is_delegated_child_context() -> bool:
@@ -73,15 +60,6 @@ def is_dispatcher_owned_worker_context() -> bool:
     return not (is_delegated_child_process_context() or _NON_DISPATCHER_OWNED_CONTEXT.get())
 
 
-def owned_kanban_task() -> str:
-    """The board task this execution OWNS: ``HERMES_KANBAN_TASK`` for the dispatcher-owned
-    worker, ``""`` otherwise. Tool access is not worker identity — a profile can expose the
-    kanban toolset interactively, and children/cron runs inherit the env var — so every
-    reader that turns the task id into worker behaviour (guidance, stop nudge, terminal
-    outcomes) goes through this one helper."""
-    if not is_dispatcher_owned_worker_context():
-        return ""
-    return (os.environ.get("HERMES_KANBAN_TASK") or "").strip()
 
 
 def is_delegated_child_process_context() -> bool:
@@ -118,28 +96,6 @@ def scrub_kanban_env(env: Mapping[str, str] | MutableMapping[str, str]) -> dict[
     return cleaned
 
 
-def kanban_path_is_fenced(path: "os.PathLike[str] | str") -> bool:
-    """Whether Kanban mutations at *path* (a board DB or board-metadata root) are denied for this
-    process: always for an in-process delegate child (the parent's own board); for a spawned
-    descendant only when *path* is the dispatcher-pinned ``HERMES_KANBAN_DB`` or lies under the
-    fenced root the marker carries. A legacy ``"1"`` marker fences everything."""
-    if _DELEGATED_CHILD_CONTEXT.get():
-        return True
-    marker = os.environ.get(DELEGATED_CHILD_ENV_MARKER, "")
-    if not marker:
-        return False
-    if marker == "1":
-        return True
-    from pathlib import Path
-    target = Path(path).expanduser().resolve()
-    pinned = os.environ.get("HERMES_KANBAN_DB", "").strip()
-    if pinned and target == Path(pinned).expanduser().resolve():
-        return True
-    try:
-        target.relative_to(Path(marker).expanduser().resolve())
-    except ValueError:
-        return False
-    return True
 
 
 @overload

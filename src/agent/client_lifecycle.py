@@ -60,8 +60,6 @@ def _reset_slot(cache: dict, *, in_use: bool = False) -> None:
     cache["in_use"] = in_use
 
 
-def _valid_credential_pair(api_key: Any, base_url: Any) -> bool:
-    return bool(isinstance(api_key, str) and api_key.strip() and isinstance(base_url, str) and base_url.strip())
 
 
 

@@ -35,72 +35,14 @@ _SESSION_TOKEN_KEYS = (
 _SESSION_COST_KEYS = ("estimated_cost_usd", "cost_status", "cost_source")
 
 
-def _assistant_row_missing_visible_text(msg: dict) -> bool:
-    """True when an assistant row has no visible text (blank final or tool-only)."""
-    if not isinstance(msg, dict) or msg.get("role") != "assistant":
-        return False
-    return not flatten_message_text(msg.get("content")).strip()
-
-
-def _record_kanban_budget_exhausted(
-    kanban_task: str, api_call_count: int, max_iterations: int, logger: logging.Logger
-) -> None:
-    """Record a terminal ``timed_out`` outcome for a kanban worker out of budget.
-
-    Routed via ``_record_task_failure`` (not ``kanban_block``) so it counts toward the
-    consecutive-failure circuit breaker. Idempotent via the ``_end_run`` CAS
-    (``WHERE ended_at IS NULL``), so safe from multiple exit paths.
-
-    This is a bounded fallback (#87096): the CAS invariant in ``_end_run`` (``WHERE ended_at IS NULL``)
-    guarantees idempotence — if another path already closed the run this is a no-op — so it is safe to call
-    from multiple exit paths.
-    """
-    try:
-        from hermes_cli import kanban_db as _kb
-        from hermes_cli import kanban_db_connect as _kbc
-        from hermes_cli import kanban_db_dispatch as _kbd
-        _conn = _kbc.connect()
-        try:
-            _kbd._record_task_failure(
-                _conn,
-                kanban_task,
-                error=(
-                    f"Iteration budget exhausted ({api_call_count}/{max_iterations}) — "
-                    "task could not complete within the allowed iterations"
-                ),
-                outcome="timed_out",
-                release_claim=True,
-                end_run=True,
-                event_payload_extra={"budget_used": api_call_count, "budget_max": max_iterations},
-            )
-        finally:
-            with suppress(Exception):
-                _conn.close()
-    except Exception:
-        logger.warning(
-            "Failed to record budget-exhausted failure for task %s", kanban_task, exc_info=True
-        )
-
-
-def _drop_verification_continuation_scaffolding(messages) -> None:
-    """Remove verification-continuation nudges in place; only the synthetic nudges carry
-    these flags, so the real attempted final answer persisted to state.db survives."""
-    messages[:] = [
-        m for m in messages
-        if not (isinstance(m, dict) and any(m.get(f) for f in _VERIFICATION_CONTINUATION_FLAGS))
-    ]
 
 
 
 
-def _invoke_hook_safely(name: str, logger: logging.Logger, **kwargs) -> list:
-    """Fire a lifecycle plugin hook; a failing hook is logged, never fatal."""
-    try:
-        from hermes_cli.lifecycle import invoke_hook
-        return invoke_hook(name, **kwargs)
-    except Exception as exc:
-        logger.warning("%s hook failed: %s", name, exc)
-        return []
+
+
+
+
 
 
 

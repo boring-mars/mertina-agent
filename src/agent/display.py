@@ -22,10 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 
-def _display_url(value: Any) -> str:
-    """Extract a display-only URL without assuming model argument types."""
-    value = (value.get("url") or value.get("href")) if isinstance(value, dict) else value
-    return value.strip() if isinstance(value, str) else ""
 
 
 

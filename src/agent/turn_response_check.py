@@ -251,14 +251,6 @@ def retry_invalid_response(
             compression_attempts=compression_attempts, result=result,
         )
 
-    agent._invoke_api_request_error_hook(
-        task_id=effective_task_id, turn_id=turn_id, api_request_id=api_request_id,
-        api_call_count=api_call_count, api_start_time=api_start_time, api_kwargs=api_kwargs,
-        error_type="InvalidAPIResponse",
-        error_message=", ".join(error_details) or "Invalid API response",
-        status_code=getattr(getattr(response, "error", None), "code", None),
-        retry_count=retry_count, max_retries=max_retries, retryable=True, reason="invalid_response",
-    )
     # Retry status is buffered and only surfaced if every retry+fallback exhausts.
     thinking_spinner = stop_thinking_spinner(agent, thinking_spinner)
 

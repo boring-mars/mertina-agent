@@ -78,16 +78,6 @@ def handle_content_policy_refusal(
     text = (getattr(normalized, "content", None) or "").strip()
     if thinking_spinner:
         thinking_spinner.stop("")
-    agent._invoke_api_request_error_hook(
-        task_id=effective_task_id, turn_id=turn_id,
-        api_request_id=api_request_id, api_call_count=api_call_count,
-        api_start_time=api_start_time, api_kwargs=api_kwargs,
-        error_type="ContentPolicyBlocked",
-        error_message=text or "model declined to respond",
-        status_code=None, retry_count=retry_count,
-        max_retries=max_retries, retryable=False,
-        reason="content_policy_blocked",
-    )
     from agent.conversation_loop import _content_policy_blocked_result
     result = _content_policy_blocked_result(
         messages, api_call_count,

@@ -22,12 +22,6 @@ from agent.message_sanitization import _repair_tool_call_arguments, _sanitize_su
 from agent.model_metadata import MINIMUM_CONTEXT_LENGTH, _estimate_tools_tokens_rough
 from agent.process_bootstrap import _install_safe_stdio
 from agent.prompt_builder import RUNTIME_ENVIRONMENT_END, RUNTIME_ENVIRONMENT_HEADING
-from agent.prompt_caching import (
-    build_prompt_cache_plan,
-    effective_cache_ttl,
-    strip_anthropic_cache_control,
-    strip_anthropic_tool_cache_control,
-)
 from agent.repetition_guard import REPETITION_LOOP_INTERRUPTED, is_runaway_repetition
 from agent.runtime_cwd import resolve_agent_cwd
 from agent.surface_switch import (
@@ -209,35 +203,10 @@ def _is_interpreter_shutdown_error(exc: Exception) -> bool:
     return False
 
 
-def _moa_client_consumes_prepared_request(client: Any) -> bool:
-    """True when ``client`` is the in-process MoA facade (only ``MoAChatCompletions`` exposes
-    ``prepare()``; other clients raise TypeError on ``_moa_prepared_request`` even while
-    ``agent.provider`` stays ``"moa"``)."""
-    completions = getattr(getattr(client, "chat", None), "completions", None)
-    return callable(getattr(completions, "prepare", None))
 
 
-def _join_truncated_parts(parts: List[str]) -> str:
-    """Join continuation fragments, adding a newline where two would glue together (#78577)."""
-    joined = ""
-    for part in parts:
-        if joined and not joined[-1].isspace() and part and not part[0].isspace():
-            joined += "\n"
-        joined += part
-    return joined
 
 
-def _moa_reference_metrics_for_hook(agent: Any) -> Any:
-    """Per-advisor metrics for post_api_request, or None off the MoA path (a plugin only
-    sees the aggregator generation; this carries the per-slot advisor spend)."""
-    client = getattr(agent, "client", None)
-    getter = getattr(client, "last_reference_metrics", None)
-    if not callable(getter):
-        return None
-    try:
-        return getter()
-    except Exception:
-        return None
 
 
 def _apply_active_turn_redirect(agent: Any, messages: List[Dict[str, Any]], text: str) -> None:
@@ -333,34 +302,6 @@ def _pressure_with_real_floor(compressor: Any, rough_tokens: int) -> int:
     return rough_tokens
 
 
-def _ollama_context_limit_error(agent: Any, request_tokens: int) -> Optional[str]:
-    """Return a user-facing error when Ollama is loaded with too little context."""
-    runtime_ctx = getattr(agent, "_ollama_num_ctx", None)
-    if (
-        not getattr(agent, "tools", None)
-        or not isinstance(runtime_ctx, int)
-        or not 0 < runtime_ctx < MINIMUM_CONTEXT_LENGTH
-    ):
-        return None
-
-    model = getattr(agent, "model", "") or "the selected model"
-    logger.warning(
-        "Ollama runtime context too small for Hermes tool use: model=%s provider=%s base_url=%s "
-        "runtime_context=%d minimum_context=%d estimated_request_tokens=%d tool_count=%d session=%s",
-        model, getattr(agent, "provider", "") or "unknown",
-        getattr(agent, "base_url", "") or "unknown base URL", runtime_ctx, MINIMUM_CONTEXT_LENGTH,
-        request_tokens, len(getattr(agent, "tools", None) or []),
-        getattr(agent, "session_id", None) or "none",
-    )
-    return (
-        f"Ollama loaded `{model}` with only {runtime_ctx:,} tokens of runtime context, but Hermes "
-        f"needs at least {MINIMUM_CONTEXT_LENGTH:,} tokens for reliable tool use.\n\n"
-        "Increase the Ollama context for this model and restart/reload the model before trying "
-        "again. A known-good starting point is 65,536 tokens. In Hermes config, set "
-        "`model.ollama_num_ctx: 65536` (and `model.context_length: 65536` if you also override the "
-        "displayed model context). If you manage the model through an Ollama Modelfile, set "
-        "`PARAMETER num_ctx 65536` there instead."
-    )
 
 
 
@@ -371,27 +312,8 @@ def _ra():
     return run_agent
 
 
-def _nous_entitlement_message(capability: str) -> str:
-    try:
-        from hermes_cli.nous_account import (
-            format_nous_portal_entitlement_message,
-            get_nous_portal_account_info,
-        )
-        account_info = get_nous_portal_account_info(force_fresh=True)
-        return format_nous_portal_entitlement_message(
-            account_info, capability=capability, in_chat=True
-        ) or ""
-    except Exception:
-        return ""
 
 
-def _print_guidance(agent, message: str) -> bool:
-    """Print each line of ``message`` as a 💡 hint; False when there is nothing to print."""
-    if not message:
-        return False
-    for line in message.splitlines():
-        agent._vprint(f"{agent.log_prefix}   💡 {line}", force=True, diagnostic=True)
-    return True
 
 
 
@@ -409,91 +331,12 @@ def _system_prompt_for_hooks(api_kwargs: Any, request_messages: Any) -> Any:
     return system_prompt
 
 
-def _is_nous_inference_route(provider: str, base_url: str) -> bool:
-    return (provider or "").strip().lower() == "nous" or base_url_host_matches(
-        str(base_url or ""), "inference-api.nousresearch.com"
-    )
 
 
-def _billing_or_entitlement_message(
-    *, capability: str, provider: str, base_url: str, model: str, unverified: bool = False
-) -> str:
-    if _is_nous_inference_route(provider, base_url):
-        return _nous_entitlement_message(capability)
-
-    provider_label = (provider or "").strip() or "the selected provider"
-    model_label = (model or "").strip() or "the selected model"
-
-    # Anthropic Pro/Max OAuth surfaces "extra usage" exhaustion as a hard 400 — "add credits"
-    # does not apply. ``unverified`` (#82154): the same 400 is returned for a server-side
-    # content-filter rejection, so hedge and name the other cause.
-    if (provider or "").strip().lower() == "anthropic":
-        switch = (
-            "You can also switch to an Anthropic API key or another provider with "
-            "/model <model> --provider <provider>."
-        )
-        if unverified:
-            return "\n".join([
-                f"{provider_label} reported that your Claude subscription usage may be exhausted for "
-                f"{model_label} (included quota + extra-usage credits) — but this specific error is "
-                "not proof of a billing problem.",
-                "If https://claude.ai/settings/usage still shows quota remaining, this is probably NOT "
-                "a billing problem: on a Claude subscription (OAuth) token Anthropic returns this same "
-                "message when its content filter rejects part of the request — typically a phrase in "
-                "the system prompt.",
-                "If usage really is exhausted: wait for the billing cycle to reset, or add extra usage "
-                "at https://claude.ai/settings/usage",
-                switch,
-                # The exhaustion latch replays the stored error without a request.
-                "Retry with a fresh credential state: `hermes auth reset anthropic`. Until that "
-                "cooldown clears, this error can be replayed from cache without contacting the API.",
-            ])
-        return "\n".join([
-            f"{provider_label} reported that your Claude subscription usage is exhausted for "
-            f"{model_label} (included quota + extra-usage credits).",
-            "Options: wait for the billing cycle to reset, or add extra usage at https://claude.ai/settings/usage",
-            switch,
-        ])
-
-    # Provider-agnostic billing URL so every text surface shows the same actionable link.
-    try:
-        from agent.billing_links import build_billing_block
-        _link = build_billing_block(provider=provider, base_url=base_url, model=model)
-        provider_label = _link.provider_label or provider_label
-        billing_url = _link.billing_url
-    except Exception:
-        billing_url = None
-    return "\n".join([
-        f"{provider_label} reported that billing, credits, or account entitlement is exhausted for {model_label}.",
-        "Add credits or update billing with that provider, then retry.",
-        *([f"{provider_label} billing: {billing_url}"] if billing_url else []),
-        "You can switch providers temporarily with /model <model> --provider <provider>.",
-    ])
 
 
-def _billing_block_dict(provider, base_url, model, message="", *, unverified: bool = False) -> Optional[dict]:
-    """Best-effort structured billing descriptor (None if billing_links is unavailable)."""
-    try:
-        from agent.billing_links import build_billing_block
-        block = build_billing_block(
-            provider=provider, base_url=str(base_url), model=model, message=message
-        ).to_dict()
-    except Exception:
-        return None
-    if block is not None and unverified:
-        block["unverified"] = True  # every surface rendering the block can hedge too (#82154)
-    return block
 
 
-def _billing_terminal_label(summary: str, unverified: bool) -> str:
-    """Terminal-failure prefix for a billing-classified error; ``unverified`` (#82154) must
-    not assert exhaustion as fact."""
-    if unverified:
-        return (
-            "Provider reported usage/credit exhaustion (unverified — the same "
-            f"error can be a content-filter rejection, not billing): {summary}"
-        )
-    return f"Billing or credits exhausted: {summary}"
 
 
 
@@ -717,17 +560,6 @@ _LENGTH_CONTINUATION_OUTPUT_LIMIT = (
 _LENGTH_CONTINUATION_DROPPED_TOOLS_PREFIX = "[System: Your previous tool call "
 
 
-def _get_continuation_prompt(is_partial_stub: bool, dropped_tools: Optional[List[str]] = None) -> str:
-    if is_partial_stub and dropped_tools:
-        tool_list = ", ".join(dropped_tools[:3])
-        return (
-            f"{_LENGTH_CONTINUATION_DROPPED_TOOLS_PREFIX}({tool_list}) was too large and "
-            "the stream timed out before it could be delivered. Do NOT retry the same tool call "
-            "with the same large content. Instead, break the content into multiple smaller tool "
-            "calls (e.g. use multiple patch calls or write smaller files). Each tool call's "
-            "arguments must be under ~8K tokens to avoid stream timeouts.]"
-        )
-    return _LENGTH_CONTINUATION_NETWORK_STUB if is_partial_stub else _LENGTH_CONTINUATION_OUTPUT_LIMIT
 
 
 # Codex/Responses turns that returned only internal reasoning: a bare retry would be
@@ -919,18 +751,8 @@ def _arm_fallback_restart(agent, api_messages, active_system_prompt, _retry):
     return active_system_prompt
 
 
-def _ensure_cached_system_prompt_static(agent, system_message=None) -> None:
-    """Rebuild ``_cached_system_prompt_static`` when caching becomes active (#72626): sessions
-    restored under a cache-off primary would otherwise fall back to the legacy layout after
-    failover to a cache-on provider."""
-    from agent.system_prompt import reconstruct_static_prefix
-    reconstruct_static_prefix(agent, system_message=system_message, log_label="failover redecoration")
 
 
-def _peel_moa_guidance(messages: List[Dict[str, Any]], guidance: Any) -> List[Dict[str, Any]]:
-    """Remove MoA reference guidance attached by ``_attach_reference_guidance``."""
-    from agent.moa_loop import peel_reference_guidance
-    return peel_reference_guidance(messages, guidance)
 
 
 
@@ -998,19 +820,6 @@ def _apply_context_engine_selection(
 
 
 
-def _decode_inline_moa_turn(user_message, persist_user_message):
-    """Decode a MoA preset encoded into ``user_message``; returns ``(user_message,
-    moa_config, persist_user_message)``, unchanged with ``moa_config=None`` otherwise."""
-    try:
-        from hermes_cli.moa_config import decode_moa_turn
-        _decoded_message, _decoded_moa_config = decode_moa_turn(user_message)
-        if _decoded_moa_config is not None:
-            if persist_user_message is None:
-                persist_user_message = _decoded_message
-            return _decoded_message, _decoded_moa_config, persist_user_message
-    except Exception:
-        pass
-    return user_message, None, persist_user_message
 
 
 def _preflight_timeout_result(agent, exc, conversation_history) -> Dict[str, Any]:
@@ -1202,10 +1011,7 @@ def _run_conversation_turn(
     store when ``user_message`` carries API-only synthetic prefixes; timestamp / platform id are
     stored as metadata (platform id lets restart drain recovery dedup). ``persist_user_display_*``:
     display-only event rendering; the model still receives the message unchanged."""
-    if moa_config is None:
-        user_message, moa_config, persist_user_message = _decode_inline_moa_turn(
-            user_message, persist_user_message
-        )
+    moa_config = None
 
     # The gateway caches agents across turns; compression state is per-turn, or a stale
     # in-place boundary would make a later uncompressed result look compacted.
@@ -1256,22 +1062,6 @@ def _run_conversation_turn(
         max_compression_attempts=getattr(agent, "max_compression_attempts", 3),
         **{f.name: getattr(_ctx, f.name.lstrip("_")) for f in fields(_LoopState) if f.name in _CTX_FIELDS},
     )
-    # Opt-in runtime: api_mode == codex_app_server hands the whole turn to the codex
-    # app-server subprocess (see agent/transports/codex_app_server_session.py).
-    if agent.api_mode == "codex_app_server":
-        codex_result = agent._run_codex_app_server_turn(
-            user_message=s.user_message, original_user_message=s.original_user_message,
-            messages=s.messages, effective_task_id=s.effective_task_id,
-            should_review_memory=s._should_review_memory,
-        )
-        from agent.turn_recovery import activate_codex_app_server_fallback
-        if not activate_codex_app_server_fallback(agent, codex_result):
-            return codex_result
-        # Fallback activation rewrote provider/model/api_mode: retry this same user turn on the generic
-        # loop below, keeping codex's projected rows and its failed API call in the turn's accounting.
-        s.api_call_count = int(codex_result.get("api_calls") or 0)
-        s.active_system_prompt = _sync_failover_system_message(agent, None, s.active_system_prompt)
-
     while (s.api_call_count < agent.max_iterations and agent.iteration_budget.remaining > 0) or agent._budget_grace_call:
         if _run_phase(begin_iteration, agent, s).action == "break":
             break

@@ -342,9 +342,6 @@ def safe_json_loads(text: str, default: Any = None) -> Any:
 _fast_yaml_loader = getattr(yaml, "CSafeLoader", None) or yaml.SafeLoader
 
 
-def fast_safe_load(stream: Any) -> Any:
-    """``yaml.safe_load`` (same inputs, same result) using the libyaml C loader when available."""
-    return yaml.load(stream, Loader=_fast_yaml_loader)
 
 
 def _env_number(key: str, default, cast):

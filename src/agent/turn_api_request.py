@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import logging
 from typing import Any
 
-from agent.message_sanitization import sanitize_outbound_kwargs, strip_images_for_rejecting_model
+from agent.message_sanitization import sanitize_outbound_kwargs
 from utils import env_var_enabled
 
 logger = logging.getLogger("agent.conversation_loop")
@@ -37,56 +37,6 @@ def _set_extra_header(api_kwargs: Any, key: str, value: str) -> None:
     _xh = dict(api_kwargs.get("extra_headers") or {})
     _xh[key] = value
     api_kwargs["extra_headers"] = _xh
-
-
-def _fire_pre_api_request_hook(
-    agent: Any, api_kwargs: Any, api_messages: Any, _llm_middleware_trace: Any, *, messages: Any,
-    original_user_message: Any, approx_tokens: Any, total_chars: Any, retry_count: Any,
-    api_call_count: Any, api_request_id: Any, api_start_time: Any, effective_task_id: Any,
-    turn_id: Any,
-) -> None:
-    from agent.conversation_loop import _system_prompt_for_hooks
-
-    try:
-        from hermes_cli.lifecycle import has_hook, invoke_hook as _invoke_hook
-        if has_hook("pre_api_request"):
-            request_messages = api_kwargs.get("messages")
-            if not isinstance(request_messages, list):
-                request_messages = api_kwargs.get("input")
-            if not isinstance(request_messages, list):
-                request_messages = api_messages
-            # Shallow copies: plugins may retain the lists; deepcopy is costly.
-            # ``request_messages``/``conversation_history`` are raw langfuse passthroughs.
-            # Anthropic (``system``) and Responses/Codex (``instructions``) move the system
-            # prompt out of messages; pass it for observability.
-            _invoke_hook(
-                "pre_api_request",
-                task_id=effective_task_id,
-                turn_id=turn_id,
-                api_request_id=api_request_id,
-                session_id=agent.session_id or "",
-                user_message=original_user_message,
-                conversation_history=list(messages),
-                platform=agent.platform or "",
-                model=agent.model,
-                provider=agent.provider,
-                base_url=agent.base_url,
-                api_mode=agent.api_mode,
-                api_call_count=api_call_count,
-                retry_count=retry_count,
-                request_messages=list(request_messages) if isinstance(request_messages, list) else [],
-                system_prompt=_system_prompt_for_hooks(api_kwargs, request_messages),
-                message_count=len(api_messages),
-                tool_count=len(agent.tools or []),
-                approx_input_tokens=approx_tokens,
-                request_char_count=total_chars,
-                max_tokens=agent.max_tokens,
-                started_at=api_start_time,
-                middleware_trace=list(_llm_middleware_trace),
-                request=agent._api_request_payload_for_hook(api_kwargs),
-            )
-    except Exception:
-        pass
 
 
 def build_api_request(
@@ -121,29 +71,8 @@ def build_api_request(
     if getattr(agent, "_is_user_initiated_turn", False) and agent._is_copilot_url():
         _set_extra_header(api_kwargs, "x-initiator", "user")
         agent._is_user_initiated_turn = False
-    try:
-        from hermes_cli.middleware import apply_llm_request_middleware
-
-        _llm_request_mw = apply_llm_request_middleware(
-            api_kwargs, task_id=effective_task_id, turn_id=turn_id, api_request_id=api_request_id,
-            session_id=agent.session_id or "", platform=agent.platform or "", model=agent.model,
-            provider=agent.provider, base_url=agent.base_url, api_mode=agent.api_mode,
-            api_call_count=api_call_count,
-        )
-        api_kwargs = _llm_request_mw.payload
-        _original_api_kwargs = _llm_request_mw.original_payload
-        _llm_middleware_trace = _llm_request_mw.trace
-    except Exception:
-        _original_api_kwargs = dict(api_kwargs)
-        _llm_middleware_trace = []
-
-    _fire_pre_api_request_hook(
-        agent, api_kwargs, api_messages, _llm_middleware_trace, messages=messages,
-        original_user_message=original_user_message, approx_tokens=approx_tokens,
-        total_chars=total_chars, retry_count=retry_count, api_call_count=api_call_count,
-        api_request_id=api_request_id, api_start_time=api_start_time,
-        effective_task_id=effective_task_id, turn_id=turn_id,
-    )
+    _original_api_kwargs = dict(api_kwargs)
+    _llm_middleware_trace = []
 
     if env_var_enabled("HERMES_DUMP_REQUESTS"):
         agent._dump_api_request_debug(api_kwargs, reason="preflight")

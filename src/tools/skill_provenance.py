@@ -30,15 +30,3 @@ def is_background_review() -> bool:
 # curator / skill-ledger / approval guard keyed on ``is_background_review()`` must still apply), but a
 # user asked for it, so the unattended-only memory delete gate (#105921) does not.
 _review_attended: contextvars.ContextVar[bool] = contextvars.ContextVar("review_attended", default=False)
-
-
-def set_review_attended(attended: bool) -> contextvars.Token[bool]:
-    return _review_attended.set(bool(attended))
-
-
-def reset_review_attended(token: contextvars.Token[bool]) -> None:
-    _review_attended.reset(token)
-
-
-def is_unattended_review() -> bool:
-    return is_background_review() and not _review_attended.get()

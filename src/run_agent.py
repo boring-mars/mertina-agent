@@ -17,30 +17,8 @@ import logging
 logger = logging.getLogger(__name__)
 import os
 import re
-import sys
 import time
-import threading
-import uuid
-import warnings
 from typing import List, Dict, Any, Optional, Callable
-from datetime import datetime
-
-from hermes_constants import get_hermes_home
-
-
-
-
-# Sources that label the human conversation an interactive UI transport hosts. A finite ``hermes chat -q`` /
-# one-shot child spawned from such a session inherits HERMES_SESSION_SOURCE (the terminal tool bridges the
-# session env into child processes) but is NOT that conversation: labelling it ``tui``/``desktop`` lists it
-# in the TUI/WebUI pickers as a resumable chat and lets ``hermes -c`` in the TUI continue it (#112550).
-# Automation sources (kanban, tool, cron, a2a, ...) are inherited on purpose.
-_UI_TRANSPORT_SOURCES = frozenset({"tui", "desktop"})
-
-# Finite non-interactive CLI runs (``hermes chat -q``/``--oneshot``, ``hermes -z``) get their own source so human
-# pickers hide them without title/cwd heuristics; ``hermes -c`` still treats them as CLI history.
-ONESHOT_SOURCE = "oneshot"
-CLI_FAMILY_SOURCES = frozenset({"cli", ONESHOT_SOURCE})
 
 
 
@@ -50,21 +28,16 @@ CLI_FAMILY_SOURCES = frozenset({"cli", ONESHOT_SOURCE})
 from agent.iteration_budget import IterationBudget
 from hermes_cli.timeouts import get_provider_request_timeout, get_provider_stale_timeout
 
-_hermes_home = get_hermes_home()  # read by agent_init via _ra()._hermes_home
-from model_tools import get_toolset_for_tool
 from tools.interrupt import set_interrupt as _set_interrupt
 
 from agent.client_lifecycle import ClientLifecycleMixin
 from agent.stream_delivery import StreamDeliveryMixin
 from agent.status_output import StatusOutputMixin
-from agent.api_request_hooks import ApiRequestHooksMixin
 from agent.api_error_summary import PROVIDER_STREAM_PARSE_MARKERS, ApiErrorSummaryMixin
 from agent.interrupt_control import InterruptControlMixin
 from agent.turn_explainers import TurnExplainersMixin
 from agent.activity_tracking import ActivityTrackingMixin
-from agent.rate_limit_credits import RateLimitCreditsMixin
 from agent.turn_facade import TurnFacadeMixin
-from agent.vision_message_prep import VisionMessagePrepMixin
 from agent.reasoning_params import ReasoningParamsMixin
 from agent.lazy_forward import forward as _forward, forward_static as _forward_static
 from agent.model_metadata import is_local_endpoint
@@ -78,13 +51,6 @@ from agent.codex_responses_adapter import (
     _split_responses_tool_id as _codex_split_responses_tool_id,
 )
 from utils import base_url_host_matches, base_url_hostname, env_float, model_forces_max_completion_tokens
-
-
-_MAX_TOOL_WORKERS = 8
-
-
-# Spawn the OpenRouter pre-warm thread once per process, not per AIAgent (gateway thread leak).
-_openrouter_prewarm_done = threading.Event()
 
 
 def _quietly(fn: Callable, *args, **kwargs) -> None:
@@ -110,11 +76,29 @@ def _quietly(fn: Callable, *args, **kwargs) -> None:
 
 
 class AIAgent(
-    ClientLifecycleMixin, StreamDeliveryMixin, StatusOutputMixin, ApiRequestHooksMixin, ApiErrorSummaryMixin,
-    InterruptControlMixin, TurnExplainersMixin, ActivityTrackingMixin, RateLimitCreditsMixin,
-    TurnFacadeMixin, VisionMessagePrepMixin, ReasoningParamsMixin,
+    ClientLifecycleMixin, StreamDeliveryMixin, StatusOutputMixin, ApiErrorSummaryMixin,
+    InterruptControlMixin, TurnExplainersMixin, ActivityTrackingMixin,
+    TurnFacadeMixin, ReasoningParamsMixin,
 ):
     """AI Agent with tool calling capabilities."""
+
+    @staticmethod
+    def _prepare_messages_for_non_vision_model(messages):
+        return messages
+
+    def _get_transport(self, api_mode: str = None):
+        mode = api_mode or self.api_mode
+        cache = getattr(self, "_transport_cache", None)
+        if cache is None:
+            cache = self._transport_cache = {}
+        if cache.get(mode) is None:
+            from agent.transports import get_transport
+            cache[mode] = get_transport(mode)
+        return cache[mode]
+
+    @staticmethod
+    def _is_qwen_portal() -> bool:
+        return False
 
 
     @property
@@ -129,52 +113,30 @@ class AIAgent(
 
     def __init__(
         self,
-        base_url: str = None, api_key: str = None, provider: str = None, api_mode: str = None,
-        acp_command: str = None, acp_args: list[str] | None = None, command: str = None, args: list[str] | None = None,
-        model: str = "",
-        max_iterations: int = sys.maxsize,  # unlimited tool-calling iterations by default (shared with subagents)
-        tool_delay: float = None,  # deprecated: accepted for compatibility, ignored
-        enabled_toolsets: List[str] = None, disabled_toolsets: List[str] = None,
-        save_trajectories: bool = False, verbose_logging: bool = False, quiet_mode: bool = False,
-        tool_progress_mode: str = "all", ephemeral_system_prompt: str = None,
-        log_prefix_chars: int = 100, log_prefix: str = "",
-        providers_allowed: List[str] = None, providers_ignored: List[str] = None, providers_order: List[str] = None,
-        provider_sort: str = None, provider_require_parameters: bool = False, provider_data_collection: str = None,
-        openrouter_min_coding_score: Optional[float] = None,
-        session_id: str = None,
-        tool_progress_callback: callable = None, tool_start_callback: callable = None,
-        tool_complete_callback: callable = None, thinking_callback: callable = None,
-        reasoning_callback: callable = None, clarify_callback: callable = None,
-        read_terminal_callback: callable = None, read_preview_callback: callable = None,
-        drive_preview_callback: callable = None, read_window_below_callback: callable = None,
-        connection_callback: callable = None, tour_callback: callable = None, step_callback: callable = None,
-        stream_delta_callback: callable = None, interim_assistant_callback: callable = None,
-        tool_gen_callback: callable = None, status_callback: callable = None,
-        notice_callback: callable = None, notice_clear_callback: callable = None,
+        base_url: str,
+        api_key: str,
+        model: str,
+        max_iterations: int = 10,
+        quiet_mode: bool = False,
+        stream_delta_callback: callable = None,
+        tool_gen_callback: callable = None,
         event_callback: Optional[Callable[[str, dict], None]] = None,
-        reaction_callback: Optional[Callable[[str], None]] = None,
-        max_tokens: int = None, reasoning_config: Dict[str, Any] = None, service_tier: str = None,
-        request_overrides: Dict[str, Any] = None, prefill_messages: List[Dict[str, Any]] = None,
-        platform: str = None, user_id: str = None, user_id_alt: str = None, user_name: str = None,
-        chat_id: str = None, chat_name: str = None, chat_type: str = None, thread_id: str = None,
-        gateway_session_key: str = None,
-        skip_context_files: bool = False, load_soul_identity: bool = False,
-        skip_memory: bool = False, skip_background_review: bool = False,
-        session_db=None, parent_session_id: str = None,
-        iteration_budget: "IterationBudget" = None, run_budget_seconds: Optional[float] = None,
-        fallback_model: Dict[str, Any] = None, credential_pool=None,
-        checkpoints_enabled: bool = False, checkpoint_max_snapshots: int = 20,
-        checkpoint_max_total_size_mb: int = 500, checkpoint_max_file_size_mb: int = 10,
-        pass_session_id: bool = False, requested_provider: str = None,
-        capabilities: Dict[str, bool] | None = None, cwd: str | None = None,
+        run_budget_seconds: Optional[float] = None,
     ):
-        """Forwarder — see ``agent.agent_init.init_agent`` (same keyword parameters, minus ``tool_delay``)."""
-        init_kwargs = {k: v for k, v in locals().items() if k not in ("self", "tool_delay")}
-        if tool_delay is not None:
-            warnings.warn("tool_delay is deprecated and ignored; sequential tool calls "
-                          "no longer sleep between executions.", DeprecationWarning, stacklevel=2)
+        """Initialize the v0.1 Chat Completions agent."""
         from agent.agent_init import init_agent
-        init_agent(self, **init_kwargs)
+        init_agent(
+            self,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            max_iterations=max_iterations,
+            quiet_mode=quiet_mode,
+            stream_delta_callback=stream_delta_callback,
+            tool_gen_callback=tool_gen_callback,
+            event_callback=event_callback,
+            run_budget_seconds=run_budget_seconds,
+        )
 
 
 
@@ -323,13 +285,6 @@ class AIAgent(
                 and "/backend-api/codex" in (getattr(self, "_base_url_lower", "") or ""))
 
     _direct_native_anthropic_tool_cache_capability = _forward("agent.agent_runtime_helpers", "_direct_native_anthropic_tool_cache_capability")
-
-    @staticmethod
-    def _model_requires_responses_api(model: str) -> bool:
-        """True for GPT-5.x, which OpenAI and OpenRouter reject on /v1/chat/completions
-        (``unsupported_api_for_model``)."""
-        return model.lower().rsplit("/", 1)[-1].startswith("gpt-5")  # strip vendor prefix ("openai/gpt-5.4")
-
 
     def _max_tokens_param(self, value: int) -> dict:
         """``max_completion_tokens`` for newer OpenAI families (and Azure / Copilot serving them), else
@@ -621,10 +576,28 @@ def main(
         api_key=api_key,
         max_iterations=max_turns,
     )
-    user_query = query if query is not None else input("You: ")
-    result = agent.run_conversation(user_query)
-    if result.get("final_response"):
-        print(result["final_response"])
+    if query is not None:
+        result = agent.run_conversation(query)
+        if result.get("final_response"):
+            print(result["final_response"])
+        return result
+
+    history = []
+    result = {}
+    while True:
+        try:
+            user_query = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if user_query.lower() in {"exit", "quit"}:
+            break
+        if not user_query:
+            continue
+        result = agent.run_conversation(user_query, conversation_history=history)
+        history = result.get("messages", history)
+        if result.get("final_response"):
+            print(result["final_response"])
     return result
 
 

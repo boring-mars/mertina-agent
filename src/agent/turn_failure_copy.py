@@ -127,21 +127,6 @@ def exit_reason_failure(turn_exit_reason: Any) -> Optional[ExitFailure]:
     return None
 
 
-def is_max_iteration_handoff(result: Any) -> bool:
-    """A non-failed, non-interrupted ``max_iterations_reached(N/N)`` result that still carries a
-    summary. ``completed`` is False because the work did not finish in that turn, but the turn
-    itself is a resumable boundary — not a failure — so cron delivers the summary and an active
-    ``/goal`` may judge it (#102213). Provider/API failures never match (cf. #63180)."""
-    if not isinstance(result, dict):
-        return False
-    if result.get("failed") is True or result.get("interrupted") is True:
-        return False
-    if result.get("completed") is not False:
-        return False
-    reason = result.get("turn_exit_reason")
-    if not (isinstance(reason, str) and reason.startswith("max_iterations_reached(")):
-        return False
-    return bool(str(result.get("final_response") or "").strip())
 
 
 # ---- chat copy tables -----------------------------------------------------------------------
@@ -233,10 +218,6 @@ FAILURE_CAUSE_GLOSS: Dict[str, str] = {
 }
 
 
-def failure_cause_gloss(reason: Any, *, subject: str = "it", possessive: str = "its") -> Optional[str]:
-    """Plain clause for a classified ``failure_reason``; None when the reason has no gloss."""
-    template = FAILURE_CAUSE_GLOSS.get(str(reason or ""))
-    return template.format(subject=subject, possessive=possessive) if template else None
 
 
 # ---- site-code copy -------------------------------------------------------------------------
@@ -325,91 +306,16 @@ def site_copy(code: str, **fields: Any) -> str:
     return _SITE_COPY[code].format_map(_Defaults(fields))
 
 
-def exhausted_copy(reason: str, *, label: str, attempts: int, summary: str, reset_seconds: Optional[float] = None) -> str:
-    """Chat copy once retries + fallback are exhausted (``max_retries_exhausted_result``). A rate
-    limit whose reset window is known names it: an 8.6h plan quota is not "wait a minute" (#89401)."""
-    lead = _EXHAUSTED_LEADS.get(reason, _EXHAUSTED_DEFAULT_LEAD).format(label=label, attempts=attempts)
-    if reset_seconds is not None and reset_seconds >= 120:
-        from agent.retry_utils import format_reset_window
-        situation = (f"its usage limit resets in {format_reset_window(reset_seconds)}. "
-                     "Send /retry after that, or switch models with /model.")
-    else:
-        situation = f"it looks temporarily unavailable. {_NEXT_STEPS_RETRY}"
-    return (
-        f"{lead} — {situation} To avoid this in future, "
-        f"add a backup provider with `hermes fallback add`.\n\nProvider said: {summary}"
-    )
 
 
-def limit_reset_copy(resets_at: float, now: Optional[float] = None) -> str:
-    """One chat/CLI line naming when the provider says the limit lifts (#98852): the Retry-After
-    / ``resets_at`` the loop already honours for backoff, shown to the user instead of a bare
-    "wait a minute". Local wall-clock time plus the remaining wait; empty once it has passed."""
-    now = time.time() if now is None else now
-    remaining = int(resets_at - now)
-    if remaining <= 0:
-        return ""
-    hours, minutes = divmod((remaining + 59) // 60, 60)
-    wait = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
-    return f"Limit resets at {time.strftime('%H:%M', time.localtime(resets_at))} (in {wait})."
 
 
-def oauth_relogin_command(provider: Any) -> str:
-    """The exact re-login command for a rejected OAuth grant, naming the provider slug and the active
-    named profile: a profile's credentials are its own (93889b770da), so a bare ``hermes auth`` from
-    the root profile re-signs the wrong store and the goal judge, reading a bare 401, guesses which
-    service revoked the token (#114012)."""
-    from hermes_constants import profile_cli_selector
-
-    slug = str(provider or "").strip().lower()
-    if slug == "nous":
-        return f"hermes {profile_cli_selector()}portal"
-    return f"hermes {profile_cli_selector()}auth add {slug} --type oauth"
 
 
-def relogin_command_hint(provider: Any) -> str:
-    """Re-sign-in command for a rejected credential on surfaces that may not know the provider:
-    the exact OAuth command for a known OAuth slug, ``hermes auth add <slug>`` for a known API-key
-    slug, and the ``<provider>`` placeholder when the slug is unknown — always carrying the
-    ``-p <profile>`` selector so a profile user never re-signs the ROOT store (#114012)."""
-    from hermes_constants import profile_cli_selector
-
-    slug = str(provider or "").strip().lower()
-    if not slug:
-        return f"hermes {profile_cli_selector()}auth add <provider>"
-    from agent.error_surface import auth_kind
-
-    if auth_kind(slug) == "oauth":
-        return oauth_relogin_command(slug)
-    return f"hermes {profile_cli_selector()}auth add {slug}"
 
 
-def nonretryable_copy(
-    classified: Any, *, provider: Any, model: Any, summary: str, prefix_suggestion: Optional[str] = None,
-) -> str:
-    """Chat copy for a terminal non-retryable rejection (auth, model missing, TLS, generic 4xx)."""
-    label = provider_label_for(provider)
-    if getattr(classified, "is_auth", False):
-        from agent.error_surface import auth_kind
-
-        template = _AUTH_COPY[auth_kind(str(provider or ""))]
-    else:
-        template = _NONRETRYABLE_COPY.get(classified.reason.value, _NONRETRYABLE_DEFAULT_COPY)
-    prefix_hint = (
-        f" If you typed the name yourself it may be missing its vendor prefix — did you mean "
-        f"'{prefix_suggestion}'?"
-        if prefix_suggestion else ""
-    )
-    body = template.format(label=label, model=model, home=display_hermes_home(), prefix_hint=prefix_hint,
-                           relogin=oauth_relogin_command(provider))
-    return f"{body}\n\nProvider said: {summary}"
 
 
-def content_policy_copy(*, label: str, summary: str) -> str:
-    return (
-        f"{label}'s safety filter refused this request, so the model didn't answer. "
-        f"{CONTENT_POLICY_NEXT_STEPS}\n\nProvider said: {summary}"
-    )
 
 
 def short_detail(exc: Any, limit: int = 200) -> str:

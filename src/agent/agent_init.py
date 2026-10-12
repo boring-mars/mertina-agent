@@ -10,7 +10,6 @@ Symbols that tests patch on ``run_agent.*`` (``OpenAI``, ``get_tool_definitions`
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import threading
 import time
@@ -18,19 +17,16 @@ from collections import deque
 from contextlib import suppress
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 from agent.iteration_budget import IterationBudget, normalize_budget_warning_ratio
 from agent.memory_manager import StreamingContextScrubber
 from agent.session_activity import ActivityProvenance
 from agent.process_bootstrap import _install_safe_stdio
-from agent.subdirectory_hints import SubdirectoryHintTracker
 from agent.think_scrubber import StreamingThinkScrubber
 from hermes_cli.timeouts import get_provider_request_timeout
-from hermes_constants import get_hermes_home
 from hermes_state_ids import new_session_id
-from utils import base_url_host_matches
 
 # Same logger name as run_agent so caplog/patches on "run_agent" see our records.
 logger = logging.getLogger("run_agent")
@@ -127,7 +123,6 @@ _CONTROL_STATE: Dict[str, Any] = {
     "_interrupt_thread_signal_pending": False,
     "_client_lock": threading.RLock,
     "_model_request_active": threading.Event,
-    "_supports_active_turn_redirect": True,
     # /steer: the drain hook appends the note to the last tool result after the current
     # batch — no interrupt, no new user turn (role alternation preserved).
     "_pending_steer": None,
@@ -144,11 +139,6 @@ _CONTROL_STATE: Dict[str, Any] = {
     "_delegate_depth": 0,
     "_active_children": list,
     "_active_children_lock": threading.Lock,
-    # Background review (agent/background_review.py): the run is installed before the worker
-    # starts and fences its first provider phase; the agent pointer enables interrupt fan-out.
-    "_background_review_agent": None,
-    "_background_review_run": None,
-    "_background_review_lock": threading.Lock,
 }
 
 # Per-turn bookkeeping: budgets, activity tracking, rate-limit/credits telemetry.
@@ -156,7 +146,6 @@ _TURN_STATE: Dict[str, Any] = {
     # Intermediate pressure warnings made models give up early; ordinary conversations
     # remain opt-in. Dispatcher workers receive a bounded completion checkpoint.
     "_iteration_budget_warning_injected": False,
-    "_budget_exhausted_injected": False,
     "_budget_grace_call": False,
     "_run_budget_started_at": None,  # set by turn_context.prepare_turn when a budget is active
     "_run_budget_wrapup_injected": False,  # one-shot latch for the 80% wrap-up notice
@@ -168,53 +157,26 @@ _TURN_STATE: Dict[str, Any] = {
     "_session_activity_last_persist_mono": 0.0,  # rate-limits durable SessionDB stamps
     "_current_tool": None,
     "_api_call_count": 0,
-    # Opt-out for the between-turns MCP refresh; set on forks that need byte-identical tools[].
-    "_skip_mcp_refresh": False,
     # Registry generation of the tool snapshot (set in _load_tools): a late refresh rejects
     # a stale rebuild instead of clobbering a newer one.
     "_tool_snapshot_generation": 0,
-    "_rate_limit_state": None,  # from x-ratelimit-* headers; read by /usage
-    # Credits tracking (dev-only, HERMES_DEV_CREDITS) from x-nous-credits-* headers; session
-    # start is latched on the first header so cumulative spend can be reported.
-    "_credits_state": None,
-    "_credits_session_start_micros": None,
-    "_or_cache_hits": 0,  # X-OpenRouter-Cache-Status: HIT count
 }
 
 # Session persistence state.
 _SESSION_STATE: Dict[str, Any] = {
     "_session_messages": list,
-    # Responses encrypted-reasoning replay: routes that 400 with ``invalid_encrypted_content``
-    # make the loop disable it for the session (stateless continuity).
-    "_codex_reasoning_replay_enabled": True,
     "_memory_write_origin": "assistant_tool",
-    "_memory_write_context": "foreground",
     # Cached system prompt (built once, rebuilt on compression) + its cross-session-stable
     # prefix, kept separately only to place an early cache marker.
     "_cached_system_prompt": None,
     "_cached_system_prompt_static": None,
-    # skills.auto_load rendered ONCE per agent: every rebuild (model switch, compression,
-    # static-prefix restoration) reuses these exact bytes instead of re-reading config/skills.
-    "_auto_load_skills_resolved": False,
-    "_auto_load_skills_result": ("", [], []),
-    # ``(cwd, workspace_block)`` pinned on the first build: the git/workspace snapshot is
-    # probed once per session and replayed on every rebuild, so a moving repo can't push the
-    # prefix-cache divergence point ahead of the volatile band at a compaction boundary.
-    "_frozen_workspace_snapshot": None,
-    # Whether close() also closes _session_db. False: a caller-supplied handle is usually the
-    # SHARED launch handle; callers handing over a DEDICATED handle set True.
-    "_owns_session_db": False,
     # Close flush and turn-start flush can overlap; the durable marker lives on each message
     # dict, so its test-and-append is serialized per agent.
     "_session_persist_lock": threading.RLock,
     # CLI's just-accepted user dict, reused by turn setup so its durable marker survives a
     # close-persistence race.
     "_pending_cli_user_message": None,
-    "_last_flushed_db_idx": 0,  # DB-write cursor (prevents duplicate writes)
     "_session_db_created": False,  # DB row deferred to run_conversation()
-    # False on helper agents (compression / hygiene / review forks) that hand the session to
-    # a continuation row that must stay open.
-    "_end_session_on_close": True,
     # True on the background review fork: never persist or publish session lifecycle hooks,
     # so its harness turn can't hijack or appear under the live session.
     "_persist_disabled": False,
@@ -243,8 +205,6 @@ _STREAM_STATE: Dict[str, Any] = {
     "_persist_user_message_idx": None,
     "_persist_user_message_override": None,
     "_persist_user_message_timestamp": None,
-    # Image-to-text fallbacks cached per payload/URL so one tool loop doesn't re-run vision.
-    "_anthropic_image_fallback_cache": dict,
 }
 
 
@@ -261,16 +221,6 @@ def _init_turn_state(agent, run_budget_seconds):
     # would starve the root file handlers. Noise reduction belongs in hermes_logging.
 
 
-def _print_key_banner(key, label: str, warn_missing: bool = False) -> None:
-    """Masked credential line. ``key`` may be a callable Entra ID bearer provider (Azure
-    Foundry) — never invoke or inspect it. Keys ≤ 12 chars (incl. "dummy-key") are not shown."""
-    from agent.azure_identity_adapter import is_token_provider
-    if is_token_provider(key):
-        print("🔑 Using credentials: Microsoft Entra ID")
-    elif isinstance(key, str) and len(key) > 12:
-        print(f"🔑 Using {label}: {key[:8]}...{key[-4:]}")
-    elif warn_missing:
-        print("⚠️  Warning: API key appears invalid or missing")
 
 
 
@@ -288,17 +238,6 @@ def _explicit_client_kwargs(agent, api_key, base_url, _provider_timeout) -> Dict
         client_kwargs["default_query"] = {k: v[0] for k, v in parse_qs(_parsed_url.query).items()}
     if _provider_timeout is not None:
         client_kwargs["timeout"] = _provider_timeout
-    _headers_for = _host_default_headers_factory(base_url)
-    if _headers_for is not None:
-        client_kwargs["default_headers"] = _headers_for(api_key, base_url)
-    elif "default_headers" not in client_kwargs:
-        # Fall back to profile.default_headers for providers that declare custom headers
-        # (Vercel AI Gateway attribution, Kimi User-Agent on non-kimi.com endpoints).
-        with suppress(Exception):
-            from providers import get_provider_profile as _gpf
-            _ph = _gpf(agent.provider)
-            if _ph and _ph.default_headers:
-                client_kwargs["default_headers"] = dict(_ph.default_headers)
     return client_kwargs
 
 
@@ -306,7 +245,7 @@ def _explicit_client_kwargs(agent, api_key, base_url, _provider_timeout) -> Dict
 
 
 
-def _init_openai_client(agent, api_key, base_url, fallback_model, _provider_timeout):
+def _init_openai_client(agent, api_key, base_url, _provider_timeout):
     """OpenAI-wire client: resolve kwargs, apply header/TLS policy, construct."""
     if not api_key or not base_url:
         raise RuntimeError("model.base_url and model.api_key are required")
@@ -325,47 +264,9 @@ def _init_openai_client(agent, api_key, base_url, fallback_model, _provider_time
         raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
 
 
-def _build_client(agent, api_key, base_url, fallback_model):
-    agent._anthropic_client = None
-    agent._is_anthropic_oauth = False
+def _build_client(agent, api_key, base_url):
     _provider_timeout = get_provider_request_timeout(agent.provider, agent.model)
-    _init_openai_client(agent, api_key, base_url, fallback_model, _provider_timeout)
-
-
-
-
-def _lazy_headers(module: str, name: str, pass_key: bool = False, pass_base: bool = False):
-    """Header factory ``(api_key, base_url) -> dict`` importing ``module.name`` at call time.
-    ``pass_key`` forwards ``(key, base_url=base)``; ``pass_base`` forwards ``(base)``."""
-    def factory(key, base):
-        import importlib
-        fn = getattr(importlib.import_module(module), name)
-        if pass_key:
-            return fn(key, base_url=base)
-        return fn(base) if pass_base else fn()
-    return factory
-
-
-# Host → default_headers factory for explicit base_url client construction. Ordered: first
-# host match wins; no match falls back to the provider profile's declared headers.
-_HOST_DEFAULT_HEADERS: List[tuple[str, Callable[[Any, str], Dict[str, str]]]] = [
-    ("openrouter.ai", _lazy_headers("agent.auxiliary_client", "build_or_headers")),
-    ("integrate.api.nvidia.com",
-     _lazy_headers("agent.auxiliary_client", "build_nvidia_nim_headers", pass_base=True)),
-    ("api.routermint.com", _lazy_headers("agent.client_lifecycle", "_routermint_headers")),
-    ("githubcopilot.com", _lazy_headers("hermes_cli.models", "copilot_default_headers")),
-    ("api.kimi.com", lambda _k, _b: {"User-Agent": "claude-code/0.1.0"}),
-    ("portal.qwen.ai", _lazy_headers("agent.client_lifecycle", "_qwen_portal_headers")),
-    ("chatgpt.com", _lazy_headers("agent.codex_headers", "codex_cloudflare_headers", pass_key=True)),
-    ("x.ai", _lazy_headers("tools.xai_http", "hermes_xai_default_headers")),
-]
-
-
-def _host_default_headers_factory(base_url: str):
-    for host, factory in _HOST_DEFAULT_HEADERS:
-        if base_url_host_matches(base_url, host):
-            return factory
-    return None
+    _init_openai_client(agent, api_key, base_url, _provider_timeout)
 
 
 
@@ -412,43 +313,11 @@ def _load_tools(agent, enabled_toolsets, disabled_toolsets):
     if agent.ephemeral_system_prompt:
         prompt_preview = agent.ephemeral_system_prompt[:60] + "..." if len(agent.ephemeral_system_prompt) > 60 else agent.ephemeral_system_prompt
         print(f"🔒 Ephemeral system prompt: '{prompt_preview}' (not saved to trajectories)")
-def _publish_session_id(session_id: str) -> None:
-    """Expose the session ID to tools via ContextVar (+ legacy os.environ fallback).
-
-    If the ContextVar bridge fails to import, keep the root-agent env fallback but never let
-    delegated construction publish a child ID process-wide.
-    """
-    try:
-        from gateway.session_context import set_current_session_id
-        set_current_session_id(session_id)
-    except Exception:
-        try:
-            from agent.delegation_context import is_delegated_child_context
-            delegated_child = is_delegated_child_context()
-        except Exception:
-            delegated_child = False
-        if not delegated_child:
-            os.environ["HERMES_SESSION_ID"] = session_id
-
-
-def _init_session_state(agent, session_id, session_db, parent_session_id, reasoning_config, max_tokens,
-    checkpoints_enabled, checkpoint_max_snapshots, checkpoint_max_total_size_mb, checkpoint_max_file_size_mb):
+def _init_session_state(agent):
     agent.session_start = datetime.now()
-    agent.session_id = session_id or new_session_id(agent.session_start)
-    _publish_session_id(agent.session_id)
-
-    # ~/.hermes/sessions/ — kept unconditionally for request_dump_*.json debug breadcrumbs.
-    agent.logs_dir = get_hermes_home() / "sessions"
-    agent.logs_dir.mkdir(parents=True, exist_ok=True)
+    agent.session_id = new_session_id(agent.session_start)
     _set_defaults(agent, _SESSION_STATE)
-
-    agent._session_db = session_db  # optional SQLite store (CLI/gateway-provided)
-    agent._parent_session_id = parent_session_id
-    agent._session_init_model_config = {
-        "max_iterations": agent.max_iterations,
-        "reasoning_config": reasoning_config,
-        "max_tokens": max_tokens,
-    }
+    agent._session_db = None
 
 
 def _apply_display_config(agent, _agent_cfg, platform):
@@ -584,9 +453,6 @@ def _init_memory(agent, _agent_cfg, skip_memory, platform):
 
 
 def _init_usage_state(agent):
-    from agent.runtime_cwd import scope_terminal_cwd
-    agent._subdirectory_hints = SubdirectoryHintTracker(
-        working_dir=scope_terminal_cwd() or None, enabled=not agent.skip_context_files)
     _set_defaults(agent, _USAGE_STATE)
 
 
@@ -748,18 +614,12 @@ def init_agent(
     agent.request_overrides = dict(request_overrides or {})
     agent.prefill_messages = prefill_messages or []  # Prefilled conversation turns
     agent._force_ascii_payload = False
-    # Every (provider, model) that rejected image content this session. build_api_request strips
-    # images from requests to those models only, so history keeps them for any model that can see.
-    agent._image_rejecting_models = set()
 
     _init_turn_state(agent, run_budget_seconds)
     _set_defaults(agent, _STREAM_STATE)
-    _build_client(agent, api_key, base_url, fallback_model)
+    _build_client(agent, api_key, base_url)
     _load_tools(agent, enabled_toolsets, disabled_toolsets)
-    _init_session_state(
-        agent, session_id, session_db, parent_session_id, reasoning_config, max_tokens,
-        checkpoints_enabled, checkpoint_max_snapshots, checkpoint_max_total_size_mb, checkpoint_max_file_size_mb,
-    )
+    _init_session_state(agent)
 
     # Load config once for memory, skills, and compression sections
     try:

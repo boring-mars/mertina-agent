@@ -236,43 +236,7 @@ def mkdir_under_hermes_home(path: str | Path) -> Path:
     target.mkdir(parents=True, exist_ok=True)
     return target
 
-def get_hermes_dir(new_subpath: str, old_name: str, *, home: Path | None = None) -> Path:
-    """Resolve a Hermes subdirectory, honouring a populated legacy ``<old_name>/`` (no migration).
 
-    An empty legacy dir does NOT count (install scaffolds, manual mkdir) so it cannot shadow the new path.
-
-    A bare empty ``<old_name>/`` directory does **not** count as "the legacy install is in use" — install
-    scaffolds, manual ``mkdir`` work, and cleared-then-abandoned locations all create empty stubs that would
-    otherwise silently shadow real data populated at ``<new_subpath>/``. See #27602 for the pairing-store
-    regression where a dormant empty ``pairing/`` orphaned approved-user data in ``platforms/pairing/``.
-    """
-    home = home or get_hermes_home()
-    old_path = home / old_name
-    return old_path if _legacy_path_has_content(old_path) else home / new_subpath
-
-def _legacy_path_has_content(path: Path) -> bool:
-    """True iff *path* is a non-directory file or a populated directory.
-
-    Non-not-found ``OSError`` means "assume occupied" (never orphan legacy data). Symlinks are
-    judged on their target; a dangling one does NOT count.
-    """
-    try:
-        st = path.lstat()
-        if stat.S_ISLNK(st.st_mode):
-            st = path.stat()  # judge a symlink on its target; dangling → FileNotFoundError
-    except FileNotFoundError:
-        return False
-    except OSError:  # e.g. PermissionError on a parent: assume occupied
-        return True
-    if not stat.S_ISDIR(st.st_mode):
-        return True
-    try:
-        next(path.iterdir())
-    except StopIteration:
-        return False
-    except OSError:
-        pass
-    return True
 
 def display_hermes_home(home: Path | None = None) -> str:
     """User-facing ``~/`` display string for HERMES_HOME (``~/.hermes/profiles/coder``).

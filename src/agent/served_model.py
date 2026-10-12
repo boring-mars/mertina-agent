@@ -21,39 +21,8 @@ SERVED_MODEL_HEADERS: tuple[str, ...] = ("x-litellm-model-id", "x-litellm-model-
 _HOOK_MARK = "_hermes_served_model_hook"
 
 
-def served_model_from_headers(headers: Any) -> Optional[str]:
-    """First non-empty served-model header, or ``None``."""
-    if headers is None or not hasattr(headers, "get"):
-        return None
-    for name in SERVED_MODEL_HEADERS:
-        value = headers.get(name)
-        if value not in (None, ""):
-            return str(value).strip()
-    return None
 
 
-def install_served_model_capture(agent: Any, client: Any) -> None:
-    """Register the response hook on *client*'s ``httpx`` transport (idempotent per client)."""
-    http_client = getattr(client, "_client", None)
-    hooks = getattr(http_client, "event_hooks", None)
-    if not isinstance(hooks, dict):
-        return
-    if any(getattr(h, _HOOK_MARK, False) for h in hooks.get("response", ())):
-        return
-
-    def _on_response(response: Any) -> None:
-        try:
-            if 200 <= int(getattr(response, "status_code", 0)) < 300:
-                agent.last_served_model = served_model_from_headers(getattr(response, "headers", None))
-        except Exception:
-            logger.debug("served-model header capture skipped", exc_info=True)
-
-    setattr(_on_response, _HOOK_MARK, True)
-    try:
-        # httpx copies on assignment; rebuild the mapping instead of mutating the live list.
-        http_client.event_hooks = {**hooks, "response": [*hooks.get("response", ()), _on_response]}
-    except Exception:
-        logger.debug("served-model hook install skipped", exc_info=True)
 
 
 def result_model_fields(agent: Any) -> dict[str, Optional[str]]:

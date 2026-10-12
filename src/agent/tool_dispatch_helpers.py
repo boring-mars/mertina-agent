@@ -64,137 +64,25 @@ _REDIRECT_OVERWRITE = re.compile(r'[^>]>[^>]|^>[^>]')
 
 
 
-def _is_mcp_tool_parallel_safe(tool_name: str) -> bool:
-    """Whether an MCP tool's server opted into parallel calls; False if MCP is unavailable."""
-    try:
-        from tools.mcp_tool_discovery import is_mcp_tool_parallel_safe
-        return is_mcp_tool_parallel_safe(tool_name)
-    except Exception:
-        return False
 
 
 _PARALLEL_SAFE_BRIDGE_LOOKUPS = frozenset({"tool_search", "tool_describe"})
 
 
-def _peel_bridge_call(tool_name: str, function_args: dict) -> tuple[str, dict]:
-    """Resolve a ``tool_call`` bridge invocation to its underlying tool.
-
-    The batch planner admits calls to a parallel run by tool NAME, but when
-    tool search is active the model emits the literal name ``tool_call`` for
-    every deferred tool — so a server opted in via
-    ``supports_parallel_tool_calls: true`` silently lost concurrency the
-    moment the bridge activated. Peel the wrapper here so admission is
-    decided on the underlying tool, exactly like the executors' unwrap.
-
-    Returns ``(underlying_name, underlying_args)`` when the wrapper parses
-    cleanly, else ``(tool_name, function_args)`` unchanged — an unparseable
-    bridge call stays a sequential barrier and fails at dispatch as before.
-    """
-    try:
-        from tools.tool_search import (
-            CONNECTOR_BATCH_SENTINEL,
-            TOOL_CALL_NAME,
-            is_connector_name,
-            resolve_underlying_call,
-        )
-        if tool_name != TOOL_CALL_NAME:
-            return tool_name, function_args
-        underlying, underlying_args, err = resolve_underlying_call(function_args)
-        if err is not None or not underlying:
-            return tool_name, function_args
-        if underlying == CONNECTOR_BATCH_SENTINEL:
-            # Only a PURE connector batch is parallel-safe (network-bound,
-            # no local state, own idempotency key). A batch containing any
-            # local entry keeps the sequential barrier: its entries never
-            # went through per-tool admission here, so treating the batch
-            # as parallel-safe would bypass path-overlap serialization for
-            # local writers and the per-server MCP parallel opt-in.
-            entries = underlying_args.get("calls") or []
-            if entries and all(
-                isinstance(e, dict) and is_connector_name(e.get("name"))
-                for e in entries
-            ):
-                return underlying, underlying_args
-            return tool_name, function_args
-        return underlying, underlying_args
-    except Exception:
-        return tool_name, function_args
-
-
-def _batch_admission(tool_call, execution_cwd: Optional[Path]) -> tuple[str, List[Path], bool] | None:
-    """Classify one call for the planner: ``None`` = sequential barrier, else
-    ``(effective_name, scoped_paths, is_writer)`` (empty paths = unscoped parallel-safe)."""
-    tool_name = tool_call.function.name
-    if tool_name in _NEVER_PARALLEL_TOOLS:
-        return None
-    try:
-        function_args = json.loads(tool_call.function.arguments)
-    except Exception:
-        _raw = tool_call.function.arguments
-        logging.debug(
-            "Could not parse args for %s — treating as sequential barrier; raw=%s",
-            tool_name, _raw[:200] if isinstance(_raw, str) else repr(_raw)[:200],
-        )
-        return None
-    if not isinstance(function_args, dict):
-        logging.debug("Non-dict args for %s (%s) — treating as sequential barrier", tool_name, type(function_args).__name__)
-        return None
-
-    name, args = _peel_bridge_call(tool_name, function_args)
-    if name in _NEVER_PARALLEL_TOOLS:
-        return None
-    if name in _PATH_SCOPED_TOOLS:
-        scoped = _extract_parallel_scope_paths(name, args, execution_cwd=execution_cwd)
-        return (name, scoped, name in _PATH_SCOPED_WRITERS) if scoped else None
-    if name in _PARALLEL_SAFE_TOOLS or name in _PARALLEL_SAFE_BRIDGE_LOOKUPS or _is_mcp_tool_parallel_safe(name):
-        return name, [], False
-    return None
 
 
 
 
 
 
-def _canonical_path(raw_path: str, execution_cwd: Optional[Path] = None) -> Path:
-    """Canonical, OS-aware path for overlap detection (realpath + normcase); relative paths
-    resolve against *execution_cwd* or ``Path.cwd()``."""
-    expanded = Path(raw_path).expanduser()
-    base = execution_cwd if execution_cwd is not None else Path.cwd()
-    candidate = expanded if expanded.is_absolute() else base / expanded
-    return Path(os.path.normcase(os.path.realpath(os.path.abspath(str(candidate)))))
-
-
-def _extract_parallel_scope_paths(
-    tool_name: str,
-    function_args: dict,
-    execution_cwd: Optional[Path] = None,
-) -> List[Path]:
-    """Every canonical path this call reserves for overlap checks. *execution_cwd* is the cwd
-    the tool will actually use (may differ from the process cwd on WSL / sandboxed backends);
-    V4A ``patch`` scope comes from patch-body headers. Empty = unknown scope = barrier."""
-    if tool_name not in _PATH_SCOPED_TOOLS:
-        return []
-
-    if tool_name == "patch" and (function_args.get("mode") or "replace") == "patch":
-        raw_paths = _extract_file_mutation_targets(tool_name, function_args)
-    else:
-        raw_path = function_args.get("path")
-        # search_files defaults its root to the cwd; reserving it beats demoting every bare search.
-        raw_paths = [raw_path] if isinstance(raw_path, str) and raw_path.strip() else ["."] if tool_name == "search_files" else []
-    # dict.fromkeys dedupes while preserving first-seen order.
-    return list(dict.fromkeys(_canonical_path(raw, execution_cwd) for raw in raw_paths if isinstance(raw, str) and raw.strip()))
 
 
 
 
-def _paths_overlap(left: Path, right: Path) -> bool:
-    """True when two already-canonical paths may refer to the same subtree (an empty path
-    overlaps nothing)."""
-    left_parts, right_parts = left.parts, right.parts
-    if not left_parts or not right_parts:
-        return False
-    common_len = min(len(left_parts), len(right_parts))
-    return left_parts[:common_len] == right_parts[:common_len]
+
+
+
+
 
 
 def _is_multimodal_tool_result(value: Any) -> bool:

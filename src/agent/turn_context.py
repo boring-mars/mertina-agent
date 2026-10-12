@@ -74,42 +74,14 @@ def drop_stale_api_content(msg: Dict[str, Any]) -> None:
     msg.pop("api_content", None)
 
 
-def extract_api_content_sidecar(msg: Mapping[str, Any]) -> Optional[str]:
-    """Extract the ``api_content`` sidecar; ``None`` when absent/non-string."""
-    v = msg.get("api_content")
-    return v if isinstance(v, str) else None
 
 
-def _pop_turn_note(agent: Any, attr: str) -> str:
-    """One-shot per-turn note: read and clear, so the system prompt stays byte-stable and a
-    cached agent never replays a stale note."""
-    note = getattr(agent, attr, "") or ""
-    if hasattr(agent, attr):
-        with suppress(Exception):
-            setattr(agent, attr, "")
-    return note if isinstance(note, str) else ""
 
 
-def consume_gateway_turn_context_notes(agent: Any) -> str:
-    """Pop the gateway's per-turn must-deliver notes."""
-    return _pop_turn_note(agent, "_gateway_turn_context_notes")
 
 
-def consume_surface_switch_note(agent: Any) -> str:
-    """Pop the surface-switch note staged by the system-prompt restore (#104414); rides the same
-    user-message channel as the gateway notes, behind the cached prefix."""
-    return _pop_turn_note(agent, "_surface_switch_note")
 
 
-def append_notes_to_multimodal_content(content: Any, notes: str) -> bool:
-    """Append must-deliver notes as a durable text part on a multimodal (list) user
-    message (the sidecar path returns ``None`` for non-string content)."""
-    if not notes or not isinstance(content, list):
-        return False
-    with suppress(Exception):
-        content.append({"type": "text", "text": notes})
-        return True
-    return False
 
 
 # Surfaces whose sessions must not be auto-titled: cron names its own session and
@@ -117,215 +89,26 @@ def append_notes_to_multimodal_content(content: Any, notes: str) -> bool:
 _UNTITLED_PLATFORMS = frozenset({"cron", "subagent"})
 
 
-def _maybe_title_session_at_turn_start(agent: Any, messages: List[Any]) -> None:
-    """Kick off auto-titling for the session's first user message; never fatal."""
-    session_db = getattr(agent, "_session_db", None)
-    session_id = getattr(agent, "session_id", None)
-    if not session_db or not session_id:
-        return
-    if str(getattr(agent, "platform", "") or "").lower() in _UNTITLED_PLATFORMS:
-        return
-    try:
-        from agent.message_content import flatten_message_text
-        from agent.title_generator import maybe_auto_title
-
-        # Turn's user message as text; image-only turns yield "" and are skipped.
-        user_text = ""
-        title_preview = None
-        for msg in reversed(messages or []):
-            if isinstance(msg, dict) and msg.get("role") == "user":
-                user_text = flatten_message_text(msg.get("content")).strip()
-                metadata = msg.get("display_metadata")
-                if isinstance(metadata, dict) and isinstance(metadata.get("title_preview"), str):
-                    title_preview = metadata["title_preview"]
-                break
-        if not user_text:
-            return
-        # The session row is created lazily; force it now or the title write matches
-        # zero rows.
-        if not getattr(agent, "_session_db_created", False):
-            ensure = getattr(agent, "_ensure_db_session", None)
-            if callable(ensure):
-                ensure()
-            if not getattr(agent, "_session_db_created", False):
-                return
-        # Snapshot runtime identity so the background titler can skip if the user
-        # switches models before it fires.
-        # ``session_id`` rides along so the background titler's OpenCode request carries the
-        # same ``x-opencode-session`` affinity as the turn it belongs to (#112717).
-        main_runtime = {
-            k: getattr(agent, k, None)
-            for k in ("model", "provider", "base_url", "api_key", "api_mode", "session_id")
-        }
-        # See #19027.
-        upgrade = maybe_auto_title(
-            session_db,
-            session_id,
-            user_text,
-            conversation_history=messages,
-            failure_callback=(
-                getattr(agent, "_title_failure_callback", None)
-                or getattr(agent, "_emit_auxiliary_failure", None)
-            ),
-            main_runtime=main_runtime,
-            title_callback=getattr(agent, "_on_session_title", None),
-            runtime_validator=lambda: (
-                getattr(agent, "model", None) == main_runtime["model"]
-                and getattr(agent, "provider", None) == main_runtime["provider"]
-            ),
-            title_preview=title_preview,
-        )
-        # Unstarted = the title call would share a self-hosted endpoint with this turn's request
-        # (#117296); ``finalize_turn`` starts it once the model has answered.
-        if upgrade is not None and upgrade.ident is None:
-            agent._deferred_title_upgrade = upgrade
-    except Exception:
-        logger.debug("Turn-start auto-title dispatch failed", exc_info=True)
 
 
-def start_deferred_title_upgrade(agent: Any) -> None:
-    """Fire the title upgrade ``_maybe_title_session_at_turn_start`` held back; no-op when none."""
-    upgrade = getattr(agent, "_deferred_title_upgrade", None)
-    if upgrade is None:
-        return
-    agent._deferred_title_upgrade = None
-    from agent.title_generator import start_title_upgrade
-    start_title_upgrade(upgrade)
 
 
-def reanchor_current_turn_user_idx(messages: List[Any], user_message: Any) -> int:
-    """Locate this turn's user message after compaction rebuilt ``messages``.
-
-    Prefers the LAST user message whose content exactly matches this turn's text, else
-    the last user-originated turn; compaction handoffs are never the fallback.
-    Returns -1 when there is no user-originated message.
-
-    Compression replaces list entries with fresh copies (and may append a todo-snapshot user message or a
-    restored user turn AFTER the surviving copy of the current turn's message), so a pre-compression index
-    is meaningless. Prefer the LAST user message whose content exactly matches this turn's text — the
-    surviving copy in the common case — so the injection stamp and the #48677 persist override can't land on
-    a todo-snapshot or historical row. Fall back to the last *user-originated* turn when no exact match
-    survives (merge-summary-into-tail rewrites the content but the trackers still need a live anchor).
-    Compaction handoffs must never become the fallback anchor (#80622) — they are reference-only
-    scaffolding, not the active ask.
-    """
-    from agent.context_compressor import user_originated_turn_view
-
-    fallback = -1
-    for i in range(len(messages) - 1, -1, -1):
-        msg = messages[i]
-        if not (isinstance(msg, dict) and msg.get("role") == "user"):
-            continue
-        # Typed synthetic current events keep their persistence anchor when raw
-        # content is unchanged; not eligible for the human-only fallback below.
-        if msg.get("content") == user_message:
-            return i
-        live_view = user_originated_turn_view(msg)
-        if live_view is None:
-            continue
-        if live_view.get("content") == user_message:
-            return i
-        # Prefer a real human turn over a synthetic handoff / continuation marker
-        # when the exact content was rewritten by merge-into-tail.
-        if fallback < 0:
-            fallback = i
-    return fallback
 
 
-def export_current_turn_boundary(agent: Any, result: Any, user_message: Any) -> Any:
-    """Stamp ``{turn_id, current_turn_user_idx}`` on a result envelope, proven against the
-    exact ``result["messages"]`` projection it travels with.
-
-    Hosts that settle their own transcript by index (hermes-webui) must never guess which
-    row is the current user turn after this loop rewrote history (alternation repair,
-    compaction, post-turn micro-compaction): a guessed index or a text match can relabel an
-    identical historical prompt and claim its old answer as this turn's. So the producer
-    exports the coordinate, computed on the final list, only when the addressed row is this
-    turn's user message verbatim. Otherwise the keys are omitted and hosts fail closed.
-
-    A preflight-timeout envelope carries the prior history without this turn's row (#7100), so a
-    repeated prompt would resolve to its historical copy: nothing is exported there.
-    """
-    if not isinstance(result, dict) or result.get("turn_exit_reason") == "context_compression_timeout":
-        return result
-    messages = result.get("messages")
-    turn_id = str(getattr(agent, "_current_turn_id", "") or "")
-    if not isinstance(messages, list) or not turn_id or user_message is None:
-        return result
-    idx = reanchor_current_turn_user_idx(messages, user_message)
-    if idx < 0 or idx >= len(messages):
-        return result
-    row = messages[idx]
-    if not (isinstance(row, dict) and row.get("role") == "user"):
-        return result
-    from agent.context_compressor import user_originated_turn_view
-
-    live_view = user_originated_turn_view(row)
-    if row.get("content") != user_message and not (
-        isinstance(live_view, dict) and live_view.get("content") == user_message
-    ):
-        return result  # rewritten (merge-into-tail) row: not a proven boundary
-    result["turn_id"] = turn_id
-    result["current_turn_user_idx"] = idx
-    return result
 
 
-def compression_made_progress(
-    orig_len: int, new_len: int, orig_tokens: int, new_tokens: int
-) -> bool:
-    """``True`` if a compression pass materially reduced the request: fewer rows, or a
-    >5% token cut with the same rows (same floor as the overflow-handler retry).
-
-    Compression can succeed by summarising message contents — reducing the estimated request token count —
-    without reducing the message row count. Treating row count as the sole progress signal false-positives
-    on size-only wins and surfaces a misleading "Cannot compress further" failure even when post-compression
-    tokens are well below the model context window. See issue #39548 for an observed case: 220 → 220
-    messages, ~288k → ~183k tokens on a 1M-context model still triggered auto-reset.
-    The token reduction must be *material* (>5%) to count as progress — the same floor the overflow-handler
-    retry path uses (conversation_loop.py, 39550) — so a sub-5% wobble doesn't keep the multi-pass loop
-    spinning. See #39550.
-    """
-    return new_len < orig_len or (orig_tokens > 0 and new_tokens < orig_tokens * 0.95)
 
 
 class PreflightCompressionTimedOut(RuntimeError):
     """Raised when an oversized turn cannot safely finish preflight."""
 
 
-def _fail_closed_after_preflight_timeout(agent, request_tokens: int) -> None:
-    """Stop an oversized turn instead of sending its unchanged provider payload.
-    Only a request the model cannot accept (above its context window, or of unknown fit) is stopped: a
-    request that merely sits above the compression threshold is sent unchanged, exactly as the
-    cooldown-blocked path sends it every turn — otherwise a slow summariser turns a session that still
-    fits its window into a turn that can never run (#113646, #114594)."""
-    from agent.conversation_compression import context_compression_timed_out, request_exceeds_model_window
-
-    if not context_compression_timed_out(agent):
-        return
-    if request_exceeds_model_window(agent, request_tokens) is False:
-        logger.warning(
-            "Preflight compression timed out but the request (~%s tokens) fits the model window (%s); "
-            "sending it uncompressed this turn",
-            f"{request_tokens:,}", f"{agent.context_compressor.context_length:,}",
-        )
-        return
-    raise PreflightCompressionTimedOut(
-        "Context compression timed out before it could commit while the request "
-        f"was still approximately {request_tokens:,} tokens. The provider call "
-        "was not sent. Run /compress and wait for it to finish, then retry."
-    )
 
 
 
 
 
 
-def _compression_warrants_another_preflight_pass(
-    orig_tokens: int, new_tokens: int, threshold_tokens: int
-) -> bool:
-    """Another immediate summary only if still over threshold AND the previous pass cut
-    tokens by >5%."""
-    return new_tokens >= threshold_tokens and orig_tokens > 0 and new_tokens < orig_tokens * 0.95
 
 
 
@@ -350,23 +133,6 @@ class TurnContext:
     preflight_compression_blocked: bool = False  # immediate retry proved ineffective
 
 
-def _persist_under_lock(agent: Any, fn, failure_msg: str, pending_cli_message: Any) -> None:
-    """Run ``fn`` under the session persist lock (when the agent has one), log-and-swallow
-    failures, then drop staged CLI input — unless it is an unmarked handoff kept for a
-    close retry (once ``_db_persisted`` the close path must not treat it as pre-worker
-    UI input). Eager clearing keeps a preflight crash from leaking stale input."""
-    try:
-        lock = getattr(agent, "_session_persist_lock", None)
-        if lock is None:
-            fn()
-        else:
-            with lock:
-                fn()
-    except Exception:
-        logger.warning(failure_msg, agent.session_id or "none", exc_info=True)
-    finally:
-        if not isinstance(pending_cli_message, dict) or pending_cli_message.get("_db_persisted"):
-            agent._pending_cli_user_message = None
 
 
 

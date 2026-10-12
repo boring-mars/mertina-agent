@@ -63,8 +63,7 @@ class FakeClient:
 def make_agent(outcomes, *, max_iterations=5, **kwargs):
     agent = AIAgent(
         base_url="http://test/v1", api_key="test-key", model="fake-model",
-        max_iterations=max_iterations, quiet_mode=True, skip_memory=True,
-        skip_context_files=True, **kwargs,
+        max_iterations=max_iterations, quiet_mode=True, **kwargs,
     )
     client = FakeClient(outcomes)
     agent.client = client

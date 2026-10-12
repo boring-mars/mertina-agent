@@ -101,21 +101,8 @@ RETRY_DELAY_PATTERNS = (
 )
 
 
-def format_reset_window(seconds: float) -> str:
-    """``~9h`` / ``~45 min`` for chat copy naming when a quota window reopens (ceilinged)."""
-    seconds = int(seconds)
-    return f"~{-(-seconds // 3600)}h" if seconds >= 3600 else f"~{-(-seconds // 60)} min"
 
 
-def reset_delay_from_message(message: str) -> Optional[float]:
-    """Seconds-until-reset parsed from free-text provider error messages, or None."""
-    if not message:
-        return None
-    for pattern, to_seconds in RETRY_DELAY_PATTERNS:
-        m = pattern.search(message)
-        if m and (seconds := to_seconds(m)) is not None:
-            return seconds
-    return None
 
 
 def jittered_backoff(attempt: int, *, base_delay: float = 5.0, max_delay: float = 120.0, jitter_ratio: float = 0.5) -> float:

@@ -374,9 +374,7 @@ def estimate_request_context_tokens(api_payload: Any) -> int:
     dict with ``messages`` (+``tools``); dict with ``input`` (Responses API,
     +``instructions``/``tools``); any other dict -> sum of its values. Image parts
     cost the learned per-image price, not their base64 length."""
-    from agent.image_token_cost import current_image_token_cost
-
-    image_cost = current_image_token_cost()
+    image_cost = 0
 
     def _chars(value: Any) -> int:
         return _payload_chars(value, image_cost)
@@ -1963,11 +1961,7 @@ class _StreamingCall(StreamingWaitMonitor):
 
     def _chat_stream_created(self, raw_stream: Any) -> None:
         response = self._attempt_stream_response = getattr(raw_stream, "response", None)
-        self.agent._capture_rate_limits(response)
-        self.agent._capture_credits(response)
-        self.agent._capture_nous_model_switch(response)
         self.agent._stream_diag_capture_response(self.clients.diag, response)
-        self.agent._check_openrouter_cache_status(response)
         self._writer_token = claim_stream_writer(self.agent)
         self._reabort_if_cancelled(response)
 

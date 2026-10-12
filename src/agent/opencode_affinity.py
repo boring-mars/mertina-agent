@@ -30,31 +30,6 @@ from typing import Any, Optional
 OPENCODE_SESSION_HEADER = "x-opencode-session"
 
 
-def opencode_transport(provider: Optional[str], model: Optional[str], base_url: Optional[str]) -> tuple[Optional[str], str]:
-    """``(api_mode, base_url)`` re-derived per model for an OpenCode relay target; ``(None, base_url)`` otherwise.
-
-    OpenCode Zen/Go serve Responses-only (``gpt-*``, ``grok-*``, ``muse-spark``), Anthropic-wire
-    (``minimax-*``, ``qwen*``, ``claude-*``) and chat/completions models behind one provider, so a
-    provider-level or persisted ``api_mode`` is wrong for every model but the one it was saved for.
-    The main runtime (``hermes_cli/runtime_provider.py``) always re-derives from the effective model;
-    auxiliary resolution must agree or ``gpt-5.6-luna`` compression 500s on /chat/completions (#98799).
-    Built-in families, custom entries named after one (``opencode-go-bridge``, #85589) and opencode.ai
-    hosts all count.
-    """
-    from hermes_cli.models import normalize_opencode_base_url, normalize_opencode_model_id, opencode_model_api_mode
-    from hermes_cli.runtime_provider_custom import _get_named_custom_provider, _opencode_family_for_custom
-
-    url = str(base_url or "")
-    family = _opencode_family_for_custom(str(provider or ""), url)
-    if family is None:
-        return None, url
-    # A custom entry that declares its own api_mode keeps it, exactly like the main runtime
-    # (_resolve_named_custom_runtime only re-derives when the entry has none).
-    if (_get_named_custom_provider(str(provider or "")) or {}).get("api_mode"):
-        return None, url
-    # ``<provider>/<model>`` config ids are stripped against the entry name before the family lookup.
-    api_mode = opencode_model_api_mode(family, normalize_opencode_model_id(provider, model))
-    return api_mode, normalize_opencode_base_url(provider, api_mode, url)
 
 
 def is_opencode_target(provider: Optional[str], base_url: Optional[str]) -> bool:

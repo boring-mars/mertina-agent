@@ -47,16 +47,6 @@ _URL_TO_PROVIDER: Dict[str, str] = {
     "ollama.com": "ollama-cloud",
 }
 
-def _infer_provider_from_url(base_url: str) -> Optional[str]:
-    """models.dev provider name for a base URL (custom endpoints need no explicit provider)."""
-    parsed = _parse_base_url(base_url, "https")
-    if parsed is None:
-        return None
-    host = parsed.netloc.lower() or parsed.path.lower()
-    for url_part, provider in _URL_TO_PROVIDER.items():
-        if url_part in host:
-            return provider
-    return None
 
 def is_local_endpoint(base_url: str) -> bool:
     """True for loopback, container-internal DNS, unqualified hosts, RFC-1918,
@@ -121,9 +111,7 @@ def estimate_messages_tokens_rough(messages: List[Dict[str, Any]], *, charge_sta
     walk (``context_compressor._estimate_msg_budget_tokens``): on non-echo routes stale reasoning
     rides the wire only for the NEWEST assistant turn, so excluding it keeps the compaction TRIGGER
     in the same size class as the walk — otherwise reasoning-heavy sessions fire preflight forever."""
-    from agent.image_token_cost import current_image_token_cost
-
-    image_cost = current_image_token_cost()
+    image_cost = 0
     if not charge_stale_thinking:
         messages = _strip_stale_thinking_for_estimate(messages)
     return sum(_estimate_message_tokens_cached(msg, image_cost) for msg in messages)

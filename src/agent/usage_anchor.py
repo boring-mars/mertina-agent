@@ -127,39 +127,3 @@ def set_usage_anchor(agent: Any, anchor: Optional[Dict[str, Any]], *, turn_base:
     if turn_base or anchor is None:
         agent._turn_base_usage_anchor = anchor
     persist_usage_anchor(agent, anchor)
-
-
-def restore_usage_anchor(agent: Any, conversation_history: Optional[List[Dict[str, Any]]]) -> None:
-    """On a resumed session, adopt the persisted anchor when ``conversation_history`` still carries
-    the priced prefix; otherwise clear the stale blob so it can never suppress compression."""
-    if getattr(agent, "_usage_anchor", None) is not None or getattr(agent, "_persist_disabled", False):
-        return
-    session_id = getattr(agent, "session_id", None)
-    getter = getattr(getattr(agent, "_session_db", None), "get_session_model_config_value", None)
-    if not session_id or not callable(getter) or not isinstance(conversation_history, list):
-        return
-    try:
-        anchor = _serialize(getter(session_id, USAGE_ANCHOR_MODEL_CONFIG_KEY, None))
-    except Exception:
-        logger.debug("usage anchor load failed", exc_info=True)
-        return
-    if anchor is None:
-        return
-    if _anchor_matches(conversation_history, anchor):
-        agent._usage_anchor = anchor
-    else:
-        persist_usage_anchor(agent, None)
-
-
-def persisted_anchor_tokens(session_db: Any, session_id: Any, messages: Any) -> Optional[int]:
-    """Anchored token figure from the session row's persisted anchor, for callers without a live
-    agent (gateway hygiene); None when absent, unreadable, or stale against ``messages``."""
-    getter = getattr(session_db, "get_session_model_config_value", None)
-    if not session_id or not callable(getter) or not isinstance(messages, list):
-        return None
-    try:
-        anchor = _serialize(getter(session_id, USAGE_ANCHOR_MODEL_CONFIG_KEY, None))
-    except Exception:
-        logger.debug("usage anchor load failed", exc_info=True)
-        return None
-    return anchored_context_tokens(messages, anchor) if anchor else None

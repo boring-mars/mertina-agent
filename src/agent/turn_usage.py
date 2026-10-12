@@ -15,7 +15,6 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from agent.image_token_cost import calibrate_from_usage
 from agent.usage_anchor import capture_usage_anchor, set_usage_anchor
 from agent.usage_pricing import normalize_usage
 
