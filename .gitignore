@@ -55,3 +55,7 @@ desktop.ini
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Local working directories, never committed
+/vendor/
+/scripts/
