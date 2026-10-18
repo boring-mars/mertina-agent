@@ -39,7 +39,8 @@ git tag 加上 `v` 前缀：`v1.0.0rc1`。
 ## 版本号记录在哪里
 
 - **git tag 是唯一的版本来源。** 每次发布都在 `main` 上打一个附注标签 `vX.Y.Z`
-- `pyproject.toml` 中的版本号由发布工具维护，不要在功能 PR 中手动修改
+- `src/mertina_agent/__init__.py` 中的版本号（`pyproject.toml` 通过 hatchling 读取它）由发布工具维护，不要在功能 PR 中手动修改。
+  release-please 搭好之前，由维护者在一个 `chore(release): X.Y.Z` commit 里手动修改
 - tag 推送后永远不移动、不删除。如果某个版本有问题，就发布一个新版本
 
 ## 变更日志
