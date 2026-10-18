@@ -39,7 +39,9 @@ Git tags add the `v` prefix: `v1.0.0rc1`.
 ## Where the version lives
 
 - **Git tags are the single source of truth.** Every release is an annotated tag `vX.Y.Z` on `main`
-- The version in `pyproject.toml` is maintained by the release tooling, not edited by hand in feature PRs
+- The version in `src/mertina_agent/__init__.py` (which `pyproject.toml` reads through hatchling) is maintained by
+  the release tooling, not edited by hand in feature PRs.
+  Until release-please is set up, the maintainer bumps it in a `chore(release): X.Y.Z` commit
 - Tags are never moved or deleted after they are pushed. If a release is broken, release a new version
 
 ## Changelog

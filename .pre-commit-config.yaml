@@ -1,0 +1,46 @@
+# Checks that run before each commit. Install them once with:
+#   uv run pre-commit install
+# Run them over the whole tree with:
+#   uv run pre-commit run --all-files
+default_language_version:
+  python: python3.12
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: trailing-whitespace
+        exclude: \.md$  # trailing double spaces are line breaks in Markdown
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # mypy and pytest run in the project environment, so they see the real
+  # dependencies instead of a hook-local copy of them.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy src
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: pytest
+        name: pytest
+        # Commit hooks stay offline; integration tests run with a plain `uv run pytest`.
+        entry: uv run pytest -m "not integration"
+        language: system
+        types: [python]
+        pass_filenames: false
