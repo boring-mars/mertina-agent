@@ -116,7 +116,11 @@ everything can be driven over HTTP.
   agent turns. Platform adapters, profile multiplexing, kanban, relay, and scale-to-zero are left out.
 - **Session management.** Each conversation maps to a session, and turns within one session run one
   at a time.
-- **Session storage.** Copy SessionDB (SQLite) and cut it down to sessions and messages.
+- **Database access (phase 1).** Adapt SQLite, PostgreSQL, and MySQL behind a common connection
+  and transaction boundary. Deliver configuration, health checks, initialization settings, resource
+  cleanup, and backend integration tests before session business logic.
+- **Session storage (later phases).** Adapt Hermes's SessionDB to sessions and messages on the
+  three supported backends.
 - **Session recovery.** Resume a session by ID with its full history.
 - **Sessions API.** Create, list, read, rename, and delete sessions, and read their messages.
 - **Runs API.** Start a run, stream its events over SSE, and stop it. A client that reconnects

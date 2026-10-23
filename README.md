@@ -36,7 +36,7 @@ core small and readable is a goal in its own right.
   retries on transient errors, and can be stopped
 - One tool, `web_search`, behind a pluggable search provider interface
 - A gateway process with an HTTP API for sessions and runs, with run events streamed over SSE
-- Conversations stored in SQLite and resumable
+- Resumable conversations with a configurable SQLite, PostgreSQL, or MySQL backend
 - A web UI for chatting and browsing past sessions
 - Memory across sessions, and skills the assistant loads when a task calls for them
 - Scheduled tasks the assistant creates for you in conversation
@@ -60,7 +60,7 @@ cloud deployment come in P1. See the [Roadmap](ROADMAP.md) for milestones and pr
         └── Prompt builder   identity, memory snapshot, skills index, time
         │
         ▼
- SessionDB (SQLite, from Hermes's hermes_state)
+ SessionDB (SQLite / PostgreSQL / MySQL, adapted from Hermes's hermes_state)
 ```
 
 Key decisions:
@@ -72,7 +72,7 @@ Key decisions:
 | Server | One gateway process based on Hermes's aiohttp API server. It serves the API and the web UI, runs agents, and runs the cron ticker |
 | Web UI | Hermes's `web/` shell (layout, theme, components). The chat page is rewritten as a native chat view on top of the Runs API |
 | Models | Keep Hermes's transport abstraction, implement Chat Completions only |
-| Storage | Hermes's SessionDB on SQLite |
+| Storage | Adapt Hermes's SessionDB for SQLite, PostgreSQL, and MySQL; database access adapters come first |
 | Users | Single user in P0. Multiple users come later |
 
 ## Planned repository layout
@@ -83,7 +83,7 @@ mertina-agent/
 │   ├── agent/        # agent loop, transports, prompt builder
 │   ├── tools/        # tool registry and built-in tools
 │   ├── gateway/      # gateway process, API server, cron ticker
-│   └── state/        # SessionDB (SQLite)
+│   └── state/        # database adapters, then SessionDB
 ├── web/              # React + Vite frontend
 ├── tests/
 ├── docs/
@@ -91,6 +91,10 @@ mertina-agent/
 ```
 
 ## Getting started
+
+The first phase of v0.2 covers database access adapters only. See the
+[phase plan](docs/plans/v0.2-phase-1-databases.md) and
+[isolated Docker database environment](dev/databases/README.md). The adapters are not implemented yet.
 
 Use Python 3.12 or newer and [uv](https://docs.astral.sh/uv/). Install the project and development
 tools from the lockfile:
