@@ -15,6 +15,24 @@ class ConfigurationError(MertinaError):
     """Raised when configuration is missing, malformed or out of range."""
 
 
+type DatabaseErrorKind = Literal[
+    "closed", "connection", "timeout", "constraint", "query", "unknown"
+]
+
+
+class DatabaseError(MertinaError):
+    """Safe database failure; the private cause may contain SQL or credentials.
+
+    An ``unknown`` failure during commit does not prove rollback. Callers must
+    reconcile their durable operation ID before announcing success or retrying.
+    """
+
+    def __init__(self, kind: DatabaseErrorKind) -> None:
+        """Expose only a controlled failure category."""
+        super().__init__(f"Database operation failed ({kind})")
+        self.kind = kind
+
+
 class AgentBusyError(MertinaError):
     """Raised when an agent is asked to run a turn while it is already running one."""
 

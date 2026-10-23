@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from mertina_agent.database.config import validate_database_url
 from mertina_agent.exceptions import ConfigurationError
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -66,6 +67,25 @@ class Settings(BaseSettings):
     max_iterations: int = Field(default=10, ge=1)
     web_search_backend: Literal["ddgs"] = "ddgs"
     web_search_timeout_s: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
+
+    database_url: SecretStr = Field(
+        default_factory=lambda: SecretStr(
+            "sqlite+aiosqlite:///" + str(Path.home() / ".mertina" / "mertina.sqlite3")
+        )
+    )
+    database_connect_timeout_s: float = Field(default=10.0, gt=0.0, allow_inf_nan=False)
+    database_timeout_s: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
+    database_pool_size: int = Field(default=5, ge=1, le=100)
+    database_max_overflow: int = Field(default=5, ge=0, le=100)
+    database_ssl: bool = False
+    database_sqlite_busy_timeout_ms: int = Field(default=5000, ge=1, le=60000)
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database(cls, value: SecretStr) -> SecretStr:
+        """Validate the selected target without exposing credentials in errors."""
+        validate_database_url(value.get_secret_value())
+        return value
 
     @field_validator("llm_base_url")
     @classmethod

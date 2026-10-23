@@ -17,10 +17,15 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "aiosqlite>=0.21",
+    "asyncmy>=0.2.10",
+    "asyncpg>=0.30",
+    "cryptography>=46",
     "ddgs>=9.16.0",
     "openai>=3.16.2",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
+    "sqlalchemy[asyncio]>=2.0.44",
 ]
 
 [project.urls]
