@@ -65,3 +65,6 @@ desktop.ini
 # Local working directories, never committed
 /vendor/
 /scripts/
+
+# End-to-end raw results (reports go to docs/testing/v0.2-e2e/)
+dev/e2e/results/

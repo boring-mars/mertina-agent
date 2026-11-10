@@ -95,6 +95,8 @@ ban-relative-imports = "all"
 [tool.ruff.lint.per-file-ignores]
 # Tests document themselves through their names, and their signatures are fixtures.
 "tests/**/*.py" = ["D", "ANN"]
+# The end-to-end report is written in Chinese, with full-width punctuation.
+"dev/e2e/report.py" = ["RUF001"]
 
 [tool.ruff.format]
 quote-style = "double"
