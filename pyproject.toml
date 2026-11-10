@@ -17,6 +17,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "aiohttp>=3.12",
     "aiosqlite>=0.21",
     "asyncmy>=0.2.10",
     "asyncpg>=0.30",
