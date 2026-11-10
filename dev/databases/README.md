@@ -1,6 +1,6 @@
 # 第一期数据库开发环境
 
-本目录提供开发基础设施；三种数据库接入适配和配置已实现，会话 schema 在第二阶段开发。
+本目录提供开发基础设施；三种数据库接入适配和配置已实现；会话 schema 由第二阶段的 `python -m mertina_agent.state init` 显式初始化。
 第一期范围见[开发计划](../../docs/plans/v0.2-phase-1-databases.md)。
 Mertina 和测试在本地 Python 环境中运行，SQLite 使用本地文件。
 从仓库根目录执行下列命令；只有 PostgreSQL/MySQL 需要 Docker Engine 和 Compose v2 或更新版本。

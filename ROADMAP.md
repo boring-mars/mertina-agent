@@ -135,7 +135,7 @@ everything can be driven over HTTP.
 | Gateway process | `gateway/run.py` (`GatewayRunner`), `gateway/config.py` |
 | Session management | `gateway/session.py`, `gateway/turn_lease.py` |
 | Session storage | `hermes_state.py`, `hermes_state_schema.py` |
-| Session recovery | `hermes_cli/session_recovery.py` |
+| Session recovery | `gateway/session_transcript.py`, `hermes_state_messages.py` |
 | Sessions and Runs API | `gateway/platforms/api_server.py` |
 
 ### Done when
