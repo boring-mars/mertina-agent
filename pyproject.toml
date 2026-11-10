@@ -29,6 +29,9 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.44",
 ]
 
+[project.scripts]
+mertina = "mertina_agent.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/boring-mars/mertina-agent"
 Repository = "https://github.com/boring-mars/mertina-agent"

@@ -37,8 +37,8 @@ from mertina_agent.exceptions import (
 from mertina_agent.gateway.run_events import EventBuffer
 from mertina_agent.gateway.session import AgentFactory, SessionAgent
 from mertina_agent.gateway.turn_lease import Lease, SessionTurnLeaseRegistry
-from mertina_agent.state.models import TurnCommit, TurnStatus
-from mertina_agent.state.serialization import build_commit, fingerprint
+from mertina_agent.state.models import TurnCommit
+from mertina_agent.state.serialization import build_commit, fingerprint, turn_status
 from mertina_agent.state.store import SessionStore
 
 logger = logging.getLogger(__name__)
@@ -313,15 +313,7 @@ class RunRegistry:
             result = await run.agent.run_conversation(
                 user_message, conversation_history=snapshot.messages
             )
-            status: TurnStatus = (
-                "stopped"
-                if result["interrupted"]
-                else "failed"
-                if result["failed"]
-                else "completed"
-                if result["completed"]
-                else "partial"
-            )
+            status = turn_status(result)
             command = build_commit(
                 snapshot,
                 result["messages"],

@@ -8,6 +8,7 @@ from typing import cast
 
 from mertina_agent.agent.transports.chat_completions import ChatCompletionsTransport
 from mertina_agent.agent.transports.types import ChatMessage
+from mertina_agent.agent.turn_result import ConversationResult
 from mertina_agent.exceptions import ModelInputError, StorageError
 from mertina_agent.state.models import HistorySnapshot, TurnCommit, TurnStatus
 
@@ -67,6 +68,17 @@ def decode_message(payload: str) -> ChatMessage:
     except (ValueError, TypeError, RecursionError) as exc:
         reason = "Stored message is corrupt"
         raise StorageError(reason) from exc
+
+
+def turn_status(result: ConversationResult) -> TurnStatus:
+    """Classify a returned turn the same way for every caller that commits it."""
+    if result["interrupted"]:
+        return "stopped"
+    if result["failed"]:
+        return "failed"
+    if result["completed"]:
+        return "completed"
+    return "partial"
 
 
 def build_commit(
