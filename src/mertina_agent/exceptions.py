@@ -33,6 +33,42 @@ class DatabaseError(MertinaError):
         self.kind = kind
 
 
+class StorageError(MertinaError):
+    """Stored data or schema cannot safely satisfy the requested operation."""
+
+
+class SessionNotFoundError(StorageError):
+    """The requested session no longer exists."""
+
+
+class SessionConflictError(StorageError):
+    """A revision, idempotency key or live session lease conflicts."""
+
+
+class RunNotFoundError(MertinaError):
+    """The process-local run does not exist or has expired."""
+
+
+class RunCapacityError(MertinaError):
+    """The bounded run registry cannot admit another active run."""
+
+
+class GatewayClosingError(MertinaError):
+    """The Gateway has stopped admitting work during shutdown."""
+
+
+class EventCursorError(MertinaError):
+    """The event cursor requires resynchronization from a run snapshot."""
+
+
+class EventSubscriptionError(MertinaError):
+    """The bounded event transport cannot admit another subscription."""
+
+
+class EventPayloadError(MertinaError):
+    """An event is invalid, too large or published after transport completion."""
+
+
 class AgentBusyError(MertinaError):
     """Raised when an agent is asked to run a turn while it is already running one."""
 
