@@ -30,6 +30,8 @@ from mertina_agent.exceptions import (
     GatewayClosingError,
     RunCapacityError,
     RunNotFoundError,
+    SessionConflictError,
+    SessionNotFoundError,
     StorageError,
 )
 from mertina_agent.gateway.run_events import EventBuffer
@@ -342,6 +344,15 @@ class RunRegistry:
             if not run.terminal:
                 self._finish(run, "failed", error="shutdown_cancelled")
             raise
+        except (SessionConflictError, SessionNotFoundError):
+            # A definite rejection, not an unknown outcome: the store wrote
+            # nothing because another process changed or removed the session,
+            # so the lease is released and no reconciliation is needed.
+            logger.error("Run was not saved; the session changed elsewhere: %s", run.id)
+            if not run.terminal:
+                self._finish(
+                    run, "failed", error="history_conflict" if committing else "run_failed"
+                )
         except Exception:
             # Task boundary: log only stable identifiers, never chained SQL,
             # model bodies or a traceback that may contain private credentials.

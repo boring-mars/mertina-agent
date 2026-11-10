@@ -76,6 +76,9 @@ class FakeStore:
         if outcome == "before":
             kind = "unknown"
             raise DatabaseError(kind)
+        if outcome == "conflict":
+            message = "Session history version changed"
+            raise SessionConflictError(message)
         key = (command.session_id, command.operation_id)
         receipt = self.receipts.get(key)
         if receipt is None:
@@ -481,6 +484,26 @@ def test_shutdown_cancel_during_commit_preserves_uncertain_state():
         assert not run.durable
         assert run.task is None
         assert factory.agents[0].closed
+
+    run_scenario(scenario)
+
+
+def test_rejected_commit_frees_the_session_and_capacity_for_the_next_run():
+    async def scenario():
+        store, factory = FakeStore(), FakeFactory()
+        session = store.add_session()
+        store.commit_outcomes.append("conflict")
+        registry = RunRegistry(store, factory, settings(gateway_max_active_runs=1))
+        run = await registry.start_run(session, "question")
+        await complete(run)
+        assert (run.status, run.error) == ("failed", "history_conflict")
+        assert not run.durable
+        assert not run.reconciliation_required
+        assert registry.active_run_id(session) is None
+        retry = await registry.start_run(session, "again")
+        await complete(retry)
+        assert retry.durable
+        await registry.aclose()
 
     run_scenario(scenario)
 
