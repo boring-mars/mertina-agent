@@ -127,6 +127,9 @@ everything can be driven over HTTP.
   can reattach to a run that is still going.
 - **Local only.** In P0 the gateway listens on localhost with no authentication. Authentication
   comes before any cloud deployment, in P1.
+- **Developer CLI.** A `mertina` command for development: chat in a saved session from the terminal,
+  list sessions, initialize the schema and start the gateway. It is a convenience for working on
+  Mertina, not the local client planned for P2.
 
 ### Hermes references
 

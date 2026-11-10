@@ -109,6 +109,45 @@ to an endpoint and model you intend to use. Set `MERTINA_LLM_API_KEY` only if th
 authentication. An empty key selects unauthenticated mode; the client does not fall back to
 `OPENAI_API_KEY`. Never commit `.env` or share its secrets. Environment variables override `.env`.
 
+### Chat from the terminal
+
+The `mertina` command is a small developer CLI. To use it from any directory, install it once as
+a uv tool; `--editable` keeps it pointing at your checkout, so code changes apply without
+reinstalling:
+
+```bash
+uv tool install --editable .
+```
+
+Inside the repository, `uv run mertina` works without installing. Then create the session tables
+once and start chatting:
+
+```bash
+mertina db init
+mertina
+```
+
+A bare `mertina` (also `mertina chat` or `mertina run`) opens a conversation. The agent runs in the
+CLI process, the reply streams into the terminal, and each finished turn is saved, so the
+conversation survives restarts and the gateway sees it too. Ctrl+C stops the current reply and
+saves what was produced; pressing it again abandons the turn without saving. Ctrl+D or `/exit`
+leaves. Inside a conversation, `/new` starts another, `/sessions` lists recent ones and
+`/resume ID` continues one.
+
+| Command | What it does |
+|---|---|
+| `mertina` | Chat in a new conversation |
+| `mertina chat --resume SESSION_ID` | Continue a saved conversation |
+| `mertina sessions [--limit N]` | List the most recently updated sessions |
+| `mertina db init` / `mertina db check` | Create or validate the session tables |
+| `mertina gateway` | Start the HTTP gateway (see below) |
+
+Every command reads `--env-file PATH` if given, otherwise `./.env`, then `~/.mertina/.env`,
+whichever exists first; environment variables still win. Put your model settings in
+`~/.mertina/.env` to use the same configuration from every directory. Do not chat in a session in
+the CLI while the gateway runs a turn in the same session: the second turn to finish is rejected
+and not saved.
+
 ### Run an agent turn
 
 Run one real agent turn explicitly, from the repository root:
@@ -210,6 +249,8 @@ uv run python -m mertina_agent.state init --env-file .env
 uv run python -m mertina_agent.state check --env-file .env
 ```
 
+`mertina db init` and `mertina db check` do the same.
+
 **3. Start the gateway.** It listens on `http://127.0.0.1:8765` by default
 (`MERTINA_GATEWAY_HOST`, `MERTINA_GATEWAY_PORT`). Stop it with Ctrl+C or SIGTERM: it stops
 accepting runs, asks running turns to stop, saves what they produced and then exits.
@@ -217,6 +258,8 @@ accepting runs, asks running turns to stop, saves what they produced and then ex
 ```bash
 uv run python -m mertina_agent.gateway --env-file .env
 ```
+
+`mertina gateway` does the same.
 
 **4. Talk to it over HTTP.** In another terminal, create a session, start a run and stream its
 events:
