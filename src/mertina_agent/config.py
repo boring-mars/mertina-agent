@@ -8,11 +8,12 @@ an invalid value fails fast instead of surfacing halfway through a run.
 See ``.env.example`` for the full list of variables with placeholder values.
 """
 
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from mertina_agent.database.config import validate_database_url
@@ -79,6 +80,46 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=5, ge=0, le=100)
     database_ssl: bool = False
     database_sqlite_busy_timeout_ms: int = Field(default=5000, ge=1, le=60000)
+
+    gateway_host: str = "127.0.0.1"
+    gateway_port: int = Field(default=8765, ge=0, le=65535)
+    gateway_bootstrap: bool = False
+    gateway_shutdown_timeout_s: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
+    gateway_cancel_timeout_s: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
+    gateway_run_ttl_s: float = Field(default=900.0, gt=0.0, allow_inf_nan=False)
+    gateway_max_runs: int = Field(default=128, ge=1, le=4096)
+    gateway_max_active_runs: int = Field(default=8, ge=1, le=128)
+    gateway_event_capacity: int = Field(default=256, ge=1, le=2048)
+    gateway_subscriber_capacity: int = Field(default=256, ge=1, le=4096)
+    gateway_max_subscribers: int = Field(default=8, ge=1, le=64)
+    gateway_heartbeat_s: float = Field(default=15.0, gt=0.0, allow_inf_nan=False)
+    gateway_send_timeout_s: float = Field(default=10.0, gt=0.0, allow_inf_nan=False)
+    gateway_body_timeout_s: float = Field(default=10.0, gt=0.0, allow_inf_nan=False)
+
+    @field_validator("gateway_host")
+    @classmethod
+    def validate_gateway_host(cls, value: str) -> str:
+        """Bind only literal loopback addresses, without relying on DNS resolution."""
+        try:
+            address = ip_address(value)
+        except ValueError:
+            message = "gateway_host must be a literal loopback address"
+            raise ValueError(message) from None
+        if not address.is_loopback or "%" in value:
+            message = "gateway_host must be a literal loopback address"
+            raise ValueError(message)
+        return value
+
+    @model_validator(mode="after")
+    def validate_gateway_limits(self) -> "Settings":
+        """Keep active work and complete replay within configured memory bounds."""
+        if self.gateway_max_active_runs > self.gateway_max_runs:
+            message = "gateway_max_active_runs must not exceed gateway_max_runs"
+            raise ValueError(message)
+        if self.gateway_event_capacity > self.gateway_subscriber_capacity:
+            message = "gateway_subscriber_capacity must cover gateway_event_capacity"
+            raise ValueError(message)
+        return self
 
     @field_validator("database_url")
     @classmethod
