@@ -29,7 +29,7 @@ scheduled once P0 is done.
 | Milestone | Theme | Status |
 |---|---|---|
 | [v0.1](#v01--agent-core) | Agent core: a tool-using agent loop you can run and test | Done |
-| [v0.2](#v02--gateway-and-sessions) | Gateway and sessions: the agent as a long-running service with an HTTP API | Planned |
+| [v0.2](#v02--gateway-and-sessions) | Gateway and sessions: the agent as a long-running service with an HTTP API | Done |
 | [v0.3](#v03--web-ui) | Web UI: chat with the agent in the browser | Planned |
 | [v0.4](#v04--memory-and-skills) | Memory and skills: the assistant remembers you and follows reusable procedures | Planned |
 | [v0.5](#v05--scheduled-tasks) | Scheduled tasks: the assistant runs work on a schedule | Planned |
@@ -128,8 +128,8 @@ everything can be driven over HTTP.
 - **Local only.** In P0 the gateway listens on localhost with no authentication. Authentication
   comes before any cloud deployment, in P1.
 - **Developer CLI.** A `mertina` command for development: chat in a saved session from the terminal,
-  list sessions, initialize the schema and start the gateway. It is a convenience for working on
-  Mertina, not the local client planned for P2.
+  list sessions, initialize the schema, start the gateway, and set up the model and database on
+  first run. It is a convenience for working on Mertina, not the local client planned for P2.
 
 ### Hermes references
 
