@@ -29,7 +29,7 @@ scheduled once P0 is done.
 | Milestone | Theme | Status |
 |---|---|---|
 | [v0.1](#v01--agent-core) | Agent core: a tool-using agent loop you can run and test | Done |
-| [v0.2](#v02--gateway-and-sessions) | Gateway and sessions: the agent as a long-running service with an HTTP API | Planned |
+| [v0.2](#v02--gateway-and-sessions) | Gateway and sessions: the agent as a long-running service with an HTTP API | Done |
 | [v0.3](#v03--web-ui) | Web UI: chat with the agent in the browser | Planned |
 | [v0.4](#v04--memory-and-skills) | Memory and skills: the assistant remembers you and follows reusable procedures | Planned |
 | [v0.5](#v05--scheduled-tasks) | Scheduled tasks: the assistant runs work on a schedule | Planned |
@@ -116,13 +116,20 @@ everything can be driven over HTTP.
   agent turns. Platform adapters, profile multiplexing, kanban, relay, and scale-to-zero are left out.
 - **Session management.** Each conversation maps to a session, and turns within one session run one
   at a time.
-- **Session storage.** Copy SessionDB (SQLite) and cut it down to sessions and messages.
+- **Database access (phase 1).** Adapt SQLite, PostgreSQL, and MySQL behind a common connection
+  and transaction boundary. Deliver configuration, health checks, initialization settings, resource
+  cleanup, and backend integration tests before session business logic.
+- **Session storage (later phases).** Adapt Hermes's SessionDB to sessions and messages on the
+  three supported backends.
 - **Session recovery.** Resume a session by ID with its full history.
 - **Sessions API.** Create, list, read, rename, and delete sessions, and read their messages.
 - **Runs API.** Start a run, stream its events over SSE, and stop it. A client that reconnects
   can reattach to a run that is still going.
 - **Local only.** In P0 the gateway listens on localhost with no authentication. Authentication
   comes before any cloud deployment, in P1.
+- **Developer CLI.** A `mertina` command for development: chat in a saved session from the terminal,
+  list sessions, initialize the schema, start the gateway, and set up the model and database on
+  first run. It is a convenience for working on Mertina, not the local client planned for P2.
 
 ### Hermes references
 
@@ -131,7 +138,7 @@ everything can be driven over HTTP.
 | Gateway process | `gateway/run.py` (`GatewayRunner`), `gateway/config.py` |
 | Session management | `gateway/session.py`, `gateway/turn_lease.py` |
 | Session storage | `hermes_state.py`, `hermes_state_schema.py` |
-| Session recovery | `hermes_cli/session_recovery.py` |
+| Session recovery | `gateway/session_transcript.py`, `hermes_state_messages.py` |
 | Sessions and Runs API | `gateway/platforms/api_server.py` |
 
 ### Done when

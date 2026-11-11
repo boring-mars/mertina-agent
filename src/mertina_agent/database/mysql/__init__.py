@@ -1,0 +1,1 @@
+"""MySQL-specific connection policy."""

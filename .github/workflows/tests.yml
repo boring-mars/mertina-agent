@@ -1,0 +1,84 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src
+      - run: uv build
+
+  tests:
+    name: Python ${{ matrix.python }} / SQLite + PostgreSQL + MySQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: mertina_test
+          POSTGRES_USER: mertina_test
+          POSTGRES_PASSWORD: test_only_password
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U mertina_test -d mertina_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: mertina_test
+          MYSQL_USER: mertina_test
+          MYSQL_PASSWORD: test_only_password
+          MYSQL_ROOT_PASSWORD: test_only_root_password
+        ports:
+          - 53306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -ptest_only_root_password"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      MERTINA_TEST_POSTGRESQL_URL: postgresql+asyncpg://mertina_test:test_only_password@127.0.0.1:55432/mertina_test
+      MERTINA_TEST_MYSQL_URL: mysql+asyncmy://mertina_test:test_only_password@127.0.0.1:53306/mertina_test
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest -m "not integration" --cov=mertina_agent --cov-report=xml:results/coverage.xml --junitxml=results/unit.xml
+      - run: uv run pytest -m integration --junitxml=results/integration.xml
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results-python-${{ matrix.python }}
+          path: results/
+          if-no-files-found: error
