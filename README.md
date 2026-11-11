@@ -119,7 +119,8 @@ reinstalling:
 uv tool install --editable .
 ```
 
-Inside the repository, `uv run mertina` works without installing. Then just run it:
+If your shell then can't find `mertina`, run `uv tool update-shell` and open a new terminal. Inside
+the repository, `uv run mertina` also works without installing. Then just run it:
 
 ```bash
 mertina
@@ -140,6 +141,11 @@ the conversation starts:
 The answers go to `~/.mertina/.env`, readable only by you. Run `mertina setup` at any time to
 change them; your saved values are offered as defaults and Enter keeps the saved key or password.
 Switching to another database does not move existing conversations.
+
+Setup starts on its own only when no settings exist. Inside a checkout where you already copied
+`.env.example` to `.env`, that file is used instead: run `mertina setup` to fill it in (it updates
+the file in use). If the model settings are already there, `mertina db init` is enough; without
+it, `mertina` stops with "Storage schema missing" and suggests that command.
 
 A bare `mertina` (also `mertina chat` or `mertina run`) opens a conversation. The agent runs in the
 CLI process, the reply streams into the terminal, and each finished turn is saved, so the
