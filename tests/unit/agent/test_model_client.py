@@ -583,3 +583,45 @@ def test_errors_and_application_logs_do_not_expose_secrets_or_provider_bodies(ca
                 assert sensitive not in app_logs
 
     asyncio.run(scenario())
+
+
+def test_list_models_sends_only_the_settings_key_and_returns_sorted_ids(monkeypatch):
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        data = [{"id": "b-model"}, {"id": "a-model"}, {"id": "b-model"}, {"object": "x"}]
+        return httpx2.Response(200, json={"object": "list", "data": data})
+
+    _owned_sdk_factory(monkeypatch, respond)
+
+    async def scenario():
+        async with ModelClient(_settings()) as client:
+            return await client.list_models()
+
+    assert asyncio.run(scenario()) == ["a-model", "b-model"]
+    (request,) = requests
+    assert request.method == "GET"
+    assert str(request.url) == "https://settings.invalid/v1/models"
+    assert request.headers["authorization"] == "Bearer settings-key"
+
+
+@pytest.mark.parametrize(
+    ("response", "error"),
+    [
+        (httpx2.Response(401, json={"error": {"message": "bad key"}}), ModelRequestError),
+        (httpx2.Response(200, json={"object": "list"}), ModelResponseError),
+    ],
+)
+def test_list_models_reports_safe_errors(monkeypatch, response, error):
+    _owned_sdk_factory(monkeypatch, lambda _request: response)
+
+    async def scenario():
+        async with ModelClient(_settings()) as client:
+            await client.list_models()
+
+    with pytest.raises(error) as caught:
+        asyncio.run(scenario())
+    assert "bad key" not in str(caught.value)
+    if error is ModelRequestError:
+        assert caught.value.status_code == 401

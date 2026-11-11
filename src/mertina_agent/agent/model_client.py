@@ -297,6 +297,32 @@ class ModelClient:
                 raise
             return accumulator.finish()
 
+    async def list_models(self) -> list[str]:
+        """Return the model IDs the endpoint offers (``GET /models``), sorted.
+
+        Used by setup to verify the credential and offer a choice; the agent
+        loop never calls it.
+
+        Raises:
+            ModelRequestError: For timeout, connection, HTTP or closed failures.
+            ModelResponseError: If the response is not an OpenAI-style model list.
+        """
+        self._ensure_open()
+        with _translate_sdk_errors():
+            response = await self._sdk.models.with_raw_response.list(extra_headers=self._headers)
+            payload: object = response.http_response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            message = "Model endpoint returned an invalid model list"
+            raise ModelResponseError(message)
+        return sorted(
+            {
+                item["id"]
+                for item in data
+                if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"]
+            }
+        )
+
     def _ensure_open(self) -> None:
         if self._closed or self._sdk.is_closed():
             message = "Model client is closed"

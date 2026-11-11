@@ -119,13 +119,27 @@ reinstalling:
 uv tool install --editable .
 ```
 
-Inside the repository, `uv run mertina` works without installing. Then create the session tables
-once and start chatting:
+Inside the repository, `uv run mertina` works without installing. Then just run it:
 
 ```bash
-mertina db init
 mertina
 ```
+
+The first time, when no settings exist, `mertina` walks you through setup in the terminal before
+the conversation starts:
+
+1. **Model.** DeepSeek's official API is the default, so you only paste its API key; OpenAI and any
+   other OpenAI-compatible endpoint are also offered. The key is typed without echo, checked by
+   listing the endpoint's models, and the chosen model gets one tiny test request.
+2. **Where conversations are saved.** Press Enter for a SQLite file at `~/.mertina/mertina.sqlite3`
+   (nothing to install). PostgreSQL and MySQL are offered too; the database server, database and
+   account must already exist. Their drivers ship with Mertina, so there is nothing else to
+   install. Setup connects, explains a failure (wrong password, missing database, nothing listening
+   at that address) and creates the session tables after asking.
+
+The answers go to `~/.mertina/.env`, readable only by you. Run `mertina setup` at any time to
+change them; your saved values are offered as defaults and Enter keeps the saved key or password.
+Switching to another database does not move existing conversations.
 
 A bare `mertina` (also `mertina chat` or `mertina run`) opens a conversation. The agent runs in the
 CLI process, the reply streams into the terminal, and each finished turn is saved, so the
@@ -138,15 +152,16 @@ leaves. Inside a conversation, `/new` starts another, `/sessions` lists recent o
 |---|---|
 | `mertina` | Chat in a new conversation |
 | `mertina --resume SESSION_ID` | Continue a saved conversation (also `mertina chat --resume`) |
+| `mertina setup` | Choose the model and database again (`--env-file PATH` writes elsewhere) |
 | `mertina sessions [--limit N]` | List the most recently updated sessions |
 | `mertina db init` / `mertina db check` | Create or validate the session tables |
 | `mertina gateway` | Start the HTTP gateway (see below) |
 
-Every command reads `--env-file PATH` if given, otherwise `./.env`, then `~/.mertina/.env`,
-whichever exists first; environment variables still win. Put your model settings in
-`~/.mertina/.env` to use the same configuration from every directory. Do not chat in a session in
-the CLI while the gateway runs a turn in the same session: the second turn to finish is rejected
-and not saved.
+Every command reads `--env-file PATH` if given, otherwise `./.env` (only if it sets a `MERTINA_`
+variable), then `~/.mertina/.env`; environment variables still win. Setup starts on its own only
+in an interactive terminal; in scripts, pass `--env-file` or set the variables. Do not chat in a
+session in the CLI while the gateway runs a turn in the same session: the second turn to finish is
+rejected and not saved.
 
 ### Run an agent turn
 

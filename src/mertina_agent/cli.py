@@ -6,8 +6,10 @@ process and commits every finished turn to the configured database, so it can be
 resumed later from the CLI or the gateway. ``mertina gateway`` and ``mertina db``
 wrap the existing ``python -m`` entry points.
 
-Settings come from ``--env-file`` when given, otherwise from ``./.env`` and then
-``~/.mertina/.env``, whichever exists first; environment variables always win.
+Settings come from ``--env-file`` when given, otherwise from ``./.env`` (only if
+it sets a ``MERTINA_`` variable) and then ``~/.mertina/.env``, whichever is found
+first; environment variables always win. ``mertina setup`` writes them
+interactively, and a bare ``mertina`` starts it when no settings exist.
 
 This is a development tool, not the P2 local client: it has no TUI, keeps one
 session open at a time and relies on the database's revision check, not a
@@ -16,6 +18,8 @@ cross-process lock, if the gateway writes the same session concurrently.
 
 import argparse
 import asyncio
+import os
+import re
 import signal
 import sys
 import time
@@ -36,6 +40,7 @@ from mertina_agent.config import Settings, load_settings
 from mertina_agent.database.runtime import open_database
 from mertina_agent.exceptions import ConfigurationError, MertinaError
 from mertina_agent.gateway.session import AgentFactory, SessionAgent, build_agent_factory
+from mertina_agent.setup_wizard import Terminal, default_env_path, run_setup
 from mertina_agent.state.models import SessionRecord, TurnStatus
 from mertina_agent.state.schema import Schema
 from mertina_agent.state.serialization import build_commit, turn_status
@@ -43,6 +48,8 @@ from mertina_agent.state.session_db import SessionDB
 
 TITLE_CHARS = 60
 """Length of the title taken from a new session's first message."""
+
+_MERTINA_SETTING = re.compile(r"^\s*(?:export\s+)?MERTINA_[A-Z0-9_]*\s*=", re.MULTILINE)
 
 HELP = """Commands:
   /new          start a new conversation
@@ -54,8 +61,19 @@ Ctrl+C stops the current reply; press it again to abandon the turn without savin
 """
 
 
+def _sets_mertina(path: Path) -> bool:
+    try:
+        return bool(_MERTINA_SETTING.search(path.read_text(encoding="utf-8", errors="replace")))
+    except OSError:
+        return False
+
+
 def resolve_env_file(explicit: Path | None, *, home: Path | None = None) -> Path | None:
     """Pick the env file: an explicit one must exist; otherwise the first one found.
+
+    A project ``./.env`` counts only when it sets a ``MERTINA_`` variable, so
+    another tool's ``.env`` in the working directory does not hide the user's
+    ``~/.mertina/.env``.
 
     Args:
         explicit: The ``--env-file`` argument, if any.
@@ -72,11 +90,34 @@ def resolve_env_file(explicit: Path | None, *, home: Path | None = None) -> Path
             message = f"Env file not found: {explicit}"
             raise ConfigurationError(message)
         return explicit
-    base = home if home is not None else Path.home()
-    for candidate in (Path(".env"), base / ".mertina" / ".env"):
-        if candidate.is_file():
-            return candidate
-    return None
+    project = Path(".env")
+    if project.is_file() and _sets_mertina(project):
+        return project
+    user = default_env_path(home)
+    return user if user.is_file() else None
+
+
+def setup_target(explicit: Path | None, *, home: Path | None = None) -> Path:
+    """The file ``mertina setup`` writes: ``--env-file``, the one in use, or the user file."""
+    if explicit is not None:
+        return explicit
+    return resolve_env_file(None, home=home) or default_env_path(home)
+
+
+def _first_run(out: TextIO) -> Path | None:
+    """Run setup when nothing configures Mertina; return the file to read, or ``None``."""
+    if any(name in os.environ for name in ("MERTINA_LLM_API_KEY", "MERTINA_LLM_BASE_URL")):
+        return None
+    if not (sys.stdin.isatty() and out.isatty()):
+        message = (
+            "No Mertina settings found. Run `mertina setup` in a terminal, or pass --env-file."
+        )
+        raise ConfigurationError(message)
+    target = default_env_path()
+    if not run_setup(target, Terminal(out)):
+        raise KeyboardInterrupt
+    out.write("\n")
+    return target
 
 
 def _printable(text: str) -> str:
@@ -355,6 +396,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sessions = commands.add_parser("sessions", parents=[common], help="list recent sessions")
     sessions.add_argument("--limit", type=int, default=20, help="how many to show")
+    commands.add_parser("setup", parents=[common], help="choose the model and database")
     commands.add_parser("gateway", parents=[common], help="start the HTTP gateway")
     database = commands.add_parser("db", parents=[common], help="create or check the schema")
     database.add_argument("action", choices=("init", "check"))
@@ -370,7 +412,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if resume is not None and command not in ("chat", "run"):
         parser.error(f"--resume only applies to chat, not {command}")
     try:
-        env_file = resolve_env_file(getattr(args, "env_file", None))
+        explicit = getattr(args, "env_file", None)
+        if command == "setup":
+            if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                message = "mertina setup needs an interactive terminal"
+                raise ConfigurationError(message)
+            return 0 if run_setup(setup_target(explicit), Terminal(sys.stdout)) else 130
+        env_file = resolve_env_file(explicit)
+        if env_file is None and command in ("chat", "run"):
+            env_file = _first_run(sys.stdout)
         env_argv = ["--env-file", str(env_file)] if env_file is not None else []
         if command == "gateway":
             from mertina_agent.gateway.__main__ import main as gateway_main

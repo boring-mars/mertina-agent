@@ -6,7 +6,14 @@ import pytest
 
 import mertina_agent.gateway.__main__ as gateway_entry
 import mertina_agent.state.__main__ as state_entry
-from mertina_agent.cli import _title, build_parser, format_session, main, resolve_env_file
+from mertina_agent.cli import (
+    _title,
+    build_parser,
+    format_session,
+    main,
+    resolve_env_file,
+    setup_target,
+)
 from mertina_agent.exceptions import ConfigurationError
 from mertina_agent.state.models import SessionRecord
 
@@ -30,8 +37,32 @@ def test_project_env_file_wins_over_user_env_file(tmp_path, monkeypatch):
     (home / ".mertina" / ".env").write_text("")
     assert resolve_env_file(None, home=home) == home / ".mertina" / ".env"
 
-    (project / ".env").write_text("")
+    (project / ".env").write_text("OTHER_TOOL_KEY=1\n# MERTINA_LLM_MODEL=commented\n")
+    assert resolve_env_file(None, home=home) == home / ".mertina" / ".env"
+
+    (project / ".env").write_text("OTHER_TOOL_KEY=1\nexport MERTINA_LLM_MODEL=m\n")
     assert resolve_env_file(None, home=home) == Path(".env")
+
+
+def test_setup_writes_the_file_in_use_or_the_user_file(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    monkeypatch.chdir(tmp_path)
+    assert setup_target(None, home=home) == home / ".mertina" / ".env"
+    assert setup_target(tmp_path / "new.env", home=home) == tmp_path / "new.env"
+    (tmp_path / ".env").write_text("MERTINA_LLM_MODEL=m\n")
+    assert setup_target(None, home=home) == Path(".env")
+
+
+def test_chat_without_settings_or_terminal_points_to_setup(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    assert main([]) == 1
+    assert "mertina setup" in capsys.readouterr().err
+
+
+def test_setup_refuses_to_run_without_a_terminal(capsys):
+    assert main(["setup"]) == 1
+    assert "interactive terminal" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
