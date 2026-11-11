@@ -47,6 +47,26 @@ def test_env_file_is_accepted_before_or_after_the_command(argv):
     assert str(build_parser().parse_args(argv).env_file) == "x.env"
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--resume", "abc"],
+        ["--env-file", "x.env", "--resume", "abc"],
+        ["chat", "--resume", "abc"],
+        ["--resume", "abc", "run"],
+    ],
+)
+def test_resume_is_accepted_with_or_without_the_chat_command(argv):
+    assert build_parser().parse_args(argv).resume == "abc"
+
+
+def test_resume_is_rejected_for_commands_that_do_not_chat(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--resume", "abc", "sessions"])
+    assert exit_info.value.code == 2
+    assert "--resume" in capsys.readouterr().err
+
+
 def test_title_collapses_whitespace_and_truncates():
     assert _title("  hello\n  world ") == "hello world"
     long = _title("x" * 100)

@@ -330,19 +330,29 @@ def _sessions(settings: Settings, limit: int, out: TextIO) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """``mertina [--env-file PATH] [chat|run|sessions|gateway|db] ...``."""
+    """``mertina [--env-file PATH] [--resume ID] [chat|run|sessions|gateway|db] ...``.
+
+    ``--env-file`` and ``--resume`` default to ``SUPPRESS`` so a value given
+    before the command is not overwritten by the subcommand's own default.
+    """
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--env-file", type=Path, default=argparse.SUPPRESS, help="settings file to read"
     )
+    resume = argparse.ArgumentParser(add_help=False)
+    resume.add_argument(
+        "--resume",
+        metavar="SESSION_ID",
+        default=argparse.SUPPRESS,
+        help="continue a saved session (chat only)",
+    )
     parser = argparse.ArgumentParser(
-        prog="mertina", description="Mertina developer CLI.", parents=[common]
+        prog="mertina", description="Mertina developer CLI.", parents=[common, resume]
     )
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
-    chat = commands.add_parser(
-        "chat", aliases=["run"], parents=[common], help="chat in a saved session (default)"
+    commands.add_parser(
+        "chat", aliases=["run"], parents=[common, resume], help="chat in a saved session (default)"
     )
-    chat.add_argument("--resume", metavar="SESSION_ID", help="continue a saved session")
     sessions = commands.add_parser("sessions", parents=[common], help="list recent sessions")
     sessions.add_argument("--limit", type=int, default=20, help="how many to show")
     commands.add_parser("gateway", parents=[common], help="start the HTTP gateway")
@@ -353,8 +363,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one ``mertina`` command and return its exit code."""
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     command = args.command or "chat"
+    resume = getattr(args, "resume", None)
+    if resume is not None and command not in ("chat", "run"):
+        parser.error(f"--resume only applies to chat, not {command}")
     try:
         env_file = resolve_env_file(getattr(args, "env_file", None))
         env_argv = ["--env-file", str(env_file)] if env_file is not None else []
@@ -369,7 +383,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = load_settings(env_file=env_file)
         if command == "sessions":
             return _sessions(settings, args.limit, sys.stdout)
-        return _chat(settings, getattr(args, "resume", None), sys.stdout)
+        return _chat(settings, resume, sys.stdout)
     except MertinaError as exc:
         sys.stderr.write(f"mertina: {exc}\n")
         if "schema" in str(exc).lower():

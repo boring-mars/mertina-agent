@@ -137,7 +137,7 @@ leaves. Inside a conversation, `/new` starts another, `/sessions` lists recent o
 | Command | What it does |
 |---|---|
 | `mertina` | Chat in a new conversation |
-| `mertina chat --resume SESSION_ID` | Continue a saved conversation |
+| `mertina --resume SESSION_ID` | Continue a saved conversation (also `mertina chat --resume`) |
 | `mertina sessions [--limit N]` | List the most recently updated sessions |
 | `mertina db init` / `mertina db check` | Create or validate the session tables |
 | `mertina gateway` | Start the HTTP gateway (see below) |
