@@ -150,7 +150,9 @@ def test_abandoned_turn_saves_nothing_and_restores_ctrl_c(tmp_path):
             os.kill(os.getpid(), signal.SIGINT)
             await turn
             assert "[turn abandoned; nothing was saved]" in out.getvalue()
-            assert (await store.get_session(chat.session_id)).message_count == 0
+            # An abandoned first turn must not leave an empty conversation behind.
+            assert chat.session_id is None
+            assert await store.list_sessions() == ()
         finally:
             await database.aclose()
 

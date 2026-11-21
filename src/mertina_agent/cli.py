@@ -40,7 +40,7 @@ from mertina_agent.database.runtime import open_database
 from mertina_agent.exceptions import ConfigurationError, MertinaError
 from mertina_agent.gateway.session import AgentFactory, SessionAgent, build_agent_factory
 from mertina_agent.setup_wizard import Terminal, run_setup
-from mertina_agent.state.models import SessionRecord, TurnStatus
+from mertina_agent.state.models import HistorySnapshot, SessionRecord, TurnStatus
 from mertina_agent.state.schema import Schema
 from mertina_agent.state.serialization import build_commit, turn_status
 from mertina_agent.state.session_db import SessionDB
@@ -155,14 +155,18 @@ class ChatSession:
         Returns:
             How the turn ended.
         """
-        if self.session_id is None:
-            self.session_id = (await self.store.create_session(_title(message))).id
-        snapshot = await self.store.load_history(self.session_id)
+        # A new conversation is created together with its first saved turn, so
+        # a first turn that is abandoned or fails leaves no empty session behind.
+        snapshot = (
+            None if self.session_id is None else await self.store.load_history(self.session_id)
+        )
         agent = self._factory(self._report)
         self._agent = agent
         self._printed = False
         try:
-            result = await agent.run_conversation(message, conversation_history=snapshot.messages)
+            result = await agent.run_conversation(
+                message, conversation_history=snapshot.messages if snapshot else ()
+            )
         finally:
             self._agent = None
             await agent.aclose()
@@ -170,15 +174,19 @@ class ChatSession:
         if not self._printed and result["final_response"]:
             self._write(_printable(result["final_response"]))
         self._write("\n")
-        command = build_commit(
-            snapshot,
-            result["messages"],
-            operation_id=uuid4().hex,
-            status=status,
-            timestamp_us=time.time_ns() // 1000,
-        )
         self.committing = True
         try:
+            if snapshot is None:
+                session = await self.store.create_session(_title(message))
+                self.session_id = session.id
+                snapshot = HistorySnapshot(session, ())
+            command = build_commit(
+                snapshot,
+                result["messages"],
+                operation_id=uuid4().hex,
+                status=status,
+                timestamp_us=time.time_ns() // 1000,
+            )
             await self.store.commit_turn(command)
         finally:
             self.committing = False
