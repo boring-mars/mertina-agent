@@ -17,7 +17,7 @@ SQLite 使用本地 Python 标准库，无需镜像或独立服务。
 
 | 后端 | 开发环境 | 本地应用连接地址 | 容器网络连接地址 |
 |---|---|---|---|
-| SQLite | 本地 Python 标准库 sqlite3 | `/Users/mac/Desktop/Metina/mertina_dev.sqlite3` | 不适用 |
+| SQLite | 本地 Python 标准库 sqlite3 | `~/.mertina/dev/mertina_dev.sqlite3` | 不适用 |
 | PostgreSQL | `postgres:18` | `127.0.0.1:55432` | `postgres:5432` |
 | MySQL | `mysql:8.0` | `127.0.0.1:53306` | `mysql:3306` |
 
@@ -34,19 +34,19 @@ MySQL root 密码为 `mertina_root_local_dev`，应用应使用普通用户。
 ## SQLite 本地路径
 
 SQLite 由 Mertina 进程直接打开文件，无需启动服务、监听端口或安装单独的数据库程序。
-本机开发库使用 `/Users/mac/Desktop/Metina/mertina_dev.sqlite3`，WAL/SHM 等伴随文件也保留在该目录。
+本机开发库使用 `~/.mertina/dev/mertina_dev.sqlite3`，WAL/SHM 等伴随文件也保留在该目录。
 这是本机开发路径约定，通过忽略的 `.env` 中 `MERTINA_DATABASE_URL` 指定；应用默认
 使用 `~/.mertina/mertina.sqlite3`，不硬编码开发机路径。
 
 ```bash
-mkdir -p /Users/mac/Desktop/Metina
-.venv/bin/python -m sqlite3 /Users/mac/Desktop/Metina/mertina_dev.sqlite3 'PRAGMA quick_check;'
+mkdir -p ~/.mertina/dev
+.venv/bin/python -m sqlite3 ~/.mertina/dev/mertina_dev.sqlite3 'PRAGMA quick_check;'
 ```
 
 需要交互查询时：
 
 ```bash
-.venv/bin/python -m sqlite3 /Users/mac/Desktop/Metina/mertina_dev.sqlite3
+.venv/bin/python -m sqlite3 ~/.mertina/dev/mertina_dev.sqlite3
 ```
 
 开发环境按 `uv sync --locked` 安装，使用仓库的 `.venv`；不需要构建 Mertina 测试镜像。
@@ -61,7 +61,7 @@ docker compose -f dev/databases/compose.yaml exec -T postgres \
   -c 'SELECT version(), current_database(), current_user;'
 docker compose -f dev/databases/compose.yaml exec -T mysql \
   sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql --protocol=TCP -h 127.0.0.1 -u "$MYSQL_USER" "$MYSQL_DATABASE" -e "SELECT VERSION(), DATABASE(), CURRENT_USER(), @@character_set_database, @@default_storage_engine;"'
-.venv/bin/python -m sqlite3 /Users/mac/Desktop/Metina/mertina_dev.sqlite3 'SELECT sqlite_version();'
+.venv/bin/python -m sqlite3 ~/.mertina/dev/mertina_dev.sqlite3 'SELECT sqlite_version();'
 ```
 
 应用接入检查：

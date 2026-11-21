@@ -6,14 +6,14 @@
 
 原路线图指定 SQLite，会话持久化调研讨论过更多数据库。用户现已明确第一期只完成
 SQLite、PostgreSQL、MySQL 的接入适配。用户进一步明确：Mertina 与分支测试在本地运行，
-SQLite 文件集中放在 `/Users/mac/Desktop/Metina/`，减少开发用容器和镜像需求。
+SQLite 文件集中放在 `~/.mertina/dev/`，减少开发用容器和镜像需求。
 
 ## 决定
 
 - 首批仅支持这三种数据库；第一期做接入层，后续再实现会话存储和 Gateway。
 - 一个配置选择一个后端；连接失败不回退，不自动迁移数据。
 - SQLite 由本地 Mertina 进程直接打开文件，开发库默认路径为
-  `/Users/mac/Desktop/Metina/mertina_dev.sqlite3`；分支测试可分别配置独立文件。
+  `~/.mertina/dev/mertina_dev.sqlite3`；分支测试可分别配置独立文件。
   PostgreSQL/MySQL 使用各自服务容器和独立命名卷，不复用其他项目的数据库。
 - 容器环境使用现有 `postgres:18`、`mysql:8.0` 镜像作为开发基线；SQLite 使用本地 Python 标准库。
   镜像实际版本由验证记录给出，不据此承诺未经测试的最低版本或整个版本区间。
