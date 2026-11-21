@@ -8,6 +8,7 @@ an invalid value fails fast instead of surfacing halfway through a run.
 See ``.env.example`` for the full list of variables with placeholder values.
 """
 
+import re
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
@@ -189,3 +190,49 @@ def load_settings(*, env_file: Path | str | None = DEFAULT_ENV_FILE) -> Settings
         fields = ", ".join(".".join(map(str, error["loc"])) for error in exc.errors())
         message = f"Invalid Mertina configuration fields: {fields}"
         raise ConfigurationError(message) from exc
+
+
+_MERTINA_SETTING = re.compile(r"^\s*(?:export\s+)?MERTINA_[A-Z0-9_]*\s*=", re.MULTILINE)
+
+
+def default_env_path(home: Path | None = None) -> Path:
+    """The user-level settings file, ``~/.mertina/.env``."""
+    return (home if home is not None else Path.home()) / ".mertina" / ".env"
+
+
+def _sets_mertina(path: Path) -> bool:
+    try:
+        return bool(_MERTINA_SETTING.search(path.read_text(encoding="utf-8", errors="replace")))
+    except OSError:
+        return False
+
+
+def resolve_env_file(explicit: Path | None, *, home: Path | None = None) -> Path | None:
+    """Pick the env file: an explicit one must exist; otherwise the first one found.
+
+    Every command-line entry point uses this order, so ``mertina`` and the
+    ``python -m`` entry points read the same settings. A project ``./.env``
+    counts only when it sets a ``MERTINA_`` variable, so another tool's
+    ``.env`` in the working directory does not hide the user's
+    ``~/.mertina/.env``.
+
+    Args:
+        explicit: The ``--env-file`` argument, if any.
+        home: Home directory override for tests.
+
+    Returns:
+        The file to read, or ``None`` to use the process environment only.
+
+    Raises:
+        ConfigurationError: If an explicit env file does not exist.
+    """
+    if explicit is not None:
+        if not explicit.is_file():
+            message = f"Env file not found: {explicit}"
+            raise ConfigurationError(message)
+        return explicit
+    project = Path(DEFAULT_ENV_FILE)
+    if project.is_file() and _sets_mertina(project):
+        return project
+    user = default_env_path(home)
+    return user if user.is_file() else None

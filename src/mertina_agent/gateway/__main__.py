@@ -8,7 +8,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from mertina_agent.config import Settings, load_settings
+from mertina_agent.config import Settings, load_settings, resolve_env_file
 from mertina_agent.exceptions import MertinaError
 from mertina_agent.gateway.run import GatewayRunner
 
@@ -37,10 +37,10 @@ async def serve(settings: Settings) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the local Gateway and expose controlled startup or shutdown failures."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument("--env-file", type=Path, default=None)
     args = parser.parse_args(argv)
     try:
-        settings = load_settings(env_file=args.env_file)
+        settings = load_settings(env_file=resolve_env_file(args.env_file))
         logging.basicConfig(level=settings.log_level)
         for name in ("openai", "httpx", "httpx2", "httpcore", "httpcore2"):
             logging.getLogger(name).setLevel(logging.WARNING)

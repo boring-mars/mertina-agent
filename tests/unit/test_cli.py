@@ -131,3 +131,21 @@ def test_gateway_and_db_delegate_with_the_resolved_env_file(tmp_path, monkeypatc
 def test_missing_explicit_env_file_is_reported(tmp_path, capsys):
     assert main(["--env-file", str(tmp_path / "missing.env"), "sessions"]) == 1
     assert "Env file not found" in capsys.readouterr().err
+
+
+def test_gateway_entry_point_reads_the_user_env_file_by_default(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".mertina").mkdir(parents=True)
+    (home / ".mertina" / ".env").write_text("")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+    paths = []
+
+    def fail_after_recording(*, env_file):
+        paths.append(env_file)
+        message = "stop here"
+        raise ConfigurationError(message)
+
+    monkeypatch.setattr(gateway_entry, "load_settings", fail_after_recording)
+    assert gateway_entry.main([]) == 1
+    assert paths == [home / ".mertina" / ".env"]

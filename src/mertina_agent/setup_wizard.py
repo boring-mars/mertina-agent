@@ -33,7 +33,7 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
 
 from mertina_agent.agent.model_client import ModelClient
-from mertina_agent.config import Settings
+from mertina_agent.config import Settings, default_env_path
 from mertina_agent.database.runtime import open_database
 from mertina_agent.exceptions import (
     ConfigurationError,
@@ -178,11 +178,6 @@ class EndpointProbe:
         """Send one tiny request with ``settings.llm_model``."""
         async with ModelClient(settings) as client:
             await client.complete([{"role": "user", "content": "Reply with the single word OK."}])
-
-
-def default_env_path(home: Path | None = None) -> Path:
-    """The user-level settings file, ``~/.mertina/.env``."""
-    return (home if home is not None else Path.home()) / ".mertina" / ".env"
 
 
 def read_env(path: Path) -> dict[str, str]:

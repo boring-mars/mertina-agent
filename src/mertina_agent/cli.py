@@ -19,7 +19,6 @@ cross-process lock, if the gateway writes the same session concurrently.
 import argparse
 import asyncio
 import os
-import re
 import signal
 import sys
 import time
@@ -36,11 +35,11 @@ from mertina_agent.agent.events import (
     ToolCallFinished,
     ToolCallStarted,
 )
-from mertina_agent.config import Settings, load_settings
+from mertina_agent.config import Settings, default_env_path, load_settings, resolve_env_file
 from mertina_agent.database.runtime import open_database
 from mertina_agent.exceptions import ConfigurationError, MertinaError
 from mertina_agent.gateway.session import AgentFactory, SessionAgent, build_agent_factory
-from mertina_agent.setup_wizard import Terminal, default_env_path, run_setup
+from mertina_agent.setup_wizard import Terminal, run_setup
 from mertina_agent.state.models import SessionRecord, TurnStatus
 from mertina_agent.state.schema import Schema
 from mertina_agent.state.serialization import build_commit, turn_status
@@ -49,7 +48,6 @@ from mertina_agent.state.session_db import SessionDB
 TITLE_CHARS = 60
 """Length of the title taken from a new session's first message."""
 
-_MERTINA_SETTING = re.compile(r"^\s*(?:export\s+)?MERTINA_[A-Z0-9_]*\s*=", re.MULTILINE)
 
 HELP = """Commands:
   /new          start a new conversation
@@ -59,42 +57,6 @@ HELP = """Commands:
   /exit         leave (Ctrl+D also works)
 Ctrl+C stops the current reply; press it again to abandon the turn without saving it.
 """
-
-
-def _sets_mertina(path: Path) -> bool:
-    try:
-        return bool(_MERTINA_SETTING.search(path.read_text(encoding="utf-8", errors="replace")))
-    except OSError:
-        return False
-
-
-def resolve_env_file(explicit: Path | None, *, home: Path | None = None) -> Path | None:
-    """Pick the env file: an explicit one must exist; otherwise the first one found.
-
-    A project ``./.env`` counts only when it sets a ``MERTINA_`` variable, so
-    another tool's ``.env`` in the working directory does not hide the user's
-    ``~/.mertina/.env``.
-
-    Args:
-        explicit: The ``--env-file`` argument, if any.
-        home: Home directory override for tests.
-
-    Returns:
-        The file to read, or ``None`` to use the process environment only.
-
-    Raises:
-        ConfigurationError: If an explicit env file does not exist.
-    """
-    if explicit is not None:
-        if not explicit.is_file():
-            message = f"Env file not found: {explicit}"
-            raise ConfigurationError(message)
-        return explicit
-    project = Path(".env")
-    if project.is_file() and _sets_mertina(project):
-        return project
-    user = default_env_path(home)
-    return user if user.is_file() else None
 
 
 def setup_target(explicit: Path | None, *, home: Path | None = None) -> Path:
