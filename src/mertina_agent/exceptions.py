@@ -15,6 +15,60 @@ class ConfigurationError(MertinaError):
     """Raised when configuration is missing, malformed or out of range."""
 
 
+type DatabaseErrorKind = Literal[
+    "closed", "connection", "timeout", "constraint", "query", "unknown"
+]
+
+
+class DatabaseError(MertinaError):
+    """Safe database failure; the private cause may contain SQL or credentials.
+
+    An ``unknown`` failure during commit does not prove rollback. Callers must
+    reconcile their durable operation ID before announcing success or retrying.
+    """
+
+    def __init__(self, kind: DatabaseErrorKind) -> None:
+        """Expose only a controlled failure category."""
+        super().__init__(f"Database operation failed ({kind})")
+        self.kind = kind
+
+
+class StorageError(MertinaError):
+    """Stored data or schema cannot safely satisfy the requested operation."""
+
+
+class SessionNotFoundError(StorageError):
+    """The requested session no longer exists."""
+
+
+class SessionConflictError(StorageError):
+    """A revision, idempotency key or live session lease conflicts."""
+
+
+class RunNotFoundError(MertinaError):
+    """The process-local run does not exist or has expired."""
+
+
+class RunCapacityError(MertinaError):
+    """The bounded run registry cannot admit another active run."""
+
+
+class GatewayClosingError(MertinaError):
+    """The Gateway has stopped admitting work during shutdown."""
+
+
+class EventCursorError(MertinaError):
+    """The event cursor requires resynchronization from a run snapshot."""
+
+
+class EventSubscriptionError(MertinaError):
+    """The bounded event transport cannot admit another subscription."""
+
+
+class EventPayloadError(MertinaError):
+    """An event is invalid, too large or published after transport completion."""
+
+
 class AgentBusyError(MertinaError):
     """Raised when an agent is asked to run a turn while it is already running one."""
 
