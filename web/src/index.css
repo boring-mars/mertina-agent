@@ -1,0 +1,188 @@
+/*
+ * Design tokens from the RFC #9 prototype: one warm palette for light and dark.
+ *
+ * Raw values live in plain CSS variables so the theme can switch at runtime, both from
+ * the system setting and from an explicit `data-theme` on <html>. `@theme inline` then
+ * exposes them as Tailwind colours: the prototype's surface and status names, plus the
+ * names shadcn/ui components expect.
+ */
+
+@import "tailwindcss";
+
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+}
+
+:root {
+  color-scheme: light;
+  --canvas: #faf9f6;
+  --sidebar: #f3f1ec;
+  --surface: #ffffff;
+  --subtle: #f2efe9;
+  --hover: #eae6dd;
+  --border: #e5e0d8;
+  --border-strong: #d5cec3;
+  --text: #1f1d1a;
+  --muted: #66615a;
+  --faint: #8c857b;
+  --accent: #c96442;
+  --accent-hover: #b55434;
+  --accent-soft: rgb(201 100 66 / 0.11);
+  --accent-fg: #ffffff;
+  --bubble: #efece5;
+  --code: #f4f1ea;
+  --code-head: #ebe7de;
+  --ok: #2d7a57;
+  --ok-soft: rgb(45 122 87 / 0.12);
+  --warn: #b4690e;
+  --warn-soft: rgb(180 105 14 / 0.12);
+  --err: #c43d3d;
+  --err-soft: rgb(196 61 61 / 0.11);
+  --shadow: 0 2px 12px rgb(31 29 26 / 0.07);
+  --shadow-lg: 0 12px 40px rgb(31 29 26 / 0.16);
+  --scrim: rgb(31 29 26 / 0.28);
+}
+
+/* The dark palette, applied by the system setting unless the user picked light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --canvas: #1c1b18;
+    --sidebar: #161513;
+    --surface: #24221f;
+    --subtle: #2a2824;
+    --hover: #312e29;
+    --border: #33302b;
+    --border-strong: #46413a;
+    --text: #ece9e2;
+    --muted: #a49e94;
+    --faint: #7b756d;
+    --accent: #d97757;
+    --accent-hover: #e38668;
+    --accent-soft: rgb(217 119 87 / 0.16);
+    --accent-fg: #181412;
+    --bubble: #2a2824;
+    --code: #171614;
+    --code-head: #22201d;
+    --ok: #4ca87b;
+    --ok-soft: rgb(76 168 123 / 0.16);
+    --warn: #e09f3e;
+    --warn-soft: rgb(224 159 62 / 0.16);
+    --err: #e06c6c;
+    --err-soft: rgb(224 108 108 / 0.15);
+    --shadow: 0 4px 20px rgb(0 0 0 / 0.35);
+    --shadow-lg: 0 16px 48px rgb(0 0 0 / 0.55);
+    --scrim: rgb(0 0 0 / 0.5);
+  }
+}
+
+/* The same dark palette, chosen explicitly. Keep in step with the block above. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #1c1b18;
+  --sidebar: #161513;
+  --surface: #24221f;
+  --subtle: #2a2824;
+  --hover: #312e29;
+  --border: #33302b;
+  --border-strong: #46413a;
+  --text: #ece9e2;
+  --muted: #a49e94;
+  --faint: #7b756d;
+  --accent: #d97757;
+  --accent-hover: #e38668;
+  --accent-soft: rgb(217 119 87 / 0.16);
+  --accent-fg: #181412;
+  --bubble: #2a2824;
+  --code: #171614;
+  --code-head: #22201d;
+  --ok: #4ca87b;
+  --ok-soft: rgb(76 168 123 / 0.16);
+  --warn: #e09f3e;
+  --warn-soft: rgb(224 159 62 / 0.16);
+  --err: #e06c6c;
+  --err-soft: rgb(224 108 108 / 0.15);
+  --shadow: 0 4px 20px rgb(0 0 0 / 0.35);
+  --shadow-lg: 0 16px 48px rgb(0 0 0 / 0.55);
+  --scrim: rgb(0 0 0 / 0.5);
+}
+
+@theme inline {
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-canvas: var(--canvas);
+  --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
+  --color-subtle: var(--subtle);
+  --color-hover: var(--hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-faint: var(--faint);
+  --color-primary-hover: var(--accent-hover);
+  --color-primary-soft: var(--accent-soft);
+  --color-bubble: var(--bubble);
+  --color-code: var(--code);
+  --color-code-head: var(--code-head);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-err: var(--err);
+  --color-err-soft: var(--err-soft);
+  --color-scrim: var(--scrim);
+
+  /*
+   * Names used by shadcn/ui components. Note shadcn's meanings: the brand colour is
+   * `primary`, `accent` is a hover background, and `muted` is a quiet background whose
+   * text colour is `muted-foreground`.
+   */
+  --color-background: var(--canvas);
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-fg);
+  --color-secondary: var(--subtle);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--subtle);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--hover);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--err);
+  --color-input: var(--border-strong);
+  --color-ring: var(--accent);
+
+  --shadow-card: var(--shadow);
+  --shadow-overlay: var(--shadow-lg);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-text antialiased;
+  }
+}
