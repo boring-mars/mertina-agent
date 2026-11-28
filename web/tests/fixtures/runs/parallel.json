@@ -1,0 +1,218 @@
+{
+  "description": "Two tool calls in one model message",
+  "recorded_with": "dev/e2e stub model and serve_gateway.py",
+  "message": "compare [parallel]",
+  "start": {
+    "run_id": "00000000000000000000000000000001",
+    "session_id": "00000000000000000000000000000002",
+    "status": "pending",
+    "text": "",
+    "text_truncated": false,
+    "error": null,
+    "durable": false,
+    "terminal": false,
+    "stop_requested": false,
+    "reconciliation_required": false,
+    "revision": null,
+    "accepted_at_us": 1795876625490403,
+    "finished_at_us": null,
+    "tool_calls": [],
+    "last_event_id": 1
+  },
+  "events": [
+    {
+      "at": 3,
+      "envelope": {
+        "id": 1,
+        "run_id": "00000000000000000000000000000001",
+        "type": "run.accepted",
+        "data": {
+          "status": "pending"
+        }
+      }
+    },
+    {
+      "at": 5,
+      "envelope": {
+        "id": 2,
+        "run_id": "00000000000000000000000000000001",
+        "type": "run.started",
+        "data": {
+          "status": "running"
+        }
+      }
+    },
+    {
+      "at": 7,
+      "envelope": {
+        "id": 3,
+        "run_id": "00000000000000000000000000000001",
+        "type": "tool.generating",
+        "data": {
+          "name": "lookup"
+        }
+      }
+    },
+    {
+      "at": 7,
+      "envelope": {
+        "id": 4,
+        "run_id": "00000000000000000000000000000001",
+        "type": "tool.generating",
+        "data": {
+          "name": "lookup"
+        }
+      }
+    },
+    {
+      "at": 8,
+      "envelope": {
+        "id": 5,
+        "run_id": "00000000000000000000000000000001",
+        "type": "tool.started",
+        "data": {
+          "call_id": "call_1_a",
+          "name": "lookup",
+          "arguments": {
+            "query": "compare (first)"
+          },
+          "arguments_truncated": false
+        }
+      }
+    },
+    {
+      "at": 8,
+      "envelope": {
+        "id": 6,
+        "run_id": "00000000000000000000000000000001",
+        "type": "tool.finished",
+        "data": {
+          "call_id": "call_1_a",
+          "name": "lookup",
+          "duration_s": 0.000132707878947258,
+          "is_error": false
+        }
+      }
+    },
+    {
+      "at": 8,
+      "envelope": {
+        "id": 7,
+        "run_id": "00000000000000000000000000000001",
+        "type": "tool.started",
+        "data": {
+          "call_id": "call_1_b",
+          "name": "lookup",
+          "arguments": {
+            "query": "compare (second)"
+          },
+          "arguments_truncated": false
+        }
+      }
+    },
+    {
+      "at": 8,
+      "envelope": {
+        "id": 8,
+        "run_id": "00000000000000000000000000000001",
+        "type": "tool.finished",
+        "data": {
+          "call_id": "call_1_b",
+          "name": "lookup",
+          "duration_s": 0.0001489170826971531,
+          "is_error": false
+        }
+      }
+    },
+    {
+      "at": 10,
+      "envelope": {
+        "id": 9,
+        "run_id": "00000000000000000000000000000001",
+        "type": "text.delta",
+        "data": {
+          "text": "Lookup finished: {\"query\": \"compare (second)\", \"answer\": \"16 cha"
+        }
+      }
+    },
+    {
+      "at": 10,
+      "envelope": {
+        "id": 10,
+        "run_id": "00000000000000000000000000000001",
+        "type": "text.delta",
+        "data": {
+          "text": "racters, deterministic result\"}"
+        }
+      }
+    },
+    {
+      "at": 11,
+      "envelope": {
+        "id": 11,
+        "run_id": "00000000000000000000000000000001",
+        "type": "run.committing",
+        "data": {
+          "status": "committing"
+        }
+      }
+    },
+    {
+      "at": 13,
+      "envelope": {
+        "id": 12,
+        "run_id": "00000000000000000000000000000001",
+        "type": "run.completed",
+        "data": {
+          "status": "completed",
+          "durable": true,
+          "revision": 1,
+          "error": null,
+          "reconciliation_required": false,
+          "text_truncated": false,
+          "finished_at_us": 1795876625502309
+        }
+      }
+    }
+  ],
+  "final": {
+    "run_id": "00000000000000000000000000000001",
+    "session_id": "00000000000000000000000000000002",
+    "status": "completed",
+    "text": "Lookup finished: {\"query\": \"compare (second)\", \"answer\": \"16 characters, deterministic result\"}",
+    "text_truncated": false,
+    "error": null,
+    "durable": true,
+    "terminal": true,
+    "stop_requested": false,
+    "reconciliation_required": false,
+    "revision": 1,
+    "accepted_at_us": 1795876625490403,
+    "finished_at_us": 1795876625502309,
+    "tool_calls": [
+      {
+        "call_id": "call_1_a",
+        "name": "lookup",
+        "arguments": {
+          "query": "compare (first)"
+        },
+        "arguments_truncated": false,
+        "status": "ok",
+        "duration_s": 0.000132707878947258,
+        "is_error": false
+      },
+      {
+        "call_id": "call_1_b",
+        "name": "lookup",
+        "arguments": {
+          "query": "compare (second)"
+        },
+        "arguments_truncated": false,
+        "status": "ok",
+        "duration_s": 0.0001489170826971531,
+        "is_error": false
+      }
+    ],
+    "last_event_id": 12
+  }
+}

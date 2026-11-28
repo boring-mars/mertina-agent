@@ -68,3 +68,6 @@ desktop.ini
 
 # End-to-end raw results (reports go to docs/testing/v0.2-e2e/)
 dev/e2e/results/
+
+# Web UI (web/dist is covered by dist/ above)
+node_modules/

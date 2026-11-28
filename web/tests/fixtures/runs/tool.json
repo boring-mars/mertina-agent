@@ -1,0 +1,166 @@
+{
+  "description": "One tool call, then an answer",
+  "recorded_with": "dev/e2e stub model and serve_gateway.py",
+  "message": "look it up [tool]",
+  "start": {
+    "run_id": "00000000000000000000000000000001",
+    "session_id": "00000000000000000000000000000002",
+    "status": "pending",
+    "text": "",
+    "text_truncated": false,
+    "error": null,
+    "durable": false,
+    "terminal": false,
+    "stop_requested": false,
+    "reconciliation_required": false,
+    "revision": null,
+    "accepted_at_us": 1795876625398712,
+    "finished_at_us": null,
+    "tool_calls": [],
+    "last_event_id": 1
+  },
+  "events": [
+    {
+      "at": 4,
+      "envelope": {
+        "id": 1,
+        "run_id": "00000000000000000000000000000001",
+        "type": "run.accepted",
+        "data": {
+          "status": "pending"
+        }
+      }
+    },
+    {
+      "at": 6,
+      "envelope": {
+        "id": 2,
+        "run_id": "00000000000000000000000000000001",
+        "type": "run.started",
+        "data": {
+          "status": "running"
+        }
+      }
+    },
+    {
+      "at": 9,
+      "envelope": {
+        "id": 3,
+        "run_id": "00000000000000000000000000000001",
+        "type": "tool.generating",
+        "data": {
+          "name": "lookup"
+        }
+      }
+    },
+    {
+      "at": 9,
+      "envelope": {
+        "id": 4,
+        "run_id": "00000000000000000000000000000001",
+        "type": "tool.started",
+        "data": {
+          "call_id": "call_1",
+          "name": "lookup",
+          "arguments": {
+            "query": "look it up"
+          },
+          "arguments_truncated": false
+        }
+      }
+    },
+    {
+      "at": 10,
+      "envelope": {
+        "id": 5,
+        "run_id": "00000000000000000000000000000001",
+        "type": "tool.finished",
+        "data": {
+          "call_id": "call_1",
+          "name": "lookup",
+          "duration_s": 0.00016391696408391,
+          "is_error": false
+        }
+      }
+    },
+    {
+      "at": 12,
+      "envelope": {
+        "id": 6,
+        "run_id": "00000000000000000000000000000001",
+        "type": "text.delta",
+        "data": {
+          "text": "Lookup finished: {\"query\": \"look it up\", \"answer\": \"10 character"
+        }
+      }
+    },
+    {
+      "at": 12,
+      "envelope": {
+        "id": 7,
+        "run_id": "00000000000000000000000000000001",
+        "type": "text.delta",
+        "data": {
+          "text": "s, deterministic result\"}"
+        }
+      }
+    },
+    {
+      "at": 12,
+      "envelope": {
+        "id": 8,
+        "run_id": "00000000000000000000000000000001",
+        "type": "run.committing",
+        "data": {
+          "status": "committing"
+        }
+      }
+    },
+    {
+      "at": 14,
+      "envelope": {
+        "id": 9,
+        "run_id": "00000000000000000000000000000001",
+        "type": "run.completed",
+        "data": {
+          "status": "completed",
+          "durable": true,
+          "revision": 1,
+          "error": null,
+          "reconciliation_required": false,
+          "text_truncated": false,
+          "finished_at_us": 1795876625411488
+        }
+      }
+    }
+  ],
+  "final": {
+    "run_id": "00000000000000000000000000000001",
+    "session_id": "00000000000000000000000000000002",
+    "status": "completed",
+    "text": "Lookup finished: {\"query\": \"look it up\", \"answer\": \"10 characters, deterministic result\"}",
+    "text_truncated": false,
+    "error": null,
+    "durable": true,
+    "terminal": true,
+    "stop_requested": false,
+    "reconciliation_required": false,
+    "revision": 1,
+    "accepted_at_us": 1795876625398712,
+    "finished_at_us": 1795876625411488,
+    "tool_calls": [
+      {
+        "call_id": "call_1",
+        "name": "lookup",
+        "arguments": {
+          "query": "look it up"
+        },
+        "arguments_truncated": false,
+        "status": "ok",
+        "duration_s": 0.00016391696408391,
+        "is_error": false
+      }
+    ],
+    "last_event_id": 9
+  }
+}
