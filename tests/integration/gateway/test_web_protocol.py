@@ -305,6 +305,65 @@ def test_commit_receipt_lookup(tmp_path):
     asyncio.run(scenario())
 
 
+def test_commit_lookup_is_a_conflict_until_the_run_settles(tmp_path):
+    gate = asyncio.Event()
+    steps = [Step(NormalizedResponse("Saved.", (), "stop"), gate=gate)]
+
+    async def scenario():
+        async with serve(tmp_path, steps) as (client, registry):
+            session = await create_session(client)
+            other = await create_session(client, title="other")
+            run = await start_run(client, session["id"])
+            await steps[0].streamed.wait()
+            response = await client.get(f"/api/sessions/{session['id']}/commits/{run['run_id']}")
+            assert response.status == 409
+            assert (await response.json())["error"]["code"] == "conflict"
+            # The run belongs to another session, which can never receive its commit.
+            response = await client.get(f"/api/sessions/{other['id']}/commits/{run['run_id']}")
+            assert response.status == 200
+            assert (await response.json())["committed"] is False
+            gate.set()
+            stream = await client.get(f"/v1/runs/{run['run_id']}/events")
+            await events_until(stream, lambda e: e["type"] in TERMINALS)
+            stream.close()
+            while registry.run_in_flight(session["id"], run["run_id"]):
+                await asyncio.sleep(0.01)
+            response = await client.get(f"/api/sessions/{session['id']}/commits/{run['run_id']}")
+            assert response.status == 200
+            assert (await response.json())["committed"] is True
+
+    asyncio.run(scenario())
+
+
+def test_commit_lookup_does_not_settle_a_run_that_ends_during_the_read(tmp_path):
+    gate = asyncio.Event()
+    steps = [Step(NormalizedResponse("Saved.", (), "stop"), gate=gate)]
+
+    async def scenario():
+        async with serve(tmp_path, steps) as (client, registry):
+            session = await create_session(client)
+            run = await start_run(client, session["id"])
+            await steps[0].streamed.wait()
+            read = registry.store.get_commit_receipt
+
+            async def stale_read(session_id, operation_id):
+                receipt = await read(session_id, operation_id)
+                gate.set()
+                while registry.run_in_flight(session_id, operation_id):
+                    await asyncio.sleep(0.01)
+                return receipt
+
+            registry.store.get_commit_receipt = stale_read
+            response = await client.get(f"/api/sessions/{session['id']}/commits/{run['run_id']}")
+            assert response.status == 409
+            registry.store.get_commit_receipt = read
+            response = await client.get(f"/api/sessions/{session['id']}/commits/{run['run_id']}")
+            assert response.status == 200
+            assert (await response.json())["committed"] is True
+
+    asyncio.run(scenario())
+
+
 def test_commit_lookup_validates_identifiers_before_reading_storage(tmp_path):
     async def scenario():
         async with serve(tmp_path, []) as (client, registry):

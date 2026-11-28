@@ -257,15 +257,22 @@ class SessionAPI:
         return web.Response(status=204)
 
     async def commit(self, request: web.Request) -> web.Response:
-        """Report whether a run's turn was durably committed, from its receipt alone.
+        """Report whether a run's turn was durably committed, from its receipt.
 
-        The process-local run record is not consulted, so the answer survives a
-        Gateway restart. A missing session is 404; a missing receipt is 200 with
-        ``committed: false``, which tells the client the turn can be resent.
+        A receipt is authoritative on its own, so the answer survives a Gateway
+        restart. Without one, a run this process may still commit is 409
+        ``conflict`` (not settled yet), a missing session is 404, and otherwise
+        200 ``committed: false`` tells the client the turn can be resent.
         """
         session_id = path_identifier(request, "session_id")
         operation_id = path_identifier(request, "operation_id")
+        # Sample before the read: a run that commits and ends during the read
+        # must not be reported as settled without its receipt.
+        in_flight = self.registry.run_in_flight(session_id, operation_id)
         receipt = await self.registry.store.get_commit_receipt(session_id, operation_id)
+        if receipt is None and in_flight:
+            message = "The run may still commit; look up the receipt again later"
+            raise SessionConflictError(message)
         if receipt is None:
             # Receipts are deleted with their session, so only a miss needs
             # this read to tell "not committed" from "session gone".

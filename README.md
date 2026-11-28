@@ -361,7 +361,7 @@ The API:
 | `PATCH /api/sessions/{id}` | Rename. Body: `{"title": "…", "expected_version": N}`, where `N` is the session's current `metadata_version` |
 | `DELETE /api/sessions/{id}` | Delete a session and its messages |
 | `GET /api/sessions/{id}/messages` | Read messages in order. Query: `limit`, `after` (last `seq` seen) and `through` (the `through` of the first page, so later pages stay consistent) |
-| `GET /api/sessions/{id}/commits/{run_id}` | Whether a run's turn was saved, read from the database, so it works after a restart: `{"committed": true, "revision", "first_seq", "last_seq", "status"}`, or `{"committed": false}` if it was not saved. `404` if the session does not exist |
+| `GET /api/sessions/{id}/commits/{run_id}` | Whether a run's turn was saved, read from the database, so it works after a restart: `{"committed": true, "revision", "first_seq", "last_seq", "status"}`, or `{"committed": false}` if it was not saved and never will be. `409` while the run is still executing or saving: ask again after it ends. `404` if the session does not exist |
 | `POST /v1/runs` | Start a turn. Body: `{"session_id": "…", "message": "…"}` |
 | `GET /v1/runs/{run_id}` | Read a run's status, the text produced so far, its tool calls (`tool_calls`: `call_id`, `name`, `status`, `duration_s`, `is_error`, `arguments`, `arguments_truncated`), `accepted_at_us` and `finished_at_us` |
 | `GET /v1/runs/{run_id}/events` | Stream events. Send `Last-Event-ID` to resume after a disconnect |

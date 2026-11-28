@@ -139,6 +139,15 @@ class RunRegistry:
         owner = self.leases.active_owner(session_id)
         return owner if owner in self._runs else None
 
+    def run_in_flight(self, session_id: str, run_id: str) -> bool:
+        """Tell whether this process may still commit ``run_id`` to ``session_id``.
+
+        Once the run's task has ended, no later commit can appear, so a missing
+        receipt is final. A restarted process holds no runs and answers ``False``.
+        """
+        run = self._runs.get(run_id)
+        return run is not None and run.session_id == session_id and run.task is not None
+
     def prune(self) -> None:
         """Expire only completed, released runs; active or uncertain work is retained."""
         now = self._clock()
