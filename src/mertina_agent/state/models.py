@@ -6,6 +6,8 @@ from typing import Literal
 from mertina_agent.agent.transports.types import ChatMessage
 
 type TurnStatus = Literal["completed", "stopped", "failed", "partial"]
+type SessionOrder = Literal["created_asc", "updated_desc"]
+"""Session list orders: oldest creation first, or most recent update first."""
 
 
 @dataclass(frozen=True)

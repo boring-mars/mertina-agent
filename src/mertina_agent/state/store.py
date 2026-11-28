@@ -2,7 +2,13 @@
 
 from typing import Protocol
 
-from mertina_agent.state.models import CommitReceipt, HistorySnapshot, SessionRecord, TurnCommit
+from mertina_agent.state.models import (
+    CommitReceipt,
+    HistorySnapshot,
+    SessionOrder,
+    SessionRecord,
+    TurnCommit,
+)
 
 
 class SessionStore(Protocol):
@@ -17,9 +23,13 @@ class SessionStore(Protocol):
         ...
 
     async def list_sessions(
-        self, *, limit: int = 50, after: tuple[int, str] | None = None
+        self,
+        *,
+        limit: int = 50,
+        after: tuple[int, str] | None = None,
+        order: SessionOrder = "created_asc",
     ) -> tuple[SessionRecord, ...]:
-        """Read a deterministic keyset page."""
+        """Read a deterministic keyset page; ``after`` holds the order's timestamp and ID."""
         ...
 
     async def rename_session(

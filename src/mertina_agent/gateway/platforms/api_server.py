@@ -38,6 +38,7 @@ from mertina_agent.gateway.api_models import (
     RequestModel,
     SessionPage,
     parse_unsigned,
+    receipt_response,
     session_response,
     validate_identifier,
 )
@@ -213,25 +214,20 @@ class SessionAPI:
         return web.json_response(session_response(session, active_run_id=None), status=201)
 
     async def list_sessions(self, request: web.Request) -> web.Response:
-        """Return one ascending keyset page and a continuation cursor."""
+        """Return one keyset page in the requested order and a continuation cursor."""
         page = read_query(
-            request, SessionPage, integers=frozenset({"limit", "after_created_at_us"})
+            request,
+            SessionPage,
+            integers=frozenset({"limit", "after_created_at_us", "after_updated_at_us"}),
         )
-        after = (
-            (page.after_created_at_us, page.after_id)
-            if page.after_created_at_us is not None and page.after_id is not None
-            else None
+        sessions = await self.registry.store.list_sessions(
+            limit=page.limit, after=page.after, order=page.order
         )
-        sessions = await self.registry.store.list_sessions(limit=page.limit, after=after)
         items = [
             session_response(session, active_run_id=self.registry.active_run_id(session.id))
             for session in sessions
         ]
-        cursor = (
-            {"after_created_at_us": sessions[-1].created_at_us, "after_id": sessions[-1].id}
-            if len(sessions) == page.limit
-            else None
-        )
+        cursor = page.next_cursor(sessions[-1]) if len(sessions) == page.limit else None
         return web.json_response({"items": items, "next_cursor": cursor})
 
     async def get(self, request: web.Request) -> web.Response:
@@ -257,6 +253,22 @@ class SessionAPI:
         """Delete through the same session lease used by run admission."""
         await self.registry.delete_session(path_identifier(request, "session_id"))
         return web.Response(status=204)
+
+    async def commit(self, request: web.Request) -> web.Response:
+        """Report whether a run's turn was durably committed, from its receipt alone.
+
+        The process-local run record is not consulted, so the answer survives a
+        Gateway restart. A missing session is 404; a missing receipt is 200 with
+        ``committed: false``, which tells the client the turn can be resent.
+        """
+        session_id = path_identifier(request, "session_id")
+        operation_id = path_identifier(request, "operation_id")
+        receipt = await self.registry.store.get_commit_receipt(session_id, operation_id)
+        if receipt is None:
+            # Receipts are deleted with their session, so only a miss needs
+            # this read to tell "not committed" from "session gone".
+            await self.registry.store.get_session(session_id)
+        return web.json_response(receipt_response(operation_id, receipt))
 
     async def messages(self, request: web.Request) -> web.Response:
         """Page exact messages within a reusable committed high water mark."""
@@ -307,6 +319,7 @@ def create_app(
             web.patch("/api/sessions/{session_id}", sessions.rename),
             web.delete("/api/sessions/{session_id}", sessions.delete),
             web.get("/api/sessions/{session_id}/messages", sessions.messages),
+            web.get("/api/sessions/{session_id}/commits/{operation_id}", sessions.commit),
             web.post("/v1/runs", runs.create),
             web.get("/v1/runs/{run_id}", runs.get),
             web.get("/v1/runs/{run_id}/events", runs.events, allow_head=False),

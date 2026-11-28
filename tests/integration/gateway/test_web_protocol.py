@@ -258,3 +258,127 @@ def test_snapshot_rebuilds_tool_cards_after_the_event_buffer_overflows(tmp_path)
             assert rest[-1][1]["type"] == "run.completed"
 
     asyncio.run(scenario())
+
+
+def test_commit_receipt_lookup(tmp_path):
+    steps = [Step(NormalizedResponse("Saved.", (), "stop"))]
+
+    async def scenario():
+        async with serve(tmp_path, steps) as (client, registry):
+            session = await create_session(client)
+            run = await start_run(client, session["id"])
+            stream = await client.get(f"/v1/runs/{run['run_id']}/events")
+            await events_until(stream, lambda e: e["type"] in TERMINALS)
+            stream.close()
+            base = f"/api/sessions/{session['id']}/commits/"
+            response = await client.get(base + run["run_id"])
+            assert response.status == 200
+            assert await response.json() == {
+                "operation_id": run["run_id"],
+                "committed": True,
+                "revision": 1,
+                "first_seq": 1,
+                "last_seq": 2,
+                "status": "completed",
+            }
+            response = await client.get(base + "b" * 32)
+            assert response.status == 200
+            assert await response.json() == {"operation_id": "b" * 32, "committed": False}
+            response = await client.get("/api/sessions/" + "c" * 32 + "/commits/" + run["run_id"])
+            assert response.status == 404
+            assert (await response.json())["error"]["code"] == "not_found"
+            for bad in (base + "not-an-id", "/api/sessions/BAD/commits/" + "b" * 32):
+                response = await client.get(bad)
+                assert response.status == 400
+                assert (await response.json())["error"]["code"] == "invalid_request"
+            response = await client.get(
+                base + run["run_id"], headers={"Origin": "https://attacker.example"}
+            )
+            assert response.status == 403
+            response = await client.post(base + run["run_id"])
+            assert response.status == 405
+            await registry.store.database.aclose()
+            response = await client.get(base + run["run_id"])
+            assert response.status == 503
+            assert (await response.json())["error"]["code"] == "storage_unavailable"
+
+    asyncio.run(scenario())
+
+
+def test_commit_lookup_validates_identifiers_before_reading_storage(tmp_path):
+    async def scenario():
+        async with serve(tmp_path, []) as (client, registry):
+            calls = []
+
+            async def recording(*args):
+                calls.append(args)
+
+            registry.store.get_commit_receipt = recording
+            registry.store.get_session = recording
+            response = await client.get("/api/sessions/" + "a" * 32 + "/commits/" + "A" * 32)
+            assert response.status == 400
+            assert calls == []
+
+    asyncio.run(scenario())
+
+
+def test_sessions_by_most_recent_update(tmp_path):
+    steps = [Step(NormalizedResponse("Saved.", (), "stop"))]
+
+    async def scenario():
+        async with serve(tmp_path, steps) as (client, _registry):
+            created = [await create_session(client, f"s{index}") for index in range(5)]
+            ids = [session["id"] for session in created]
+            response = await client.get("/api/sessions", params={"limit": "2"})
+            default = await response.json()
+            assert [item["id"] for item in default["items"]] == ids[:2]
+            assert set(default["next_cursor"]) == {"after_created_at_us", "after_id"}
+
+            query = {"order": "updated_desc", "limit": "2"}
+            response = await client.get("/api/sessions", params=query)
+            first = await response.json()
+            assert [item["id"] for item in first["items"]] == [ids[4], ids[3]]
+            assert first["next_cursor"] == {
+                "after_updated_at_us": first["items"][-1]["updated_at_us"],
+                "after_id": ids[3],
+            }
+            # A turn commits to a session already shown on page one.
+            run = await start_run(client, ids[4])
+            stream = await client.get(f"/v1/runs/{run['run_id']}/events")
+            await events_until(stream, lambda e: e["type"] in TERMINALS)
+            stream.close()
+            response = await client.get("/api/sessions", params={**query, **first["next_cursor"]})
+            second = await response.json()
+            assert [item["id"] for item in second["items"]] == [ids[2], ids[1]]
+            response = await client.get("/api/sessions", params={**query, **second["next_cursor"]})
+            third = await response.json()
+            assert [item["id"] for item in third["items"]] == [ids[0]]
+            assert third["next_cursor"] is None
+            response = await client.get("/api/sessions", params=query)
+            refreshed = await response.json()
+            assert [item["id"] for item in refreshed["items"]] == [ids[4], ids[3]]
+            assert refreshed["items"][0]["updated_at_us"] > first["items"][0]["updated_at_us"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "order=updated_desc&after_created_at_us=1&after_id=" + "a" * 32,
+        "after_updated_at_us=1&after_id=" + "a" * 32,
+        "order=updated_desc&after_updated_at_us=1",
+        "order=updated_desc&after_id=" + "a" * 32,
+        "order=newest",
+        "order=updated_desc&order=updated_desc",
+        "order=updated_desc&after_updated_at_us=-1&after_id=" + "a" * 32,
+    ],
+)
+def test_session_order_and_cursor_mismatch_is_rejected(tmp_path, query):
+    async def scenario():
+        async with serve(tmp_path, []) as (client, _registry):
+            response = await client.get("/api/sessions?" + query)
+            assert response.status == 400
+            assert (await response.json())["error"]["code"] == "invalid_request"
+
+    asyncio.run(scenario())

@@ -391,6 +391,46 @@ def test_database_constraints_reject_orphans_and_duplicate_message_numbers(stora
     asyncio.run(scenario())
 
 
+def test_sessions_page_by_most_recent_update_with_id_tiebreak(storage_factory):
+    async def scenario():
+        async with storage_factory() as store:
+            sessions = [await store.create_session(f"Title {index}") for index in range(5)]
+            ids = [session.id for session in sessions]
+            table = store.schema.sessions
+            async with store.database.transaction() as connection:
+                # Two sessions share the newest timestamp; ID descending breaks the tie.
+                for identifier, updated in zip(ids, (300, 100, 300, 200, 50), strict=True):
+                    await connection.execute(
+                        update(table).where(table.c.id == identifier).values(updated_at_us=updated)
+                    )
+            expected = [
+                *sorted((ids[0], ids[2]), reverse=True),
+                ids[3],
+                ids[1],
+                ids[4],
+            ]
+            first = await store.list_sessions(limit=2, order="updated_desc")
+            assert [session.id for session in first] == expected[:2]
+            # A session on page one is updated before page two is read.
+            command = await _command(store, first[0].id)
+            await store.commit_turn(command)
+            cursor = (first[-1].updated_at_us, first[-1].id)
+            second = await store.list_sessions(limit=2, after=cursor, order="updated_desc")
+            assert [session.id for session in second] == expected[2:4]
+            cursor = (second[-1].updated_at_us, second[-1].id)
+            third = await store.list_sessions(limit=2, after=cursor, order="updated_desc")
+            assert [session.id for session in third] == expected[4:]
+            refreshed = await store.list_sessions(limit=1, order="updated_desc")
+            assert refreshed[0].id == first[0].id
+            assert refreshed[0].updated_at_us == command.timestamp_us
+            # The default order still pages by creation time.
+            default = await store.list_sessions(limit=5)
+            by_creation = sorted(sessions, key=lambda item: (item.created_at_us, item.id))
+            assert [session.id for session in default] == [item.id for item in by_creation]
+
+    asyncio.run(scenario())
+
+
 def test_stale_pooled_connection_is_replaced_without_losing_committed_history(storage_factory):
     async def scenario():
         async with storage_factory() as store:

@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import asdict
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -13,7 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from mertina_agent.state.models import SessionRecord
+from mertina_agent.state.models import CommitReceipt, SessionRecord
 
 type Identifier = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{32}$")]
 type NonNegative = Annotated[int, Field(strict=True, ge=0, le=2**63 - 1)]
@@ -64,19 +64,44 @@ class StartRun(RequestModel):
 
 
 class SessionPage(RequestModel):
-    """Stable ascending creation-time/ID pagination."""
+    """Stable keyset pagination by creation time ascending or update time descending."""
 
+    order: Literal["created_asc", "updated_desc"] = "created_asc"
     limit: PageLimit = 50
     after_created_at_us: NonNegative | None = None
+    after_updated_at_us: NonNegative | None = None
     after_id: Identifier | None = None
 
     @model_validator(mode="after")
     def validate_cursor(self) -> Self:
-        """Require both parts of the keyset cursor together."""
-        if (self.after_created_at_us is None) != (self.after_id is None):
+        """Require both parts of the order's own keyset cursor together."""
+        if self.order == "created_asc":
+            timestamp, foreign = self.after_created_at_us, self.after_updated_at_us
+        else:
+            timestamp, foreign = self.after_updated_at_us, self.after_created_at_us
+        if foreign is not None:
+            message = "Session cursor field does not match the requested order"
+            raise ValueError(message)
+        if (timestamp is None) != (self.after_id is None):
             message = "Both session cursor fields are required together"
             raise ValueError(message)
         return self
+
+    @property
+    def after(self) -> tuple[int, str] | None:
+        """Return the keyset cursor for the store, if one was supplied."""
+        timestamp = (
+            self.after_created_at_us if self.order == "created_asc" else self.after_updated_at_us
+        )
+        if timestamp is None or self.after_id is None:
+            return None
+        return timestamp, self.after_id
+
+    def next_cursor(self, last: SessionRecord) -> dict[str, object]:
+        """Build the continuation cursor using this order's field names."""
+        if self.order == "created_asc":
+            return {"after_created_at_us": last.created_at_us, "after_id": last.id}
+        return {"after_updated_at_us": last.updated_at_us, "after_id": last.id}
 
 
 class MessagePage(RequestModel):
@@ -121,6 +146,20 @@ def validate_identifier(value: str) -> str:
         message = "Invalid identifier"
         raise ValueError(message)
     return value
+
+
+def receipt_response(operation_id: str, receipt: CommitReceipt | None) -> dict[str, object]:
+    """Serialize a commit lookup; the fingerprint is internal and never exposed."""
+    if receipt is None:
+        return {"operation_id": operation_id, "committed": False}
+    return {
+        "operation_id": receipt.operation_id,
+        "committed": True,
+        "revision": receipt.revision,
+        "first_seq": receipt.first_seq,
+        "last_seq": receipt.last_seq,
+        "status": receipt.status,
+    }
 
 
 def session_response(session: SessionRecord, *, active_run_id: str | None) -> dict[str, object]:

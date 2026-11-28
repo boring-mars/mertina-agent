@@ -356,11 +356,12 @@ The API:
 | Method and path | What it does |
 |---|---|
 | `POST /api/sessions` | Create a session. Body: `{"title": "…"}` (optional, `{}` uses a default title) |
-| `GET /api/sessions` | List sessions, oldest first. Query: `limit` (1–100), and both `after_created_at_us` and `after_id` from the previous page's `next_cursor` |
+| `GET /api/sessions` | List sessions, oldest first. Query: `limit` (1–100), and both `after_created_at_us` and `after_id` from the previous page's `next_cursor`. With `order=updated_desc`, most recently updated first; the cursor is then `after_updated_at_us` and `after_id`, and `order` must be sent with every page |
 | `GET /api/sessions/{id}` | Read a session. `active_run_id` names the run in progress, if any |
 | `PATCH /api/sessions/{id}` | Rename. Body: `{"title": "…", "expected_version": N}`, where `N` is the session's current `metadata_version` |
 | `DELETE /api/sessions/{id}` | Delete a session and its messages |
 | `GET /api/sessions/{id}/messages` | Read messages in order. Query: `limit`, `after` (last `seq` seen) and `through` (the `through` of the first page, so later pages stay consistent) |
+| `GET /api/sessions/{id}/commits/{run_id}` | Whether a run's turn was saved, read from the database, so it works after a restart: `{"committed": true, "revision", "first_seq", "last_seq", "status"}`, or `{"committed": false}` if it was not saved. `404` if the session does not exist |
 | `POST /v1/runs` | Start a turn. Body: `{"session_id": "…", "message": "…"}` |
 | `GET /v1/runs/{run_id}` | Read a run's status, the text produced so far, its tool calls (`tool_calls`: `call_id`, `name`, `status`, `duration_s`, `is_error`, `arguments`, `arguments_truncated`), `accepted_at_us` and `finished_at_us` |
 | `GET /v1/runs/{run_id}/events` | Stream events. Send `Last-Event-ID` to resume after a disconnect |
@@ -379,7 +380,8 @@ Behaviour to know about:
 - **Restarts keep saved turns, not running ones.** After a restart, sessions and their messages
   are still there and the next run continues from them. A turn that was still running when the
   process was killed is lost, and run IDs and their events are kept in memory only, for
-  `MERTINA_GATEWAY_RUN_TTL_S` seconds after a run ends.
+  `MERTINA_GATEWAY_RUN_TTL_S` seconds after a run ends. For a run that ended with
+  `storage_unconfirmed`, `GET /api/sessions/{id}/commits/{run_id}` tells whether it was saved.
 - **Browsers on other sites are rejected.** A request whose `Origin` header does not match the
   gateway's own address gets `403`.
 - **Errors** have the form `{"error": {"code": "…", "message": "…"}}` and never include
