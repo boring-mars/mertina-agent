@@ -320,7 +320,7 @@ data: {"id":3,"run_id":"…","type":"run.committing","data":{"status":"committin
 
 id: 4
 event: run.completed
-data: {"id":4,"run_id":"…","type":"run.completed","data":{"status":"completed","durable":true,"revision":1,"error":null,"reconciliation_required":false}}
+data: {"id":4,"run_id":"…","type":"run.completed","data":{"status":"completed","durable":true,"revision":1,"error":null,"reconciliation_required":false,"text_truncated":false,"finished_at_us":1795869195214921}}
 ```
 
 Between `run.started` and the final event, a streaming model also sends `text.delta`, tool calls
@@ -328,6 +328,22 @@ send `tool.generating`, `tool.started` and `tool.finished`, and a retried model 
 `retry.scheduled`, after which the client should discard the text it has shown for that attempt.
 The final event is `run.completed`, `run.partial`, `run.stopped` or `run.failed`. It is sent only
 after the turn has been saved, and `durable: true` confirms that.
+
+`tool.started` carries the parsed `arguments` of the call, for example
+`{"call_id":"call_1","name":"web_search","arguments":{"query":"…"},"arguments_truncated":false}`.
+When their compact JSON is longer than 4096 characters, `arguments` is `null` and
+`arguments_truncated` is `true`; the complete call is in the saved messages. The final event also
+says whether the answer was cut off at the gateway's output limit (`text_truncated`) and when the
+run ended (`finished_at_us`, microseconds since the Unix epoch, like session timestamps). Its
+`error` is `null` or one of:
+
+| `error` | Meaning |
+|---|---|
+| `model_failed` | The model call failed after its retries; the turn was saved with an explanation |
+| `run_failed` | The run failed before saving; nothing was written |
+| `history_conflict` | The session changed or was deleted elsewhere; nothing was written |
+| `storage_unconfirmed` | Saving started but could not be confirmed; `reconciliation_required` is `true` |
+| `shutdown_cancelled` | The gateway was shutting down; `reconciliation_required` is `true` if saving had started |
 
 Read the saved conversation:
 
@@ -340,13 +356,14 @@ The API:
 | Method and path | What it does |
 |---|---|
 | `POST /api/sessions` | Create a session. Body: `{"title": "…"}` (optional, `{}` uses a default title) |
-| `GET /api/sessions` | List sessions, oldest first. Query: `limit` (1–100), and both `after_created_at_us` and `after_id` from the previous page's `next_cursor` |
+| `GET /api/sessions` | List sessions, oldest first. Query: `limit` (1–100), and both `after_created_at_us` and `after_id` from the previous page's `next_cursor`. With `order=updated_desc`, most recently updated first; the cursor is then `after_updated_at_us` and `after_id`, and `order` must be sent with every page |
 | `GET /api/sessions/{id}` | Read a session. `active_run_id` names the run in progress, if any |
 | `PATCH /api/sessions/{id}` | Rename. Body: `{"title": "…", "expected_version": N}`, where `N` is the session's current `metadata_version` |
 | `DELETE /api/sessions/{id}` | Delete a session and its messages |
 | `GET /api/sessions/{id}/messages` | Read messages in order. Query: `limit`, `after` (last `seq` seen) and `through` (the `through` of the first page, so later pages stay consistent) |
+| `GET /api/sessions/{id}/commits/{run_id}` | Whether a run's turn was saved, read from the database, so it works after a restart: `{"committed": true, "revision", "first_seq", "last_seq", "status"}`, or `{"committed": false}` if it was not saved and never will be. `409` while the run is still executing or saving: ask again after it ends. `404` if the session does not exist |
 | `POST /v1/runs` | Start a turn. Body: `{"session_id": "…", "message": "…"}` |
-| `GET /v1/runs/{run_id}` | Read a run's status and the text produced so far |
+| `GET /v1/runs/{run_id}` | Read a run's status, the text produced so far, its tool calls (`tool_calls`: `call_id`, `name`, `status`, `duration_s`, `is_error`, `arguments`, `arguments_truncated`), `accepted_at_us` and `finished_at_us` |
 | `GET /v1/runs/{run_id}/events` | Stream events. Send `Last-Event-ID` to resume after a disconnect |
 | `POST /v1/runs/{run_id}/stop` | Ask a running turn to stop. Repeating it, or stopping a finished run, is harmless |
 
@@ -358,11 +375,16 @@ Behaviour to know about:
   gateway answers `503`.
 - **Disconnecting does not stop a run.** Only the stop endpoint does. Reconnect with
   `Last-Event-ID` to receive the events you missed. If they are no longer buffered, the gateway
-  answers `409`; read `GET /v1/runs/{run_id}` and the session's messages instead.
+  answers `409`; read `GET /v1/runs/{run_id}`, which includes the run's tool calls, and resume
+  from its `last_event_id`.
 - **Restarts keep saved turns, not running ones.** After a restart, sessions and their messages
   are still there and the next run continues from them. A turn that was still running when the
   process was killed is lost, and run IDs and their events are kept in memory only, for
-  `MERTINA_GATEWAY_RUN_TTL_S` seconds after a run ends.
+  `MERTINA_GATEWAY_RUN_TTL_S` seconds after a run ends. For a run that ended with
+  `storage_unconfirmed`, `GET /api/sessions/{id}/commits/{run_id}` tells whether it was saved.
+- **The Web UI is served from the same address.** When `web/dist` exists (build it with
+  `npm --prefix web run build`), other `GET` paths outside `/api/` and `/v1/` serve its files,
+  falling back to `index.html`. `MERTINA_GATEWAY_STATIC_DIR` points to another build directory.
 - **Browsers on other sites are rejected.** A request whose `Origin` header does not match the
   gateway's own address gets `403`.
 - **Errors** have the form `{"error": {"code": "…", "message": "…"}}` and never include

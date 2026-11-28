@@ -21,6 +21,7 @@ from collections.abc import Collection, Sequence
 from typing import Literal, cast
 
 from mertina_agent.agent.events import (
+    MAX_EVENT_ARGUMENT_CHARS,
     EventCallback,
     ToolCallFinished,
     ToolCallStarted,
@@ -89,6 +90,19 @@ def _parse_tool_arguments(raw_arguments: str) -> tuple[JsonObject, str | None]:
     if isinstance(arguments, dict):
         return cast(JsonObject, arguments), None
     return {}, _INVALID_ARGUMENTS_RESULT
+
+
+def bound_event_arguments(arguments: JsonObject) -> tuple[JsonObject | None, bool]:
+    """Return ``(arguments, False)``, or ``(None, True)`` when they are too long for events.
+
+    The limit applies to the compact JSON encoding, so a client can always
+    expect either the complete object or nothing; a cut-off JSON prefix is never
+    sent.
+    """
+    encoded = json.dumps(arguments, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded) > MAX_EVENT_ARGUMENT_CHARS:
+        return None, True
+    return arguments, False
 
 
 def _detect_tool_failure(result: str) -> bool:
@@ -172,7 +186,16 @@ async def _run_tool_call(
     event_callback: EventCallback | None,
 ) -> str:
     """Run one parsed call, reporting its start and finish; tool failures become results."""
-    emit_event(event_callback, ToolCallStarted(call_id=tool_call.id, name=tool_call.name))
+    event_arguments, truncated = bound_event_arguments(arguments)
+    emit_event(
+        event_callback,
+        ToolCallStarted(
+            call_id=tool_call.id,
+            name=tool_call.name,
+            arguments=event_arguments,
+            arguments_truncated=truncated,
+        ),
+    )
     started = time.monotonic()
     result = await handle_function_call(
         tool_call.name, arguments, enabled_tools=enabled_tools, tool_registry=tool_registry

@@ -14,6 +14,7 @@ import json
 import logging
 import math
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -38,9 +39,11 @@ from mertina_agent.gateway.api_models import (
     RequestModel,
     SessionPage,
     parse_unsigned,
+    receipt_response,
     session_response,
     validate_identifier,
 )
+from mertina_agent.gateway.platforms.static_site import StaticSite
 from mertina_agent.state.serialization import decode_message
 
 if TYPE_CHECKING:
@@ -213,25 +216,20 @@ class SessionAPI:
         return web.json_response(session_response(session, active_run_id=None), status=201)
 
     async def list_sessions(self, request: web.Request) -> web.Response:
-        """Return one ascending keyset page and a continuation cursor."""
+        """Return one keyset page in the requested order and a continuation cursor."""
         page = read_query(
-            request, SessionPage, integers=frozenset({"limit", "after_created_at_us"})
+            request,
+            SessionPage,
+            integers=frozenset({"limit", "after_created_at_us", "after_updated_at_us"}),
         )
-        after = (
-            (page.after_created_at_us, page.after_id)
-            if page.after_created_at_us is not None and page.after_id is not None
-            else None
+        sessions = await self.registry.store.list_sessions(
+            limit=page.limit, after=page.after, order=page.order
         )
-        sessions = await self.registry.store.list_sessions(limit=page.limit, after=after)
         items = [
             session_response(session, active_run_id=self.registry.active_run_id(session.id))
             for session in sessions
         ]
-        cursor = (
-            {"after_created_at_us": sessions[-1].created_at_us, "after_id": sessions[-1].id}
-            if len(sessions) == page.limit
-            else None
-        )
+        cursor = page.next_cursor(sessions[-1]) if len(sessions) == page.limit else None
         return web.json_response({"items": items, "next_cursor": cursor})
 
     async def get(self, request: web.Request) -> web.Response:
@@ -257,6 +255,29 @@ class SessionAPI:
         """Delete through the same session lease used by run admission."""
         await self.registry.delete_session(path_identifier(request, "session_id"))
         return web.Response(status=204)
+
+    async def commit(self, request: web.Request) -> web.Response:
+        """Report whether a run's turn was durably committed, from its receipt.
+
+        A receipt is authoritative on its own, so the answer survives a Gateway
+        restart. Without one, a run this process may still commit is 409
+        ``conflict`` (not settled yet), a missing session is 404, and otherwise
+        200 ``committed: false`` tells the client the turn can be resent.
+        """
+        session_id = path_identifier(request, "session_id")
+        operation_id = path_identifier(request, "operation_id")
+        # Sample before the read: a run that commits and ends during the read
+        # must not be reported as settled without its receipt.
+        in_flight = self.registry.run_in_flight(session_id, operation_id)
+        receipt = await self.registry.store.get_commit_receipt(session_id, operation_id)
+        if receipt is None and in_flight:
+            message = "The run may still commit; look up the receipt again later"
+            raise SessionConflictError(message)
+        if receipt is None:
+            # Receipts are deleted with their session, so only a miss needs
+            # this read to tell "not committed" from "session gone".
+            await self.registry.store.get_session(session_id)
+        return web.json_response(receipt_response(operation_id, receipt))
 
     async def messages(self, request: web.Request) -> web.Response:
         """Page exact messages within a reusable committed high water mark."""
@@ -288,14 +309,23 @@ def create_app(
     heartbeat_s: float = 15,
     send_timeout_s: float = 10,
     body_timeout_s: float = 10,
+    static_dir: Path | None = None,
 ) -> web.Application:
-    """Create routes without owning registry, database or HTTP-server resources."""
+    """Create routes without owning registry, database or HTTP-server resources.
+
+    With ``static_dir``, unmatched non-API GET requests are served from that
+    build directory, falling back to its ``index.html``; a missing build only
+    logs how to create it.
+    """
     from mertina_agent.gateway.platforms.api_server_runs import RunsAPI
 
     if not math.isfinite(body_timeout_s) or body_timeout_s <= 0:
         message = "Request body timeout must be finite and positive"
         raise ValueError(message)
-    app = web.Application(middlewares=[_boundary], client_max_size=131072)
+    middlewares = [_boundary]
+    if static_dir is not None:
+        middlewares.append(StaticSite(static_dir).middleware)
+    app = web.Application(middlewares=middlewares, client_max_size=131072)
     app[BODY_TIMEOUT_KEY] = body_timeout_s
     sessions = SessionAPI(registry)
     runs = RunsAPI(registry, heartbeat_s=heartbeat_s, send_timeout_s=send_timeout_s)
@@ -307,6 +337,7 @@ def create_app(
             web.patch("/api/sessions/{session_id}", sessions.rename),
             web.delete("/api/sessions/{session_id}", sessions.delete),
             web.get("/api/sessions/{session_id}/messages", sessions.messages),
+            web.get("/api/sessions/{session_id}/commits/{operation_id}", sessions.commit),
             web.post("/v1/runs", runs.create),
             web.get("/v1/runs/{run_id}", runs.get),
             web.get("/v1/runs/{run_id}/events", runs.events, allow_head=False),

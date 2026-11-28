@@ -8,10 +8,11 @@ from mertina_agent.gateway.api_models import (
     SessionPage,
     StartRun,
     parse_unsigned,
+    receipt_response,
     session_response,
     validate_identifier,
 )
-from mertina_agent.state.models import SessionRecord
+from mertina_agent.state.models import CommitReceipt, SessionRecord
 
 SESSION_ID = "a" * 32
 
@@ -88,6 +89,11 @@ def test_numeric_cursors_accept_bounded_canonical_values(value):
         {"limit": True},
         {"limit": "2"},
         {"after_created_at_us": -1, "after_id": SESSION_ID},
+        {"order": "updated_desc", "after_created_at_us": 1, "after_id": SESSION_ID},
+        {"after_updated_at_us": 1, "after_id": SESSION_ID},
+        {"order": "updated_desc", "after_updated_at_us": 1},
+        {"order": "updated_desc", "after_id": SESSION_ID},
+        {"order": "newest"},
     ],
 )
 def test_session_page_rejects_partial_or_invalid_cursors(body):
@@ -114,3 +120,29 @@ def test_session_response_keeps_metadata_and_activity_separate():
         "message_count": 5,
         "active_run_id": "b" * 32,
     }
+
+
+def test_session_page_cursor_uses_the_field_names_of_its_order():
+    session = SessionRecord(SESSION_ID, "title", 1, 2, 3, 4, 5)
+    default = SessionPage.model_validate({})
+    assert default.order == "created_asc"
+    assert default.after is None
+    assert default.next_cursor(session) == {"after_created_at_us": 1, "after_id": SESSION_ID}
+    page = SessionPage.model_validate(
+        {"order": "updated_desc", "after_updated_at_us": 7, "after_id": SESSION_ID}
+    )
+    assert page.after == (7, SESSION_ID)
+    assert page.next_cursor(session) == {"after_updated_at_us": 2, "after_id": SESSION_ID}
+
+
+def test_receipt_response_never_exposes_the_fingerprint():
+    receipt = CommitReceipt(SESSION_ID, "b" * 32, "f" * 64, 3, 5, 6, "partial")
+    assert receipt_response("b" * 32, receipt) == {
+        "operation_id": "b" * 32,
+        "committed": True,
+        "revision": 3,
+        "first_seq": 5,
+        "last_seq": 6,
+        "status": "partial",
+    }
+    assert receipt_response("b" * 32, None) == {"operation_id": "b" * 32, "committed": False}

@@ -10,7 +10,12 @@ from pydantic import SecretStr
 from mertina_agent.agent.core import Agent
 from mertina_agent.agent.transports.types import NormalizedResponse, ToolCall
 from mertina_agent.config import Settings
-from mertina_agent.exceptions import ModelRequestError, RunNotFoundError, StorageError
+from mertina_agent.exceptions import (
+    DatabaseError,
+    ModelRequestError,
+    RunNotFoundError,
+    StorageError,
+)
 from mertina_agent.gateway.run import GatewayRunner
 from mertina_agent.tools.registry import ToolRegistry
 
@@ -153,6 +158,76 @@ async def _restart_scenario(tmp_path, scenario):
         assert restored.session.history_revision == 2
         assert len(restored.messages) == len(saved) + 2
     assert second.closed
+
+
+@pytest.mark.parametrize("written", [True, False])
+def test_commit_receipt_reconciles_an_unconfirmed_turn_after_restart(tmp_path, written):
+    asyncio.run(_reconciliation_scenario(tmp_path, written=written))
+
+
+async def _reconciliation_scenario(tmp_path, *, written):
+    settings = Settings(
+        database_url=SecretStr("sqlite+aiosqlite:///" + str(tmp_path / "unconfirmed.db")),
+        gateway_port=0,
+        gateway_bootstrap=True,
+        gateway_shutdown_timeout_s=0.2,
+        gateway_cancel_timeout_s=0.2,
+        llm_max_attempts=1,
+    )
+    first = Model([NormalizedResponse("Unconfirmed reply", (), "stop")])
+    async with GatewayRunner(
+        settings, agent_factory=lambda callback: OwnedAgent(settings, first, callback)
+    ) as runner:
+        store = runner.registry.store
+        commit_turn = store.commit_turn
+
+        async def lost_acknowledgement(command):
+            # Either the write lands and its acknowledgement is lost, or the
+            # connection fails first; reconciliation reads fail too.
+            if written:
+                await commit_turn(command)
+            kind = "unknown"
+            raise DatabaseError(kind)
+
+        async def unavailable_receipt(_session_id, _operation_id):
+            kind = "connection"
+            raise DatabaseError(kind)
+
+        store.commit_turn = lost_acknowledgement
+        store.get_commit_receipt = unavailable_receipt
+        async with ClientSession() as client:
+            async with client.post(runner.address + "/api/sessions", json={}) as response:
+                session_id = (await response.json())["id"]
+            run = await runner.registry.start_run(session_id, "question")
+            await asyncio.wait_for(run.task, 3)
+            async with client.get(f"{runner.address}/v1/runs/{run.id}") as response:
+                snapshot = await response.json()
+        assert snapshot["error"] == "storage_unconfirmed"
+        assert snapshot["reconciliation_required"] is True
+        assert snapshot["durable"] is False
+
+    resumed_settings = settings.model_copy(update={"gateway_bootstrap": False})
+    async with (
+        GatewayRunner(resumed_settings, agent_factory=lambda _callback: None) as runner,
+        ClientSession() as client,
+    ):
+        async with client.get(f"{runner.address}/v1/runs/{run.id}") as response:
+            assert response.status == 404
+        path = f"{runner.address}/api/sessions/{session_id}/commits/{run.id}"
+        async with client.get(path) as response:
+            assert response.status == 200
+            receipt = await response.json()
+        if written:
+            assert receipt == {
+                "operation_id": run.id,
+                "committed": True,
+                "revision": 1,
+                "first_seq": 1,
+                "last_seq": 2,
+                "status": "completed",
+            }
+        else:
+            assert receipt == {"operation_id": run.id, "committed": False}
 
 
 def test_missing_schema_fails_before_listening_and_can_be_initialized(tmp_path):

@@ -168,7 +168,10 @@ def test_one_failing_call_does_not_affect_its_batch():
         event.call_id: event.is_error for event in events if isinstance(event, ToolCallFinished)
     }
     assert finished == {"a": True, "b": False}
-    assert sum(isinstance(event, ToolCallStarted) for event in events) == 2
+    started = {
+        event.call_id: event.arguments for event in events if isinstance(event, ToolCallStarted)
+    }
+    assert started == {"a": {"query": "bad"}, "b": {"query": "good"}}
 
 
 def test_stop_before_a_parallel_batch_skips_every_call(parallel_registry, log):

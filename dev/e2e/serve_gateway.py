@@ -34,7 +34,7 @@ from mertina_agent.gateway.run import GatewayRunner
 from mertina_agent.state.models import CommitReceipt, HistorySnapshot, TurnCommit
 from mertina_agent.state.serialization import encode_message, turn_status
 from mertina_agent.state.session_db import SessionDB
-from mertina_agent.tools.registry import ToolRegistry, tool_result
+from mertina_agent.tools.registry import ToolRegistry, tool_error, tool_result
 
 type Record = dict[str, object]
 
@@ -43,7 +43,7 @@ LOOKUP_SCHEMA = {
     "description": "Look up a fact. Deterministic test tool.",
     "parameters": {
         "type": "object",
-        "properties": {"query": {"type": "string"}},
+        "properties": {"query": {"type": "string"}, "fail": {"type": "boolean"}},
         "required": ["query"],
     },
 }
@@ -75,8 +75,10 @@ def _bytes(messages: Sequence[ChatMessage]) -> int:
 
 
 def lookup(arguments: dict[str, object]) -> str:
-    """Deterministic tool: describe the query without any I/O."""
+    """Deterministic tool: describe the query without any I/O, or fail on request."""
     query = str(arguments.get("query", ""))
+    if arguments.get("fail") is True:
+        return tool_error("Lookup failed on request", query=query)
     return tool_result(query=query, answer=f"{len(query)} characters, deterministic result")
 
 

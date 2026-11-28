@@ -21,7 +21,13 @@ from mertina_agent.exceptions import (
     SessionNotFoundError,
     StorageError,
 )
-from mertina_agent.state.models import CommitReceipt, HistorySnapshot, SessionRecord, TurnCommit
+from mertina_agent.state.models import (
+    CommitReceipt,
+    HistorySnapshot,
+    SessionOrder,
+    SessionRecord,
+    TurnCommit,
+)
 from mertina_agent.state.schema import Schema
 from mertina_agent.state.serialization import MAX_TURN_BYTES, decode_message, fingerprint
 
@@ -110,24 +116,48 @@ class SessionDB:
         *,
         limit: int = 50,
         after: tuple[int, str] | None = None,
+        order: SessionOrder = "created_asc",
     ) -> tuple[SessionRecord, ...]:
-        """Read a stable ascending (creation time, ID) keyset page."""
+        """Read a stable keyset page in the requested order.
+
+        ``created_asc`` pages by ascending (creation time, ID). ``updated_desc``
+        pages by descending (update time, ID); a session updated while a client
+        pages moves above its cursor and appears on the next first-page read.
+        Neither order is indexed: a single user's session table is small.
+        """
         if type(limit) is not int or not 1 <= limit <= 100:
             message = "Session page limit must be between 1 and 100"
             raise StorageError(message)
+        if order not in ("created_asc", "updated_desc"):
+            message = "Unknown session order"
+            raise StorageError(message)
         table = self.schema.sessions
+        descending = order == "updated_desc"
+        column = table.c.updated_at_us if descending else table.c.created_at_us
         query = select(table)
         if after is not None:
             timestamp, identifier = after
             _integer(timestamp)
             _identifier(identifier)
-            query = query.where(
-                or_(
-                    table.c.created_at_us > timestamp,
-                    and_(table.c.created_at_us == timestamp, table.c.id > identifier),
+            if descending:
+                query = query.where(
+                    or_(
+                        column < timestamp,
+                        and_(column == timestamp, table.c.id < identifier),
+                    )
                 )
-            )
-        query = query.order_by(table.c.created_at_us, table.c.id).limit(limit)
+            else:
+                query = query.where(
+                    or_(
+                        column > timestamp,
+                        and_(column == timestamp, table.c.id > identifier),
+                    )
+                )
+        if descending:
+            query = query.order_by(column.desc(), table.c.id.desc())
+        else:
+            query = query.order_by(column, table.c.id)
+        query = query.limit(limit)
         async with self.database.transaction(write=False) as connection:
             return tuple(_record(row) for row in (await connection.execute(query)).mappings())
 

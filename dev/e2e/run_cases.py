@@ -378,11 +378,9 @@ def verify_transcript(case: Case, messages: list[Record], *, partial_last: bool 
             continue
         expected = expected_reply(messages[:index])
         if message.get("tool_calls"):
-            call = message["tool_calls"][0]
-            wanted = expected.tool_call or {}
-            if call["id"] != wanted.get("id") or call["function"]["arguments"] != wanted.get(
-                "arguments"
-            ):
+            stored = [(call["id"], call["function"]["arguments"]) for call in message["tool_calls"]]
+            wanted = [(call["id"], call["arguments"]) for call in expected.tool_calls]
+            if stored != wanted:
                 mismatches.append(index)
         elif partial_last and index == len(messages) - 1:
             if not expected.text.startswith(str(message.get("content") or "")):

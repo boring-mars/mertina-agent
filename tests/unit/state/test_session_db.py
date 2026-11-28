@@ -37,6 +37,13 @@ def test_invalid_session_page_limit_is_rejected(limit):
         asyncio.run(store.list_sessions(limit=limit))
 
 
+@pytest.mark.parametrize("order", ["updated_asc", "", None])
+def test_unknown_session_order_is_rejected(order):
+    store = SessionDB(UnavailableDatabase())
+    with pytest.raises(StorageError, match="order"):
+        asyncio.run(store.list_sessions(order=order))
+
+
 @pytest.mark.parametrize("version", [-1, True, 1.5, 2**31 - 1])
 def test_invalid_rename_version_is_rejected(version):
     store = SessionDB(UnavailableDatabase())

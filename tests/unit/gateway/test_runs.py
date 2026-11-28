@@ -5,11 +5,14 @@ from dataclasses import replace
 import pytest
 
 from mertina_agent.agent.events import (
+    MAX_EVENT_ARGUMENT_CHARS,
     RetryScheduled,
     RunCompleted,
     RunFailed,
     RunStopped,
     TextDelta,
+    ToolCallFinished,
+    ToolCallStarted,
 )
 from mertina_agent.agent.transports.types import Usage
 from mertina_agent.config import Settings
@@ -21,7 +24,8 @@ from mertina_agent.exceptions import (
     SessionConflictError,
     SessionNotFoundError,
 )
-from mertina_agent.gateway.runs import MAX_SNAPSHOT_CHARS, RunRegistry
+from mertina_agent.gateway.run_events import MAX_EVENT_BYTES
+from mertina_agent.gateway.runs import MAX_SNAPSHOT_CHARS, TERMINAL_ERRORS, RunRegistry
 from mertina_agent.state.models import CommitReceipt, HistorySnapshot, SessionRecord
 from mertina_agent.state.serialization import decode_message, fingerprint
 
@@ -613,6 +617,233 @@ def test_snapshot_retry_resets_text_and_output_limit_bounds_retained_display():
         )
         replay.close()
         await complete(run)
+        await registry.aclose()
+
+    run_scenario(scenario)
+
+
+class WallClock:
+    """Return strictly increasing epoch microseconds, recording each reading."""
+
+    def __init__(self, start=1_700_000_000_000_000):
+        self.readings = []
+        self._next = start
+
+    def __call__(self):
+        self.readings.append(self._next)
+        self._next += 1_000
+        return self.readings[-1]
+
+
+def started(call_id, arguments=None, *, truncated=False, name="lookup"):
+    return ToolCallStarted(call_id, name, arguments, truncated)
+
+
+@pytest.mark.parametrize("outcome", ["completed", "stopped", "failed", "partial"])
+def test_terminal_events_report_truncation_and_wall_clock_finish(outcome):
+    async def scenario():
+        store, factory = FakeStore(), FakeFactory(outcome=outcome)
+        session = store.add_session()
+        store.commit_gate = asyncio.Event()
+        clock = WallClock()
+        registry = RunRegistry(store, factory, settings(), wall_clock=clock)
+        run = await registry.start_run(session, "question")
+        accepted = run.snapshot()["accepted_at_us"]
+        assert accepted == clock.readings[0]
+        subscription = run.events.subscribe(0)
+        await store.commit_entered.wait()
+        assert run.snapshot()["finished_at_us"] is None
+        store.commit_gate.set()
+        await complete(run)
+        terminal = drain(subscription)[-1]
+        assert terminal.type == f"run.{outcome}"
+        snapshot = run.snapshot()
+        assert terminal.data["text_truncated"] is False
+        assert terminal.data["text_truncated"] == snapshot["text_truncated"]
+        assert terminal.data["finished_at_us"] == snapshot["finished_at_us"]
+        assert snapshot["finished_at_us"] > snapshot["accepted_at_us"] == accepted
+        # The commit uses the same injected clock as the run timestamps.
+        assert store.commands[0].timestamp_us in clock.readings
+        subscription.close()
+        await registry.aclose()
+
+    run_scenario(scenario)
+
+
+def test_output_limit_marks_the_terminal_event_truncated():
+    async def scenario():
+        store, factory = FakeStore(), FakeFactory(blocked=True)
+        registry = RunRegistry(store, factory, settings())
+        run = await registry.start_run(store.add_session(), "question")
+        subscription = run.events.subscribe(0)
+        await store.load_entered.wait()
+        await asyncio.sleep(0)
+        # The interrupted agent reports a short final response; the snapshot
+        # and terminal event must still say the visible answer was cut off.
+        factory.agents[0].callback(TextDelta("x" * (MAX_SNAPSHOT_CHARS + 1)))
+        await complete(run)
+        terminal = drain(subscription)[-1]
+        assert terminal.type == "run.stopped"
+        assert terminal.data["text_truncated"] is True
+        assert run.snapshot()["text_truncated"] is True
+        subscription.close()
+        await registry.aclose()
+
+    run_scenario(scenario)
+
+
+def test_tool_started_event_forwards_bounded_arguments():
+    async def scenario():
+        store, factory = FakeStore(), FakeFactory(blocked=True)
+        registry = RunRegistry(store, factory, settings())
+        run = await registry.start_run(store.add_session(), "question")
+        subscription = run.events.subscribe(0)
+        await store.load_entered.wait()
+        await asyncio.sleep(0)
+        agent = factory.agents[0]
+        # Astral characters escape to 12 bytes each in the ASCII event encoding.
+        widest = {"q": "🦊" * (MAX_EVENT_ARGUMENT_CHARS - 8)}
+        agent.callback(started("a", {"query": "asyncpg 3.13t wheels"}))
+        agent.callback(started("b", widest))
+        agent.callback(started("c", None, truncated=True))
+        events = [event for event in drain(subscription) if event.type == "tool.started"]
+        assert [event.data for event in events] == [
+            {
+                "call_id": "a",
+                "name": "lookup",
+                "arguments": {"query": "asyncpg 3.13t wheels"},
+                "arguments_truncated": False,
+            },
+            {"call_id": "b", "name": "lookup", "arguments": widest, "arguments_truncated": False},
+            {"call_id": "c", "name": "lookup", "arguments": None, "arguments_truncated": True},
+        ]
+        assert all(len(event._json) <= MAX_EVENT_BYTES for event in events)
+        agent.release.set()
+        subscription.close()
+        await complete(run)
+        await registry.aclose()
+
+    run_scenario(scenario)
+
+
+def test_snapshot_lists_tool_calls_in_start_order_and_keeps_them_across_retry():
+    async def scenario():
+        store, factory = FakeStore(), FakeFactory(blocked=True)
+        registry = RunRegistry(store, factory, settings())
+        run = await registry.start_run(store.add_session(), "question")
+        await store.load_entered.wait()
+        await asyncio.sleep(0)
+        assert run.snapshot()["tool_calls"] == []
+        agent = factory.agents[0]
+        agent.callback(started("a", {"query": "one"}))
+        agent.callback(started("b", None, truncated=True))
+        agent.callback(ToolCallFinished("b", "lookup", 0.5, True))
+        agent.callback(ToolCallFinished("a", "lookup", 1.25, False))
+        agent.callback(RetryScheduled(1, 3, 0.1, "http 503"))
+        agent.callback(started("c", {"query": "three"}))
+        snapshot = run.snapshot()
+        assert snapshot["tool_calls"] == [
+            {
+                "call_id": "a",
+                "name": "lookup",
+                "status": "ok",
+                "duration_s": 1.25,
+                "is_error": False,
+                "arguments": {"query": "one"},
+                "arguments_truncated": False,
+            },
+            {
+                "call_id": "b",
+                "name": "lookup",
+                "status": "error",
+                "duration_s": 0.5,
+                "is_error": True,
+                "arguments": None,
+                "arguments_truncated": True,
+            },
+            {
+                "call_id": "c",
+                "name": "lookup",
+                "status": "running",
+                "duration_s": None,
+                "is_error": False,
+                "arguments": {"query": "three"},
+                "arguments_truncated": False,
+            },
+        ]
+        snapshot["tool_calls"][0]["status"] = "external mutation"
+        assert run.snapshot()["tool_calls"][0]["status"] == "ok"
+        # A later call that reuses an ID finishes the running entry, not the old one.
+        agent.callback(started("a", {"query": "again"}))
+        agent.callback(ToolCallFinished("a", "lookup", 0.1, True))
+        calls = run.snapshot()["tool_calls"]
+        assert [(call["call_id"], call["status"]) for call in calls] == [
+            ("a", "ok"),
+            ("b", "error"),
+            ("c", "running"),
+            ("a", "error"),
+        ]
+        agent.release.set()
+        await complete(run)
+        assert len(run.snapshot()["tool_calls"]) == 4
+        await registry.aclose()
+
+    run_scenario(scenario)
+
+
+def test_terminal_error_codes_are_the_specified_closed_set():
+    assert {
+        "model_failed",
+        "run_failed",
+        "history_conflict",
+        "storage_unconfirmed",
+        "shutdown_cancelled",
+    } == TERMINAL_ERRORS
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("model_failed", "model_failed"),
+        ("agent_exception", "run_failed"),
+        ("commit_conflict", "history_conflict"),
+        ("receipt_unavailable", "storage_unconfirmed"),
+        ("shutdown_during_commit", "shutdown_cancelled"),
+    ],
+)
+def test_each_failure_path_ends_with_a_specified_error_code(path, expected):
+    async def scenario():
+        store = FakeStore()
+        factory = FakeFactory(outcome="failed" if path == "model_failed" else "completed")
+        session = store.add_session()
+        if path == "commit_conflict":
+            store.commit_outcomes.append("conflict")
+        elif path == "receipt_unavailable":
+            store.commit_outcomes.append("after")
+            store.receipt_error = True
+        elif path == "shutdown_during_commit":
+            store.commit_gate = asyncio.Event()
+        registry = RunRegistry(store, factory, settings())
+        if path == "agent_exception":
+            factory.options["blocked"] = True
+        run = await registry.start_run(session, "question")
+        subscription = run.events.subscribe(0)
+        if path == "agent_exception":
+            await store.load_entered.wait()
+            await asyncio.sleep(0)
+            factory.agents[0].failure = RuntimeError("boom")
+            factory.agents[0].release.set()
+        if path == "shutdown_during_commit":
+            await store.commit_entered.wait()
+            await registry.aclose()
+        await complete(run)
+        terminal = drain(subscription)[-1]
+        assert terminal.data["error"] == expected
+        assert terminal.data["error"] in TERMINAL_ERRORS
+        assert terminal.data["reconciliation_required"] is (
+            path in {"receipt_unavailable", "shutdown_during_commit"}
+        )
+        subscription.close()
         await registry.aclose()
 
     run_scenario(scenario)

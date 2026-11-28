@@ -11,6 +11,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from typing import Literal, get_args
 from uuid import uuid4
 
 from mertina_agent.agent.events import (
@@ -45,6 +46,17 @@ logger = logging.getLogger(__name__)
 MAX_SNAPSHOT_CHARS = 262144
 TEXT_EVENT_CHARS = 4096
 
+type TerminalError = Literal[
+    "model_failed", "run_failed", "history_conflict", "storage_unconfirmed", "shutdown_cancelled"
+]
+"""The closed set of terminal ``error`` codes; adding one is a protocol change."""
+TERMINAL_ERRORS: frozenset[str] = frozenset(get_args(TerminalError.__value__))
+
+
+def wall_clock_us() -> int:
+    """Return wall-clock microseconds since the Unix epoch, like session timestamps."""
+    return time.time_ns() // 1000
+
 
 @dataclass
 class RunRecord:
@@ -64,6 +76,9 @@ class RunRecord:
     reconciliation_required: bool = False
     revision: int | None = None
     completed_at: float | None = None
+    accepted_at_us: int = 0
+    finished_at_us: int | None = None
+    tool_calls: list[dict[str, object]] = field(default_factory=list)
     task: asyncio.Task[None] | None = field(default=None, repr=False)
     agent: SessionAgent | None = field(default=None, repr=False)
 
@@ -81,6 +96,9 @@ class RunRecord:
             "stop_requested": self.stop_requested,
             "reconciliation_required": self.reconciliation_required,
             "revision": self.revision,
+            "accepted_at_us": self.accepted_at_us,
+            "finished_at_us": self.finished_at_us,
+            "tool_calls": [dict(call) for call in self.tool_calls],
             "last_event_id": self.events.latest_id,
         }
 
@@ -100,13 +118,19 @@ class RunRegistry:
         settings: Settings,
         *,
         clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], int] = wall_clock_us,
     ) -> None:
-        """Borrow the store; own all created agents, tasks and event transports."""
+        """Borrow the store; own all created agents, tasks and event transports.
+
+        ``clock`` is monotonic and drives expiry; ``wall_clock`` returns epoch
+        microseconds for timestamps that clients and the database see.
+        """
         self.store = store
         self.leases = SessionTurnLeaseRegistry()
         self._factory = agent_factory
         self._settings = settings
         self._clock = clock
+        self._wall_clock = wall_clock
         self._runs: dict[str, RunRecord] = {}
         self._closing = False
 
@@ -114,6 +138,15 @@ class RunRegistry:
         """Expose a discoverable run identity while execution or commit owns the lease."""
         owner = self.leases.active_owner(session_id)
         return owner if owner in self._runs else None
+
+    def run_in_flight(self, session_id: str, run_id: str) -> bool:
+        """Tell whether this process may still commit ``run_id`` to ``session_id``.
+
+        Once the run's task has ended, no later commit can appear, so a missing
+        receipt is final. A restarted process holds no runs and answers ``False``.
+        """
+        run = self._runs.get(run_id)
+        return run is not None and run.session_id == session_id and run.task is not None
 
     def prune(self) -> None:
         """Expire only completed, released runs; active or uncertain work is retained."""
@@ -176,6 +209,7 @@ class RunRegistry:
                 max_subscribers=self._settings.gateway_max_subscribers,
             ),
             lease,
+            accepted_at_us=self._wall_clock(),
         )
         # Publish a reservation before the first await, so global capacity and
         # session discovery also account for slow admission reads.
@@ -256,8 +290,20 @@ class RunRegistry:
         elif isinstance(event, ToolGenerationStarted):
             run.events.publish("tool.generating", asdict(event))
         elif isinstance(event, ToolCallStarted):
-            run.events.publish("tool.started", asdict(event))
+            data = asdict(event)
+            run.tool_calls.append(
+                {**data, "status": "running", "duration_s": None, "is_error": False}
+            )
+            run.events.publish("tool.started", data)
         elif isinstance(event, ToolCallFinished):
+            # Call IDs are unique within one assistant message, but a model may
+            # reuse them later in the turn; the most recent running call wins.
+            for call in reversed(run.tool_calls):
+                if call["call_id"] == event.call_id and call["status"] == "running":
+                    call["status"] = "error" if event.is_error else "ok"
+                    call["duration_s"] = event.duration_s
+                    call["is_error"] = event.is_error
+                    break
             run.events.publish("tool.finished", asdict(event))
 
     async def _persist(self, command: TurnCommit) -> int:
@@ -280,11 +326,12 @@ class RunRegistry:
         message = "Commit acknowledgement is unavailable"
         raise StorageError(message)
 
-    def _finish(self, run: RunRecord, status: str, *, error: str | None = None) -> None:
+    def _finish(self, run: RunRecord, status: str, *, error: TerminalError | None = None) -> None:
         run.status = status
         run.error = error
         run.terminal = True
         run.completed_at = self._clock()
+        run.finished_at_us = self._wall_clock()
         run.events.publish(
             f"run.{status}",
             {
@@ -293,6 +340,8 @@ class RunRegistry:
                 "revision": run.revision,
                 "error": error,
                 "reconciliation_required": run.reconciliation_required,
+                "text_truncated": run.text_truncated,
+                "finished_at_us": run.finished_at_us,
             },
         )
         run.events.finish()
@@ -319,7 +368,7 @@ class RunRegistry:
                 result["messages"],
                 operation_id=run.id,
                 status=status,
-                timestamp_us=time.time_ns() // 1000,
+                timestamp_us=self._wall_clock(),
             )
             run.status = "committing"
             run.events.publish("run.committing", {"status": "committing"})
@@ -329,7 +378,9 @@ class RunRegistry:
             run.durable = True
             final = result["final_response"] or ""
             run.text = final[:MAX_SNAPSHOT_CHARS]
-            run.text_truncated = len(final) > MAX_SNAPSHOT_CHARS
+            # An answer cut off by the output limit stays truncated even when
+            # the interrupted agent reports a shorter final response.
+            run.text_truncated = run.text_truncated or len(final) > MAX_SNAPSHOT_CHARS
             self._finish(run, status, error="model_failed" if result["failed"] else None)
         except asyncio.CancelledError:
             run.reconciliation_required = committing
