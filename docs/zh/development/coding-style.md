@@ -5,6 +5,8 @@
 目标是写出任何贡献者都能看懂、能安全修改的代码。下面的大部分规则由工具强制执行，
 所以与其死记规则，不如在推送前把工具跑一遍。
 
+本文前面的规则针对 Python 代码，浏览器界面 `web/` 的规则见最后一节[前端](#前端web)。
+
 ## 工具
 
 | 工具 | 用途 | 命令 |
@@ -135,3 +137,34 @@ def load_session(session_id: str, *, timeout_s: float = 5.0) -> Session:
 - 为了一个小功能，优先使用标准库或已有的依赖，而不是引入新依赖
 - `pyproject.toml` 中不要锁死具体版本，只声明兼容的最低版本（`httpx>=0.27`），精确版本由 `uv.lock` 锁定
 - 新增依赖的 PR 要在描述中说明原因
+
+## 前端（`web/`）
+
+`web/` 是 TypeScript 写的浏览器界面，有自己的工具链。上面针对 Python 的规则不适用于它，以本节为准。
+它的工具配置放在 `web/` 目录里（`package.json`、`tsconfig.json`、`eslint.config.js` 等），
+这是"配置都放在 `pyproject.toml`"这条规则的例外。
+
+| 工具 | 用途 | 命令（在仓库根目录运行） |
+|---|---|---|
+| Node.js 22 LTS | 运行时，版本由 `web/.nvmrc` 和 `engines` 固定 | — |
+| npm | 依赖与脚本，提交 `web/package-lock.json` | `npm --prefix web ci` |
+| TypeScript | 静态类型检查 | `npm --prefix web run typecheck` |
+| ESLint | 代码检查（含 `typescript-eslint`、`eslint-plugin-react-hooks`） | `npm --prefix web run lint` |
+| Prettier | 格式化（含 Tailwind 类名排序） | `npm --prefix web run format` |
+| Vitest | 测试 | `npm --prefix web test` |
+
+- **类型**：开启 `strict` 和 `noUncheckedIndexedAccess`。不使用 `any`；确实不知道类型时用 `unknown`，再做类型收窄。
+  Gateway 返回的数据在 `web/src/api/` 中集中定义类型并做运行时校验，组件里不直接解析 JSON
+- **格式**：以 Prettier 的输出为准，行宽 100，与 Python 保持一致
+- **命名**：组件和类型用 `PascalCase`，函数和变量用 `camelCase`，常量用 `UPPER_SNAKE_CASE`；
+  组件文件名与组件同名（`SessionList.tsx`），其他模块用 `camelCase.ts`
+- **语言**：代码和注释用英文。界面文案用中文，集中放在一个文件里，不在组件里散写字符串，方便以后做多语言
+- **状态**：Gateway 的运行事件由不依赖 React 的纯函数 reducer 处理；组件只读取结果，不自己拼装事件
+- **安全**：模型输出与网页内容都视为不可信。不使用 `dangerouslySetInnerHTML`；Markdown 渲染不启用
+  `rehype-raw`，需要支持部分 HTML 时必须接 `rehype-sanitize` 白名单；外链加 `rel="noopener noreferrer"`
+- **外部资源**：字体、图标和代码高亮等资源随构建产物一起发布（例如用 `@fontsource`），
+  运行时不访问外部 CDN
+- **依赖**：与 Python 一致，`package.json` 中声明兼容的版本范围，精确版本由锁文件固定；
+  添加依赖前同样要确认维护状态、使用广度和许可证，并在 PR 描述中说明原因。
+  体积较大的依赖（如代码高亮）按需懒加载
+- **构建产物**：`web/dist` 不提交进仓库

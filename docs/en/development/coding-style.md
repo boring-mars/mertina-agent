@@ -5,6 +5,8 @@
 The goal is code that any contributor can read and change safely. Tools enforce most of the rules below,
 so run them before pushing rather than memorizing the rules.
 
+The rules below cover Python code. The browser UI in `web/` follows the last section, [Front end](#front-end-web).
+
 ## Tooling
 
 | Tool | Purpose | Command |
@@ -136,3 +138,38 @@ Code that runs locally, including the CLI, tests and scripts, must work on all t
 - Prefer the standard library or an existing dependency over adding a new one for a small feature
 - Don't pin exact versions in `pyproject.toml`. Declare a compatible lower bound (`httpx>=0.27`). `uv.lock` pins exact versions
 - A PR that adds a dependency explains why in the description
+
+## Front end (`web/`)
+
+`web/` is the browser UI, written in TypeScript with its own toolchain. The Python rules above do not apply to it;
+this section does. Its tool configuration lives in `web/` (`package.json`, `tsconfig.json`, `eslint.config.js`
+and so on), an exception to the "all configuration in `pyproject.toml`" rule.
+
+| Tool | Purpose | Command (from the repository root) |
+|---|---|---|
+| Node.js 22 LTS | Runtime, pinned by `web/.nvmrc` and `engines` | — |
+| npm | Dependencies and scripts; commit `web/package-lock.json` | `npm --prefix web ci` |
+| TypeScript | Static type checking | `npm --prefix web run typecheck` |
+| ESLint | Linting (with `typescript-eslint` and `eslint-plugin-react-hooks`) | `npm --prefix web run lint` |
+| Prettier | Formatting (with Tailwind class sorting) | `npm --prefix web run format` |
+| Vitest | Tests | `npm --prefix web test` |
+
+- **Types**: `strict` and `noUncheckedIndexedAccess` are on. Don't use `any`; when a type is truly unknown, use
+  `unknown` and narrow it. Types for Gateway responses are defined and validated at runtime in `web/src/api/`;
+  components never parse JSON themselves
+- **Formatting**: Prettier's output is final. Line width 100, the same as Python
+- **Naming**: `PascalCase` for components and types, `camelCase` for functions and variables, `UPPER_SNAKE_CASE`
+  for constants. A component's file is named after it (`SessionList.tsx`); other modules use `camelCase.ts`
+- **Language**: code and comments in English. UI copy is in Chinese and lives in one file, not scattered through
+  components, so it can be translated later
+- **State**: Gateway run events are handled by a pure reducer that does not depend on React. Components read its
+  result and never assemble events themselves
+- **Security**: treat model output and web content as untrusted. Don't use `dangerouslySetInnerHTML`. Markdown
+  rendering does not enable `rehype-raw`; supporting some HTML later requires a `rehype-sanitize` allowlist.
+  External links get `rel="noopener noreferrer"`
+- **External resources**: fonts, icons and syntax highlighting ship with the build (for example with
+  `@fontsource`). Nothing is loaded from an external CDN at runtime
+- **Dependencies**: as with Python, `package.json` declares compatible ranges and the lockfile pins exact versions.
+  Check maintenance, adoption and license before adding one, and explain why in the PR. Load heavy
+  dependencies (such as syntax highlighting) lazily
+- **Build output**: `web/dist` is not committed
