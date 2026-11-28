@@ -15,7 +15,12 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from mertina_agent.agent.transports.types import JsonObject
+
 logger = logging.getLogger(__name__)
+
+MAX_EVENT_ARGUMENT_CHARS = 4096
+"""Longest compact JSON encoding of tool arguments that events carry whole."""
 
 
 @dataclass(frozen=True)
@@ -47,10 +52,15 @@ class ToolCallStarted:
     Attributes:
         call_id: ID the model gave the call; distinguishes concurrent calls.
         name: Tool name.
+        arguments: The parsed arguments, or ``None`` when their compact JSON
+            encoding exceeds :data:`MAX_EVENT_ARGUMENT_CHARS`. Never logged.
+        arguments_truncated: Whether ``arguments`` was withheld for its size.
     """
 
     call_id: str
     name: str
+    arguments: JsonObject | None
+    arguments_truncated: bool
 
 
 @dataclass(frozen=True)

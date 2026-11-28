@@ -2,9 +2,11 @@
 
 import asyncio
 import json
+import logging
 
 import pytest
 
+from mertina_agent.agent.events import MAX_EVENT_ARGUMENT_CHARS, ToolCallStarted
 from mertina_agent.agent.interrupt import InterruptSignal, bind_interrupt_signal
 from mertina_agent.agent.tool_executor import (
     INTERRUPTED_TOOL_RESULT,
@@ -169,3 +171,63 @@ def test_embedded_boundary_tokens_cannot_close_the_block_early():
 
     assert content.count("untrusted_tool_result") == 2
     assert "</untrusted-tool-result>" in content
+
+
+def started_events(events):
+    return [event for event in events if isinstance(event, ToolCallStarted)]
+
+
+def test_start_event_carries_the_parsed_arguments(tool_registry):
+    events = []
+
+    run(
+        [call("a", arguments='{"query": "asyncpg 3.13t wheels"}')],
+        tool_registry,
+        event_callback=events.append,
+    )
+
+    assert started_events(events) == [
+        ToolCallStarted(
+            call_id="a",
+            name="echo",
+            arguments={"query": "asyncpg 3.13t wheels"},
+            arguments_truncated=False,
+        )
+    ]
+
+
+def test_start_event_withholds_arguments_over_the_compact_json_limit(tool_registry, calls_seen):
+    # Compact encoding is {"q":"..."}: 8 characters plus the value.
+    fits = {"q": "x" * (MAX_EVENT_ARGUMENT_CHARS - 8)}
+    too_long = {"q": "汉" * (MAX_EVENT_ARGUMENT_CHARS - 7)}
+    events = []
+
+    run(
+        [call("a", arguments=json.dumps(fits)), call("b", arguments=json.dumps(too_long))],
+        tool_registry,
+        event_callback=events.append,
+    )
+
+    first, second = started_events(events)
+    assert first.arguments == fits
+    assert first.arguments_truncated is False
+    assert second.arguments is None
+    assert second.arguments_truncated is True
+    # The tool itself still receives the complete arguments.
+    assert calls_seen == [fits, too_long]
+
+
+def test_invalid_arguments_publish_no_start_event(tool_registry):
+    events = []
+
+    run([call("a", arguments="[1, 2]")], tool_registry, event_callback=events.append)
+
+    assert started_events(events) == []
+
+
+def test_tool_arguments_are_not_logged(tool_registry, caplog):
+    caplog.set_level(logging.DEBUG)
+
+    run([call("a", arguments='{"secret": "do-not-log-me"}')], tool_registry)
+
+    assert "do-not-log-me" not in caplog.text
