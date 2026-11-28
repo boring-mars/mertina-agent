@@ -382,6 +382,9 @@ Behaviour to know about:
   process was killed is lost, and run IDs and their events are kept in memory only, for
   `MERTINA_GATEWAY_RUN_TTL_S` seconds after a run ends. For a run that ended with
   `storage_unconfirmed`, `GET /api/sessions/{id}/commits/{run_id}` tells whether it was saved.
+- **The Web UI is served from the same address.** When `web/dist` exists (build it with
+  `npm --prefix web run build`), other `GET` paths outside `/api/` and `/v1/` serve its files,
+  falling back to `index.html`. `MERTINA_GATEWAY_STATIC_DIR` points to another build directory.
 - **Browsers on other sites are rejected.** A request whose `Origin` header does not match the
   gateway's own address gets `403`.
 - **Errors** have the form `{"error": {"code": "…", "message": "…"}}` and never include

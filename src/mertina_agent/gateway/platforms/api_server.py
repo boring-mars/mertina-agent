@@ -14,6 +14,7 @@ import json
 import logging
 import math
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -42,6 +43,7 @@ from mertina_agent.gateway.api_models import (
     session_response,
     validate_identifier,
 )
+from mertina_agent.gateway.platforms.static_site import StaticSite
 from mertina_agent.state.serialization import decode_message
 
 if TYPE_CHECKING:
@@ -300,14 +302,23 @@ def create_app(
     heartbeat_s: float = 15,
     send_timeout_s: float = 10,
     body_timeout_s: float = 10,
+    static_dir: Path | None = None,
 ) -> web.Application:
-    """Create routes without owning registry, database or HTTP-server resources."""
+    """Create routes without owning registry, database or HTTP-server resources.
+
+    With ``static_dir``, unmatched non-API GET requests are served from that
+    build directory, falling back to its ``index.html``; a missing build only
+    logs how to create it.
+    """
     from mertina_agent.gateway.platforms.api_server_runs import RunsAPI
 
     if not math.isfinite(body_timeout_s) or body_timeout_s <= 0:
         message = "Request body timeout must be finite and positive"
         raise ValueError(message)
-    app = web.Application(middlewares=[_boundary], client_max_size=131072)
+    middlewares = [_boundary]
+    if static_dir is not None:
+        middlewares.append(StaticSite(static_dir).middleware)
+    app = web.Application(middlewares=middlewares, client_max_size=131072)
     app[BODY_TIMEOUT_KEY] = body_timeout_s
     sessions = SessionAPI(registry)
     runs = RunsAPI(registry, heartbeat_s=heartbeat_s, send_timeout_s=send_timeout_s)

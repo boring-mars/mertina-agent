@@ -17,6 +17,7 @@ from mertina_agent.config import Settings
 from mertina_agent.database.runtime import Database, open_database
 from mertina_agent.exceptions import ConfigurationError
 from mertina_agent.gateway.platforms.api_server import create_app
+from mertina_agent.gateway.platforms.static_site import default_static_dir
 from mertina_agent.gateway.runs import RunRegistry
 from mertina_agent.gateway.session import AgentFactory, build_agent_factory
 from mertina_agent.state.schema import Schema
@@ -79,6 +80,7 @@ class GatewayRunner:
                 heartbeat_s=self.settings.gateway_heartbeat_s,
                 send_timeout_s=self.settings.gateway_send_timeout_s,
                 body_timeout_s=self.settings.gateway_body_timeout_s,
+                static_dir=self.settings.gateway_static_dir or default_static_dir(),
             )
             self._http = web.AppRunner(
                 app, access_log=None, shutdown_timeout=self.settings.gateway_cancel_timeout_s

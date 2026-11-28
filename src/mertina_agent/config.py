@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     gateway_heartbeat_s: float = Field(default=15.0, gt=0.0, allow_inf_nan=False)
     gateway_send_timeout_s: float = Field(default=10.0, gt=0.0, allow_inf_nan=False)
     gateway_body_timeout_s: float = Field(default=10.0, gt=0.0, allow_inf_nan=False)
+    gateway_static_dir: Path | None = None
+
+    @field_validator("gateway_static_dir", mode="before")
+    @classmethod
+    def validate_gateway_static_dir(cls, value: object) -> object:
+        """Treat an empty value as unset, rather than as the working directory."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("gateway_host")
     @classmethod
