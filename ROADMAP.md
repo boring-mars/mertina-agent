@@ -156,19 +156,25 @@ everything can be driven over HTTP.
 
 ### Scope
 
-- **Dashboard shell.** Copy Hermes's `web/` layout, theme, UI components, and API client. The built
+- **Own web client.** The UI is designed and built for Mertina instead of copying Hermes's `web/`
+  shell. This is a deliberate exception to "copy, then cut": the Runs API is the contract, and the
+  interaction design was agreed in [RFC #9](https://github.com/boring-mars/mertina-agent/issues/9)
+  from a clickable prototype. Stack: React, TypeScript, Vite, Tailwind CSS and shadcn/ui. The built
   UI is served by the gateway process.
-- **Chat page.** Rewrite the chat page as a native chat view on top of the Runs API: streaming
-  Markdown, collapsible tool calls, and a stop button. Hermes's embedded terminal chat is left out.
-- **Sessions page.** List sessions, open one to continue it, rename it, and delete it.
+- **Chat.** Streaming Markdown, a progress strip for each run, parallel tool calls that collapse when
+  they finish, and a stop button. Retries, failures, unconfirmed saves and stream reconnects each
+  have their own state in the UI.
+- **Sessions.** List sessions with the most recently active first, open one to continue it, rename
+  it, and delete it with a short undo window.
+- **Gateway support.** Serve the built UI, list sessions by last update, and add the event and
+  snapshot fields the UI needs, without changing existing fields.
 
-### Hermes references
+### References
 
-| Mertina | Hermes |
+| Item | Where |
 |---|---|
-| Dashboard shell | `web/src/App.tsx`, `web/src/components/`, `web/src/lib/api.ts` |
-| Chat page | `web/src/pages/ChatPage.tsx` (rewritten) |
-| Sessions page | `web/src/pages/SessionsPage.tsx` |
+| Interaction design | [RFC #9](https://github.com/boring-mars/mertina-agent/issues/9), prototype on the [`web-ui-prototype`](https://github.com/boring-mars/mertina-agent/tree/web-ui-prototype) branch |
+| Development plan | [docs/plans/v0.3-web-ui.md](docs/plans/v0.3-web-ui.md) |
 
 ### Done when
 

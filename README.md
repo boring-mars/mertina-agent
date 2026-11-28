@@ -16,7 +16,7 @@ on your own machine and sync with the cloud.
 It is a slimmed-down rebuild of [Hermes Agent](https://github.com/NousResearch/hermes-agent) by
 Nous Research. Hermes is a powerful agent with a very large surface area: many providers,
 messaging platforms, terminal backends, and research tooling. Mertina copies Hermes's core pieces
-(the agent loop, the gateway and its API server, and the web UI shell), cuts them down to a minimal
+(the agent loop, the gateway and its API server), cuts them down to a minimal
 harness, and then adds capabilities one at a time, following the direction Hermes has taken.
 
 ## Product direction
@@ -49,7 +49,7 @@ cloud deployment come in P1. See the [Roadmap](ROADMAP.md) for milestones and pr
 ## Architecture (P0)
 
 ```
- Browser: web UI (React + Vite, shell from Hermes's web/, native chat page)
+ Browser: web UI (React + Vite, designed for Mertina)
         │  HTTP: REST for sessions, SSE for streaming run events
         ▼
  Gateway process (aiohttp, from Hermes's gateway/)
@@ -72,7 +72,7 @@ Key decisions:
 | Base | Copy and cut down Hermes code, keeping its structure. We do not try to stay in sync with upstream |
 | Language | Python for the agent and the gateway, TypeScript for the web UI |
 | Server | One gateway process based on Hermes's aiohttp API server. It serves the API and the web UI, runs agents, and runs the cron ticker |
-| Web UI | Hermes's `web/` shell (layout, theme, components). The chat page is rewritten as a native chat view on top of the Runs API |
+| Web UI | Designed and built for Mertina on top of the Runs API (React, TypeScript, Vite, Tailwind CSS, shadcn/ui); see [RFC #9](https://github.com/boring-mars/mertina-agent/issues/9) |
 | Models | Keep Hermes's transport abstraction, implement Chat Completions only |
 | Storage | Adapt Hermes's SessionDB for SQLite, PostgreSQL, and MySQL behind one storage contract; one database per process, chosen at startup |
 | Users | Single user in P0. Multiple users come later |

@@ -74,6 +74,23 @@ The project calls LLM providers and cloud services. In tests:
 - Never use real API keys in tests. CI has no production credentials
 - If a recorded response fixture is used, strip any keys, tokens or personal data from it before committing
 
+## Front-end tests
+
+Tests in `web/` use Vitest: `npm --prefix web test`. The principles in "Writing good tests" apply here too.
+
+- Tests live in `web/tests/`, mirroring `web/src/`, and are named `<module>.test.ts(x)`
+- **The run-event reducer and the SSE reader matter most**: every event type, every terminal status and error
+  code, and every branch of reconnecting and resynchronizing needs a case. Use table-driven tests whose input is
+  an event sequence and whose assertion is the final state
+- Event-sequence fixtures live in `web/tests/fixtures/runs/`, recorded from the `dev/e2e` stub model or a real
+  Gateway. Strip keys, tokens and personal data before committing them
+- Component tests use Testing Library and find elements by the text and roles a user sees, not by CSS classes or
+  component internals
+- Mock at the network boundary: replace `fetch`, never the project's own modules
+- End-to-end smoke tests use Playwright against the stub model, the Gateway and the built UI, covering sending a
+  message, stopping a run, and reattaching after a reload. They need a Python environment and run as a separate
+  CI job
+
 ## Flaky tests
 
 A test that sometimes fails is a bug. If you find one:

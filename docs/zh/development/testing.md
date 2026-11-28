@@ -74,6 +74,20 @@ tests/
 - 测试中绝不使用真实的 API key。CI 中没有生产环境的凭证
 - 如果使用录制的响应作为 fixture，提交前要删除其中的 key、token 和个人数据
 
+## 前端测试
+
+`web/` 的测试用 Vitest，命令为 `npm --prefix web test`。上面"如何写好测试"中的原则同样适用。
+
+- 测试放在 `web/tests/`，目录结构与 `web/src/` 对应，文件命名为 `<模块>.test.ts(x)`
+- **运行事件 reducer 与 SSE 读取器是重点**：每种事件类型、每种终态和错误码、断线续订与重新同步的每个分支都要有用例。
+  用表驱动测试，输入是事件序列，断言是最终状态
+- 事件序列 fixture 放在 `web/tests/fixtures/runs/`，从 `dev/e2e` 的假模型或真实 Gateway 录制。
+  提交前删除其中的 key、token 和个人数据
+- 组件测试用 Testing Library，按用户能看到的文字和角色查找元素，不依赖 CSS 类名或组件内部状态
+- 在网络边界 mock：替换 `fetch`，不要 mock 项目自身的模块
+- 端到端冒烟测试用 Playwright，启动"假模型 + Gateway + 构建产物"，覆盖发消息、停止、刷新后重新接上三条主流程。
+  它需要 Python 环境，在 CI 中单独运行
+
 ## 不稳定的测试
 
 时好时坏的测试就是 bug。发现后：
