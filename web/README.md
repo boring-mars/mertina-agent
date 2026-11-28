@@ -48,23 +48,23 @@ no `data:` fonts), because the Gateway's Content-Security-Policy allows same-ori
 
 ## Check
 
-| Command | What it does |
-|---|---|
-| `npm --prefix web run typecheck` | TypeScript, strict |
-| `npm --prefix web run lint` | ESLint |
+| Command                             | What it does                 |
+| ----------------------------------- | ---------------------------- |
+| `npm --prefix web run typecheck`    | TypeScript, strict           |
+| `npm --prefix web run lint`         | ESLint                       |
 | `npm --prefix web run format:check` | Prettier (`format` rewrites) |
-| `npm --prefix web test` | Vitest |
+| `npm --prefix web test`             | Vitest                       |
 
 ## Layout
 
-| Path | Contents |
-|---|---|
-| `src/api/` | REST client, runtime decoders for every Gateway response, error types, SSE reader |
-| `src/runs/` | Typed run events, the pure run-event reducer, and the controller that follows a run (reconnect, resynchronize) |
-| `src/ui/` | shadcn/ui components and helpers; design tokens are in `src/index.css` |
-| `src/app/` | The app shell and `copy.ts`, which holds all UI text |
-| `tests/` | Vitest tests mirroring `src/`; `tests/fixtures/runs/` holds recorded event sequences |
-| `scripts/recordRun.mjs` | Records a run from a live Gateway as a fixture |
+| Path                    | Contents                                                                                                       |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `src/api/`              | REST client, runtime decoders for every Gateway response, error types, SSE reader                              |
+| `src/runs/`             | Typed run events, the pure run-event reducer, and the controller that follows a run (reconnect, resynchronize) |
+| `src/ui/`               | shadcn/ui components and helpers; design tokens are in `src/index.css`                                         |
+| `src/app/`              | The app shell and `copy.ts`, which holds all UI text                                                           |
+| `tests/`                | Vitest tests mirroring `src/`; `tests/fixtures/runs/` holds recorded event sequences                           |
+| `scripts/recordRun.mjs` | Records a run from a live Gateway as a fixture                                                                 |
 
 ## Recording run fixtures
 
